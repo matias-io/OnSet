@@ -1,0 +1,92 @@
+OnSet Personal Use License 1.0
+
+Copyright (c) 2026 Matias Suxo. Published as Reimagine Media.
+All rights reserved except as expressly granted below.
+
+1. Covered material
+
+This license covers the original OnSet source code, shaders, artwork and
+documentation supplied with this license, called the Software. Matias Suxo,
+publishing as Reimagine Media, is the Licensor. Third-party software, fonts,
+music, album artwork and lyrics retain their separate terms and are not
+relicensed by this document.
+
+2. Free personal use and modification
+
+The Licensor grants you a worldwide, royalty-free, nonexclusive license to
+download, copy, study, run and modify the Software for your own personal,
+noncommercial use, subject to all the conditions below. Personal use means use
+by an individual for a private hobby, learning or unpaid practice. A free,
+unmonetized personal performance is permitted if it has no business or
+promotional purpose. You do not have to publish private modifications.
+
+3. No commercial use
+
+You may not use, sell, rent, sublicense, host or otherwise exploit the Software
+or a modified version for commercial purposes without separate written
+permission from the Licensor. Commercial purposes include paid performances,
+ticketed events, monetized streams, advertising, business promotion, client
+work, subscriptions, and use in a business or other activity intended to earn
+revenue or profit. This applies whether the benefit is direct or indirect and
+whether or not the activity actually makes a profit.
+
+4. Attribution and sharing under the same terms
+
+You may share copies and modified versions without charge with individuals
+for their personal, noncommercial use under this same license. Every shared
+copy must include this complete license and the copyright notice above.
+Shared versions must carry the following credit in their README or About
+screen, and on any public download or distribution page:
+
+    OnSet by Reimagine Media and Matias Suxo.
+    https://github.com/matias-io/OnSet
+
+Keep this credit reasonably visible and do not imply endorsement by the
+Licensor. Identify your changes and the fact that your version is modified.
+License your modifications to the Software under this same license. You may
+not apply additional legal or technical restrictions that prevent recipients
+from exercising its permissions. When sharing executables, also provide the
+corresponding source, including your modifications and the scripts needed to
+build them, to the same recipients without charge. These conditions do not
+change the licenses of independent third-party components.
+
+5. No direct competition
+
+Without separate written permission from the Licensor, you may not use the
+Software or a modified version to develop, offer, distribute or operate a
+competing DJ or music visualization product or service intended to replace
+OnSet. This restriction applies to free and paid offerings. Personal forks
+shared under section 4 for individual personal use are permitted, provided
+they are identified as OnSet derivatives and are not marketed as a separate
+competing product or service. This license does not restrict independently
+created software that does not use or incorporate the Software.
+
+6. Other permissions and reserved rights
+
+Commercial use, direct competition or different licensing terms require a
+separate written agreement with Matias Suxo. Contact the Licensor through
+https://github.com/matias-io. No trademark or endorsement rights are granted
+except the limited use of names needed for the required attribution. All
+rights not expressly granted here are reserved. Rights that applicable law
+grants independently of this license remain unaffected.
+
+7. Termination
+
+Your permission under this license ends if you violate its terms. If you
+correct a first violation within 30 days after becoming aware of it, your
+permission is reinstated. Later violations require the Licensor's written
+agreement for reinstatement. Termination does not end the permissions of
+recipients who continue to comply with this license.
+
+8. No warranty or liability
+
+TO THE EXTENT PERMITTED BY APPLICABLE LAW, THE SOFTWARE IS PROVIDED "AS IS",
+WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. THE LICENSOR AND
+CONTRIBUTORS ARE NOT LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING
+FROM THE SOFTWARE OR ITS USE, WHETHER IN CONTRACT, TORT OR OTHERWISE.
+
+9. Existing grants
+
+These terms apply to copies offered under this license. They do not revoke or
+reduce rights already granted to a recipient under an earlier license.
