@@ -75,3 +75,5 @@ complete terms. Contributions to OnSet must be offered under these same terms.
 
 Dependencies retain their own licenses. Music, artwork and lyrics from your
 library or external services are not covered by OnSet's license.
+
+The bundled Inter fonts use the [SIL Open Font License 1.1](assets/fonts/LICENSE).
