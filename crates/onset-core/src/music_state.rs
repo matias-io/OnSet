@@ -88,7 +88,9 @@ impl MusicState {
     pub fn beat_count(&self) -> f32 {
         match self.beat_index {
             Some(b) => b as f32 + self.beat_phase,
-            None if self.bpm_grid > 0.0 => (self.playhead_s * f64::from(self.bpm_grid) / 60.0) as f32,
+            None if self.bpm_grid > 0.0 => {
+                (self.playhead_s * f64::from(self.bpm_grid) / 60.0) as f32
+            }
             None => 0.0,
         }
     }

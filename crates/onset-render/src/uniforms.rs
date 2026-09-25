@@ -184,7 +184,12 @@ impl FrameUniforms {
                 fx.cue_hit,
             ],
             vibe: [x.vibe.energy, x.vibe.darkness, mood, x.history_row],
-            stems: [ms.analysis.low, ms.analysis.mid, ms.analysis.high, ms.analysis.vocal],
+            stems: [
+                ms.analysis.low,
+                ms.analysis.mid,
+                ms.analysis.high,
+                ms.analysis.vocal,
+            ],
             scene: [x.tweak.speed, x.tweak.intensity, x.tweak.hue, 0.0],
         }
     }

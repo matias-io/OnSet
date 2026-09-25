@@ -6,7 +6,22 @@ use crate::gpu::Gpu;
 use crate::scene::{FullscreenScene, Scene, ShaderError};
 
 /// File stems under `assets/shaders/`, in menu order.
-pub const BUILTIN_SCENE_NAMES: &[&str] = &["tunnel", "synthwave", "ribbons", "kaleido", "lasers", "nebula", "zerog", "crystal", "liquid", "cover", "pulse", "ring", "warp", "voronoi"];
+pub const BUILTIN_SCENE_NAMES: &[&str] = &[
+    "tunnel",
+    "synthwave",
+    "ribbons",
+    "kaleido",
+    "lasers",
+    "nebula",
+    "zerog",
+    "crystal",
+    "liquid",
+    "cover",
+    "pulse",
+    "ring",
+    "warp",
+    "voronoi",
+];
 
 /// What a scene is, for the launcher and Auto mode.
 #[derive(Debug, Clone, Copy, PartialEq)]

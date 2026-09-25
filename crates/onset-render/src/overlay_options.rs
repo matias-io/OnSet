@@ -58,7 +58,12 @@ pub enum Corner {
 }
 
 impl Corner {
-    pub const ALL: [Self; 4] = [Self::BottomLeft, Self::BottomRight, Self::TopLeft, Self::TopRight];
+    pub const ALL: [Self; 4] = [
+        Self::BottomLeft,
+        Self::BottomRight,
+        Self::TopLeft,
+        Self::TopRight,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {

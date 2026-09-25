@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="180" viewBox="0 0 720 180" role="img" aria-labelledby="title desc">
+  <title id="title">OnSet</title>
+  <desc id="desc">A turquoise and violet beat pulse beside the OnSet wordmark on a dark background.</desc>
+  <defs>
+    <linearGradient id="pulse" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#72f3cf"/>
+      <stop offset="1" stop-color="#ae8aff"/>
+    </linearGradient>
+  </defs>
+  <rect width="720" height="180" rx="28" fill="#0d1019"/>
+  <circle cx="97" cy="90" r="45" fill="none" stroke="url(#pulse)" stroke-width="6"/>
+  <path d="M44 90h31l10-22 13 44 13-34 10 12h29" fill="none" stroke="url(#pulse)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="180" y="117" fill="#f5f4fb" font-family="Segoe UI,Arial,sans-serif" font-size="82" font-weight="600" letter-spacing="-3">OnSet</text>
+  <path d="M470 90h12m10-12v24m12-36v48m12-28v8m12-42v76m12-54v32m12-22v12m12-34v56m12-40v24m12-18v12m12-26v40m12-32v24m12-16v8m12-22v36" stroke="url(#pulse)" stroke-width="4" stroke-linecap="round" opacity=".7"/>
+</svg>

@@ -1,20 +1,24 @@
-use std::path::Path;
+use std::path::PathBuf;
 
 use onset_core::transport::TrackRef;
 use onset_transport::decode::decode_file;
 use onset_transport::sim::SimPlayer;
 use onset_transport::source::{SourceStatus, TransportSource};
 
-const MOVE: &str = r"C:\Users\Reima\Music\DJ\Adam Port - Move.flac";
+// Optional fixture: a stereo FLAC about 177 seconds long.
+fn track_path() -> Option<PathBuf> {
+    std::env::var_os("ONSET_TEST_TRACK")
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+}
 
 #[test]
 fn decodes_move_flac() {
-    let path = Path::new(MOVE);
-    if !path.exists() {
-        eprintln!("skipping: track not present");
+    let Some(path) = track_path() else {
+        eprintln!("skipping: set ONSET_TEST_TRACK to the optional FLAC fixture");
         return;
-    }
-    let d = decode_file(path).unwrap();
+    };
+    let d = decode_file(&path).unwrap();
     assert_eq!(d.channels, 2);
     assert!(
         d.sample_rate == 44_100 || d.sample_rate == 48_000,
@@ -27,11 +31,10 @@ fn decodes_move_flac() {
 
 #[test]
 fn sim_reports_advancing_playhead() {
-    let path = Path::new(MOVE);
-    if !path.exists() {
+    let Some(path) = track_path() else {
         return;
-    }
-    let Ok(mut p) = SimPlayer::start(path, TrackRef::Unknown, 120.0) else {
+    };
+    let Ok(mut p) = SimPlayer::start(&path, TrackRef::Unknown, 120.0) else {
         eprintln!("skipping: no output device");
         return;
     };
@@ -60,11 +63,10 @@ fn sim_reports_advancing_playhead() {
 
 #[test]
 fn sim_pause_and_rate() {
-    let path = Path::new(MOVE);
-    if !path.exists() {
+    let Some(path) = track_path() else {
         return;
-    }
-    let Ok(mut p) = SimPlayer::start(path, TrackRef::Unknown, 120.0) else {
+    };
+    let Ok(mut p) = SimPlayer::start(&path, TrackRef::Unknown, 120.0) else {
         return;
     };
     p.set_gain(0.0);
@@ -85,11 +87,10 @@ fn sim_pause_and_rate() {
 
 #[test]
 fn sim_taps_mono_audio_blocks() {
-    let path = Path::new(MOVE);
-    if !path.exists() {
+    let Some(path) = track_path() else {
         return;
-    }
-    let Ok(p) = SimPlayer::start(path, TrackRef::Unknown, 120.0) else {
+    };
+    let Ok(p) = SimPlayer::start(&path, TrackRef::Unknown, 120.0) else {
         return;
     };
     p.set_gain(0.0);

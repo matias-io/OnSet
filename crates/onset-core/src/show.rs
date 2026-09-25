@@ -1160,7 +1160,11 @@ mod tests {
         let mut d = ShowDirector::new();
         d.update(&playing(Some(PhraseKind::Intro), 30), 0.016, &s);
         d.update(&playing(Some(PhraseKind::Verse), 32), 0.016, &s);
-        assert!((d.fx().phrase_move - s.moves).abs() < 0.02, "{}", d.fx().phrase_move);
+        assert!(
+            (d.fx().phrase_move - s.moves).abs() < 0.02,
+            "{}",
+            d.fx().phrase_move
+        );
         let off = FxSettings { moves: 0.0, ..s };
         let mut q = ShowDirector::new();
         q.update(&playing(Some(PhraseKind::Intro), 30), 0.016, &off);
@@ -1179,7 +1183,11 @@ mod tests {
         for _ in 0..60 {
             d.update(&ms, 0.016, &s);
         }
-        assert!(first < 0.5 && d.fx().vocal > 0.8, "{first} {}", d.fx().vocal);
+        assert!(
+            first < 0.5 && d.fx().vocal > 0.8,
+            "{first} {}",
+            d.fx().vocal
+        );
     }
 
     #[test]
@@ -1197,7 +1205,10 @@ mod tests {
         // The loop sends the playhead back into the chorus.
         let events = d.update(&playing(Some(PhraseKind::Chorus), 199), 0.016, &s);
         assert!(!events.contains(&ShowEvent::Drop), "{events:?}");
-        assert!(!events.iter().any(|e| matches!(e, ShowEvent::Phrase(_))), "{events:?}");
+        assert!(
+            !events.iter().any(|e| matches!(e, ShowEvent::Phrase(_))),
+            "{events:?}"
+        );
     }
 
     #[test]
@@ -1213,12 +1224,21 @@ mod tests {
             ap.on_events(&[e], v, &p, &allowed, AutoChange::Phrases, 0.5)
         };
         assert!(go(&mut ap, ShowEvent::Track).is_some());
-        assert!(go(&mut ap, ShowEvent::Drop).is_some(), "the first drop still lands");
-        assert!(go(&mut ap, ShowEvent::Breakdown).is_none(), "too soon after the drop");
+        assert!(
+            go(&mut ap, ShowEvent::Drop).is_some(),
+            "the first drop still lands"
+        );
+        assert!(
+            go(&mut ap, ShowEvent::Breakdown).is_none(),
+            "too soon after the drop"
+        );
         assert!(go(&mut ap, ShowEvent::Drop).is_none(), "too soon again");
         for _ in 0..8 {
             go(&mut ap, ShowEvent::Bar);
         }
-        assert!(go(&mut ap, ShowEvent::Breakdown).is_some(), "eight bars later it may change");
+        assert!(
+            go(&mut ap, ShowEvent::Breakdown).is_some(),
+            "eight bars later it may change"
+        );
     }
 }

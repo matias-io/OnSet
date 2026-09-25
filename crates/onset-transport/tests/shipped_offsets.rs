@@ -17,6 +17,9 @@ fn every_shipped_version_has_a_signature() {
 #[test]
 fn rekordbox_7_2_19_knows_the_master_deck() {
     let o = Offsets::for_version(&shipped(), "7.2.19").expect("7.2.19");
-    let flag = o.signature.and_then(|s| s.master_flag).expect("master flag");
+    let flag = o
+        .signature
+        .and_then(|s| s.master_flag)
+        .expect("master flag");
     assert_eq!((flag.offset, flag.mask), (-396, 1));
 }

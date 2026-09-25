@@ -8,7 +8,7 @@ use onset_render::overlay_options::{Corner, LyricPlace, LyricStyle};
 use onset_render::renderer::Quality;
 use onset_render::scenes::scene_info;
 
-use crate::config::{Config, MonitorChoice, Preset, PresentModeChoice};
+use crate::config::{Config, MonitorChoice, PresentModeChoice, Preset};
 use crate::engine::{EngineCommand, EngineStatus};
 use crate::overlay::{Edits, OverlayAction, OverlayView, monitor_detail, monitor_label};
 
@@ -223,8 +223,11 @@ fn toggle(ui: &mut egui::Ui, on: &mut bool, colour: egui::Color32) -> egui::Resp
     };
     ui.painter().rect_filled(rect, radius, bg);
     let x = egui::lerp((rect.left() + radius)..=(rect.right() - radius), t);
-    ui.painter()
-        .circle_filled(egui::pos2(x, rect.center().y), radius * 0.8, egui::Color32::WHITE);
+    ui.painter().circle_filled(
+        egui::pos2(x, rect.center().y),
+        radius * 0.8,
+        egui::Color32::WHITE,
+    );
     response
 }
 
@@ -250,8 +253,10 @@ fn switch_row(
 
 /// A thin bar showing an effect's current level, so the DJ sees what a slider does.
 fn meter(ui: &mut egui::Ui, level: f32, colour: egui::Color32) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 4.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 2.0, egui::Color32::from_gray(35));
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 4.0), egui::Sense::hover());
+    ui.painter()
+        .rect_filled(rect, 2.0, egui::Color32::from_gray(35));
     let mut fill = rect;
     fill.set_width(rect.width() * level.clamp(0.0, 1.0));
     ui.painter().rect_filled(fill, 2.0, colour);
@@ -259,7 +264,12 @@ fn meter(ui: &mut egui::Ui, level: f32, colour: egui::Color32) {
 
 fn section(ui: &mut egui::Ui, title: &str) {
     ui.add_space(10.0);
-    ui.label(egui::RichText::new(title.to_uppercase()).small().strong().weak());
+    ui.label(
+        egui::RichText::new(title.to_uppercase())
+            .small()
+            .strong()
+            .weak(),
+    );
     ui.add_space(2.0);
 }
 
@@ -267,9 +277,19 @@ fn section(ui: &mut egui::Ui, title: &str) {
 fn section_help(ui: &mut egui::Ui, title: &str, help: &str) {
     ui.add_space(10.0);
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(title.to_uppercase()).small().strong().weak());
-        ui.label(egui::RichText::new(" ? ").small().strong().background_color(egui::Color32::from_gray(50)))
-            .on_hover_text(help);
+        ui.label(
+            egui::RichText::new(title.to_uppercase())
+                .small()
+                .strong()
+                .weak(),
+        );
+        ui.label(
+            egui::RichText::new(" ? ")
+                .small()
+                .strong()
+                .background_color(egui::Color32::from_gray(50)),
+        )
+        .on_hover_text(help);
     });
     ui.add_space(2.0);
 }
@@ -346,7 +366,10 @@ pub fn launcher_page(
             ui.separator();
             ui.horizontal(|ui| {
                 let start = egui::Button::new(
-                    egui::RichText::new("Start show").size(20.0).strong().color(egui::Color32::BLACK),
+                    egui::RichText::new("Start show")
+                        .size(20.0)
+                        .strong()
+                        .color(egui::Color32::BLACK),
                 )
                 .fill(colour)
                 .min_size(egui::vec2(200.0, 40.0));
@@ -357,7 +380,11 @@ pub fn launcher_page(
                     edits.actions.push(OverlayAction::Quit);
                 }
             });
-            ui.label(egui::RichText::new("Esc during the show comes back here.").small().weak());
+            ui.label(
+                egui::RichText::new("Esc during the show comes back here.")
+                    .small()
+                    .weak(),
+            );
         });
 }
 
@@ -365,7 +392,8 @@ fn header(ui: &mut egui::Ui, view: &OverlayView<'_>, colour: egui::Color32) {
     // The title breathes with the kick, so the launcher shows the audio is live.
     // The row keeps a fixed height so the panel below does not jump on every kick.
     let pulse = view.audio.kick.clamp(0.0, 1.0);
-    let (row, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), egui::Sense::hover());
+    let (row, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), egui::Sense::hover());
     let painter = ui.painter_at(row);
     // Measured at rest, so the subtitle stays still while the title pulses.
     let title_w = painter
@@ -389,7 +417,8 @@ fn header(ui: &mut egui::Ui, view: &OverlayView<'_>, colour: egui::Color32) {
     let (light, verdict, hint) = readiness(view.status);
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
-        ui.painter().circle_filled(rect.center(), 6.0, light_colour(light));
+        ui.painter()
+            .circle_filled(rect.center(), 6.0, light_colour(light));
         ui.label(verdict);
     });
     if !hint.is_empty() {
@@ -415,7 +444,9 @@ fn header(ui: &mut egui::Ui, view: &OverlayView<'_>, colour: egui::Color32) {
         ui.label(egui::RichText::new(" ").small());
     }
     if view.simulator {
-        ui.label(egui::RichText::new("Developer simulator: rekordbox is not read in this run.").small());
+        ui.label(
+            egui::RichText::new("Developer simulator: rekordbox is not read in this run.").small(),
+        );
     }
 }
 
@@ -463,8 +494,19 @@ fn mode_cards(ui: &mut egui::Ui, config: &mut Config, colour: egui::Color32, edi
             let selected = config.preset == p;
             let fx = p.fx().unwrap_or_default();
             let frame = egui::Frame::default()
-                .fill(if selected { egui::Color32::from_gray(38) } else { egui::Color32::from_gray(24) })
-                .stroke(egui::Stroke::new(if selected { 2.0 } else { 1.0 }, if selected { colour } else { egui::Color32::from_gray(55) }))
+                .fill(if selected {
+                    egui::Color32::from_gray(38)
+                } else {
+                    egui::Color32::from_gray(24)
+                })
+                .stroke(egui::Stroke::new(
+                    if selected { 2.0 } else { 1.0 },
+                    if selected {
+                        colour
+                    } else {
+                        egui::Color32::from_gray(55)
+                    },
+                ))
                 .corner_radius(6.0)
                 .inner_margin(egui::Margin::same(8));
             let response = frame
@@ -473,7 +515,15 @@ fn mode_cards(ui: &mut egui::Ui, config: &mut Config, colour: egui::Color32, edi
                     ui.label(if selected { title.color(colour) } else { title });
                     for (name, level) in style_levels(&fx) {
                         ui.label(egui::RichText::new(name).small().weak());
-                        meter(ui, level, if selected { colour } else { egui::Color32::from_gray(120) });
+                        meter(
+                            ui,
+                            level,
+                            if selected {
+                                colour
+                            } else {
+                                egui::Color32::from_gray(120)
+                            },
+                        );
                     }
                 })
                 .response
@@ -492,14 +542,27 @@ fn mode_cards(ui: &mut egui::Ui, config: &mut Config, colour: egui::Color32, edi
     }
 }
 
-fn preset_buttons(ui: &mut egui::Ui, config: &mut Config, colour: egui::Color32, edits: &mut Edits) {
+fn preset_buttons(
+    ui: &mut egui::Ui,
+    config: &mut Config,
+    colour: egui::Color32,
+    edits: &mut Edits,
+) {
     ui.horizontal(|ui| {
         for p in Preset::NAMED {
             let selected = config.preset == p;
             let text = egui::RichText::new(p.label()).strong();
-            let b = egui::Button::new(if selected { text.color(egui::Color32::BLACK) } else { text })
-                .fill(if selected { colour } else { egui::Color32::from_gray(45) })
-                .min_size(egui::vec2(96.0, 30.0));
+            let b = egui::Button::new(if selected {
+                text.color(egui::Color32::BLACK)
+            } else {
+                text
+            })
+            .fill(if selected {
+                colour
+            } else {
+                egui::Color32::from_gray(45)
+            })
+            .min_size(egui::vec2(96.0, 30.0));
             if ui.add(b).clicked() {
                 config.preset = p;
                 if let Some(fx) = p.fx() {
@@ -532,7 +595,11 @@ fn show_tab(
         edits.changed = true;
     }
 
-    section_help(ui, "Style", "How big the show goes. Each card shows what it turns up; click one to use it. Fine-tune every effect on the Effects tab.");
+    section_help(
+        ui,
+        "Style",
+        "How big the show goes. Each card shows what it turns up; click one to use it. Fine-tune every effect on the Effects tab.",
+    );
     mode_cards(ui, config, colour, edits);
 
     section(ui, "Scenes");
@@ -571,7 +638,11 @@ fn show_tab(
 
     section(ui, "Try it");
     preview_buttons(ui, edits);
-    ui.label(egui::RichText::new("Plays the effects on the preview without music.").small().weak());
+    ui.label(
+        egui::RichText::new("Plays the effects on the preview without music.")
+            .small()
+            .weak(),
+    );
 }
 
 /// Buttons that play show moments on the preview without music.
@@ -584,7 +655,9 @@ fn preview_buttons(ui: &mut egui::Ui, edits: &mut Edits) {
             edits.actions.push(OverlayAction::Preview(ShowEvent::Drop));
         }
         if ui.button("New phrase").clicked() {
-            edits.actions.push(OverlayAction::Preview(ShowEvent::Phrase(None)));
+            edits
+                .actions
+                .push(OverlayAction::Preview(ShowEvent::Phrase(None)));
         }
         if ui.button("Track change").clicked() {
             edits.actions.push(OverlayAction::Preview(ShowEvent::Track));
@@ -595,13 +668,21 @@ fn preview_buttons(ui: &mut egui::Ui, edits: &mut Edits) {
     });
 }
 
-fn monitor_picker(ui: &mut egui::Ui, config: &mut Config, view: &OverlayView<'_>, edits: &mut Edits) {
+fn monitor_picker(
+    ui: &mut egui::Ui,
+    config: &mut Config,
+    view: &OverlayView<'_>,
+    edits: &mut Edits,
+) {
     egui::ComboBox::from_id_salt("monitor")
         .width(ui.available_width() - 10.0)
         .selected_text(monitor_label(view.monitors, &config.output_monitor))
         .show_ui(ui, |ui| {
             if ui
-                .selectable_label(config.output_monitor == MonitorChoice::Primary, "Primary screen")
+                .selectable_label(
+                    config.output_monitor == MonitorChoice::Primary,
+                    "Primary screen",
+                )
                 .clicked()
             {
                 config.output_monitor = MonitorChoice::Primary;
@@ -641,6 +722,7 @@ fn scene_combo(ui: &mut egui::Ui, config: &mut Config, view: &OverlayView<'_>, e
         });
 }
 
+#[allow(clippy::too_many_lines)]
 fn scenes_tab(
     ui: &mut egui::Ui,
     config: &mut Config,
@@ -665,14 +747,20 @@ fn scenes_tab(
                 (AutoChange::Drops, "+ at drops"),
                 (AutoChange::Phrases, "+ every few phrases"),
             ] {
-                if ui.radio(config.auto_change == mode, name).clicked() && config.auto_change != mode {
+                if ui.radio(config.auto_change == mode, name).clicked()
+                    && config.auto_change != mode
+                {
                     config.auto_change = mode;
                     edits.push(OverlayAction::Look);
                 }
             }
         });
     }
-    section_help(ui, "The scenes", "Click a picture to put that scene on the preview and adjust it below. Ticked scenes are the ones Auto chooses from.");
+    section_help(
+        ui,
+        "The scenes",
+        "Click a picture to put that scene on the preview and adjust it below. Ticked scenes are the ones Auto chooses from.",
+    );
     let max_cost = config.quality.max_cost();
     let mut rotation: Vec<String> = config.rotation.clone().unwrap_or_else(|| {
         view.scenes
@@ -698,7 +786,12 @@ fn scenes_tab(
                         ui.add_sized(img, egui::Button::new(scene_title(name)))
                     };
                     if active {
-                        ui.painter().rect_stroke(picture.rect, 3.0, egui::Stroke::new(2.0, colour), egui::StrokeKind::Outside);
+                        ui.painter().rect_stroke(
+                            picture.rect,
+                            3.0,
+                            egui::Stroke::new(2.0, colour),
+                            egui::StrokeKind::Outside,
+                        );
                     }
                     let picture = match info {
                         Some(i) => picture.on_hover_text(i.blurb),
@@ -709,7 +802,11 @@ fn scenes_tab(
                     }
                     ui.horizontal(|ui| {
                         let mut on = rotation.contains(name);
-                        if ui.checkbox(&mut on, "").on_hover_text("In the Auto rotation").changed() {
+                        if ui
+                            .checkbox(&mut on, "")
+                            .on_hover_text("In the Auto rotation")
+                            .changed()
+                        {
                             if on {
                                 rotation.push(name.clone());
                             } else {
@@ -726,8 +823,16 @@ fn scenes_tab(
                                 _ => "light",
                             };
                             let t = egui::RichText::new(tag).small();
-                            ui.label(if i.cost > max_cost { t.color(egui::Color32::from_rgb(230, 140, 60)) } else { t.weak() })
-                                .on_hover_text(if i.cost > max_cost { "Auto skips it at this quality; raise Quality on the Output tab." } else { "How hard it works the graphics card." });
+                            ui.label(if i.cost > max_cost {
+                                t.color(egui::Color32::from_rgb(230, 140, 60))
+                            } else {
+                                t.weak()
+                            })
+                            .on_hover_text(if i.cost > max_cost {
+                                "Auto skips it at this quality; raise Quality on the Output tab."
+                            } else {
+                                "How hard it works the graphics card."
+                            });
                         }
                     });
                 });
@@ -750,15 +855,37 @@ fn scenes_tab(
 /// Speed, intensity and colour for the scene on the preview.
 fn tweak_editor(ui: &mut egui::Ui, config: &mut Config, view: &OverlayView<'_>, edits: &mut Edits) {
     let name = view.active_scene.to_string();
-    section_help(ui, &format!("Adjust {}", scene_title(&name)), "These apply to this scene only, wherever it appears: in Auto, or picked by hand.");
+    section_help(
+        ui,
+        &format!("Adjust {}", scene_title(&name)),
+        "These apply to this scene only, wherever it appears: in Auto, or picked by hand.",
+    );
     if let Some(i) = scene_info(&name) {
         ui.label(egui::RichText::new(i.blurb).small().weak());
     }
     let mut t = config.tweaks.get(&name).copied().unwrap_or_default();
     let mut changed = false;
-    changed |= ui.add(egui::Slider::new(&mut t.speed, 0.25..=2.0).text("Speed").step_by(0.05)).changed();
-    changed |= ui.add(egui::Slider::new(&mut t.intensity, 0.0..=2.0).text("Reacts to the music").step_by(0.05)).changed();
-    changed |= ui.add(egui::Slider::new(&mut t.hue, 0.0..=1.0).text("Colour shift").step_by(0.01)).changed();
+    changed |= ui
+        .add(
+            egui::Slider::new(&mut t.speed, 0.25..=2.0)
+                .text("Speed")
+                .step_by(0.05),
+        )
+        .changed();
+    changed |= ui
+        .add(
+            egui::Slider::new(&mut t.intensity, 0.0..=2.0)
+                .text("Reacts to the music")
+                .step_by(0.05),
+        )
+        .changed();
+    changed |= ui
+        .add(
+            egui::Slider::new(&mut t.hue, 0.0..=1.0)
+                .text("Colour shift")
+                .step_by(0.01),
+        )
+        .changed();
     ui.horizontal(|ui| {
         if ui.button("Reset this scene").clicked() {
             t = SceneTweak::default();
@@ -787,7 +914,11 @@ fn effect_slider(
 ) -> bool {
     ui.add_space(6.0);
     let changed = ui
-        .add(egui::Slider::new(value, range).text(title).show_value(false))
+        .add(
+            egui::Slider::new(value, range)
+                .text(title)
+                .show_value(false),
+        )
         .changed();
     ui.label(egui::RichText::new(detail).small().weak());
     if let Some(level) = live {
@@ -796,6 +927,7 @@ fn effect_slider(
     changed
 }
 
+#[allow(clippy::too_many_lines)]
 fn effects_tab(
     ui: &mut egui::Ui,
     config: &mut Config,
@@ -812,43 +944,140 @@ fn effects_tab(
     let live = view.fx;
     let mut changed = false;
     section(ui, "Movement");
-    changed |= effect_slider(ui, &mut fx.reactivity, 0.0..=2.0, "Audio reactivity",
-        "How far the scenes move with the bass, mids, treble and drums.", Some(view.audio.loudness), colour);
-    changed |= effect_slider(ui, &mut fx.shake, 0.0..=1.0, "Camera shake",
-        "The picture jolts on kicks during drops.", Some(live.shake), colour);
-    changed |= effect_slider(ui, &mut fx.emphasis, 0.0..=1.0, "Overlay pulse",
-        "The card and HUD grow for a moment on a new track or a drop.", Some(live.emphasis), colour);
-    section_help(ui, "Build-ups and phrase changes", "rekordbox's phrase analysis says when a drop is coming and when a phrase ends; these animate the approach and the change.");
-    changed |= effect_slider(ui, &mut fx.buildup, 0.0..=1.0, "Build-ups",
-        "Light bars sweep across the screen before a drop, faster as it nears, with a slow push in and a colour cycle.", Some(live.build), colour);
-    changed |= effect_slider(ui, &mut fx.moves, 0.0..=1.0, "Phrase slides",
-        "On every new phrase the picture slides and a band of light crosses the screen.", Some(live.phrase_move), colour);
+    changed |= effect_slider(
+        ui,
+        &mut fx.reactivity,
+        0.0..=2.0,
+        "Audio reactivity",
+        "How far the scenes move with the bass, mids, treble and drums.",
+        Some(view.audio.loudness),
+        colour,
+    );
+    changed |= effect_slider(
+        ui,
+        &mut fx.shake,
+        0.0..=1.0,
+        "Camera shake",
+        "The picture jolts on kicks during drops.",
+        Some(live.shake),
+        colour,
+    );
+    changed |= effect_slider(
+        ui,
+        &mut fx.emphasis,
+        0.0..=1.0,
+        "Overlay pulse",
+        "The card and HUD grow for a moment on a new track or a drop.",
+        Some(live.emphasis),
+        colour,
+    );
+    section_help(
+        ui,
+        "Build-ups and phrase changes",
+        "rekordbox's phrase analysis says when a drop is coming and when a phrase ends; these animate the approach and the change.",
+    );
+    changed |= effect_slider(
+        ui,
+        &mut fx.buildup,
+        0.0..=1.0,
+        "Build-ups",
+        "Light bars sweep across the screen before a drop, faster as it nears, with a slow push in and a colour cycle.",
+        Some(live.build),
+        colour,
+    );
+    changed |= effect_slider(
+        ui,
+        &mut fx.moves,
+        0.0..=1.0,
+        "Phrase slides",
+        "On every new phrase the picture slides and a band of light crosses the screen.",
+        Some(live.phrase_move),
+        colour,
+    );
     ui.horizontal(|ui| {
         if ui.button("Preview a build-up").clicked() {
             edits.actions.push(OverlayAction::PreviewBuild);
         }
         if ui.button("Preview a phrase change").clicked() {
-            edits.actions.push(OverlayAction::Preview(ShowEvent::Phrase(None)));
+            edits
+                .actions
+                .push(OverlayAction::Preview(ShowEvent::Phrase(None)));
         }
     });
     section(ui, "Light");
-    changed |= effect_slider(ui, &mut fx.flashes, 0.0..=1.0, "Flashes",
-        "White flash at drops, tinted flashes when the playhead passes a cue.", Some(live.flash), colour);
-    changed |= effect_slider(ui, &mut fx.bloom, 0.0..=1.5, "Glow",
-        "Bloom around bright light.", None, colour);
-    changed |= effect_slider(ui, &mut fx.trails, 0.0..=1.0, "Trails",
-        "Scenes that use feedback leave light trails behind.", None, colour);
+    changed |= effect_slider(
+        ui,
+        &mut fx.flashes,
+        0.0..=1.0,
+        "Flashes",
+        "White flash at drops, tinted flashes when the playhead passes a cue.",
+        Some(live.flash),
+        colour,
+    );
+    changed |= effect_slider(
+        ui,
+        &mut fx.bloom,
+        0.0..=1.5,
+        "Glow",
+        "Bloom around bright light.",
+        None,
+        colour,
+    );
+    changed |= effect_slider(
+        ui,
+        &mut fx.trails,
+        0.0..=1.0,
+        "Trails",
+        "Scenes that use feedback leave light trails behind.",
+        None,
+        colour,
+    );
     section(ui, "Colour and surprises");
-    changed |= effect_slider(ui, &mut fx.colour, 0.0..=1.0, "Colour changes",
-        "Hue swings at drops and new phrases; the palette always starts from the cover.", Some(live.phrase_hit), colour);
-    changed |= effect_slider(ui, &mut fx.inversions, 0.0..=1.0, "Inversions",
-        "Light and dark swap for a beat at some drops.", Some(live.invert), colour);
-    changed |= effect_slider(ui, &mut fx.glitch, 0.0..=1.0, "Glitches",
-        "Slices of the picture tear on track changes and cues.", Some(live.glitch), colour);
-    changed |= effect_slider(ui, &mut fx.chaos, 0.0..=1.0, "Randomness",
-        "How often Onset surprises: unexpected colour turns, glitches, bolder scene picks.", None, colour);
-    changed |= effect_slider(ui, &mut fx.grain, 0.0..=1.0, "Film grain",
-        "A little texture over the whole picture.", None, colour);
+    changed |= effect_slider(
+        ui,
+        &mut fx.colour,
+        0.0..=1.0,
+        "Colour changes",
+        "Hue swings at drops and new phrases; the palette always starts from the cover.",
+        Some(live.phrase_hit),
+        colour,
+    );
+    changed |= effect_slider(
+        ui,
+        &mut fx.inversions,
+        0.0..=1.0,
+        "Inversions",
+        "Light and dark swap for a beat at some drops.",
+        Some(live.invert),
+        colour,
+    );
+    changed |= effect_slider(
+        ui,
+        &mut fx.glitch,
+        0.0..=1.0,
+        "Glitches",
+        "Slices of the picture tear on track changes and cues.",
+        Some(live.glitch),
+        colour,
+    );
+    changed |= effect_slider(
+        ui,
+        &mut fx.chaos,
+        0.0..=1.0,
+        "Randomness",
+        "How often Onset surprises: unexpected colour turns, glitches, bolder scene picks.",
+        None,
+        colour,
+    );
+    changed |= effect_slider(
+        ui,
+        &mut fx.grain,
+        0.0..=1.0,
+        "Film grain",
+        "A little texture over the whole picture.",
+        None,
+        colour,
+    );
     section(ui, "Strobe");
     let before = fx.strobe;
     ui.checkbox(&mut fx.strobe, "Strobe after drops");
@@ -861,10 +1090,23 @@ fn effects_tab(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn screen_tab(ui: &mut egui::Ui, config: &mut Config, colour: egui::Color32, edits: &mut Edits) {
-    ui.label("What sits on top of the visuals: the Now Playing card for the crowd, the HUD for you.");
-    section_help(ui, "Now Playing card", "The track's cover, title and artist, with the details you tick below. It swaps with a crossfade when the MASTER deck changes.");
-    if switch_row(ui, &mut config.show_card, "Show the card", "C toggles it during the show.", colour) {
+    ui.label(
+        "What sits on top of the visuals: the Now Playing card for the crowd, the HUD for you.",
+    );
+    section_help(
+        ui,
+        "Now Playing card",
+        "The track's cover, title and artist, with the details you tick below. It swaps with a crossfade when the MASTER deck changes.",
+    );
+    if switch_row(
+        ui,
+        &mut config.show_card,
+        "Show the card",
+        "C toggles it during the show.",
+        colour,
+    ) {
         edits.push(OverlayAction::ShowCard(config.show_card));
     }
     let mut changed = false;
@@ -873,30 +1115,51 @@ fn screen_tab(ui: &mut egui::Ui, config: &mut Config, colour: egui::Color32, edi
         .selected_text(c.corner.label())
         .show_ui(ui, |ui| {
             for corner in Corner::ALL {
-                changed |= ui.selectable_value(&mut c.corner, corner, corner.label()).changed();
+                changed |= ui
+                    .selectable_value(&mut c.corner, corner, corner.label())
+                    .changed();
             }
         });
-    changed |= ui.add(egui::Slider::new(&mut c.size, 0.6..=1.6).text("Size").step_by(0.05)).changed();
-    egui::Grid::new("card-fields").num_columns(3).spacing([16.0, 2.0]).show(ui, |ui| {
-        changed |= tick(ui, &mut c.artwork, "Cover art");
-        changed |= tick(ui, &mut c.album, "Album");
-        changed |= tick(ui, &mut c.year, "Year");
-        ui.end_row();
-        changed |= tick(ui, &mut c.key, "Key");
-        changed |= tick(ui, &mut c.bpm, "BPM");
-        changed |= tick(ui, &mut c.genre, "Genre");
-        ui.end_row();
-        changed |= tick(ui, &mut c.label, "Label");
-        changed |= tick(ui, &mut c.rating, "Rating");
-        changed |= tick(ui, &mut c.tags, "My Tags");
-        ui.end_row();
-        changed |= tick(ui, &mut c.comment, "Comment");
-        changed |= tick(ui, &mut c.play_count, "Play count");
-        ui.end_row();
-    });
-    ui.label(egui::RichText::new("Label, rating, My Tags, comment and play count come from your rekordbox collection.").small().weak());
+    changed |= ui
+        .add(
+            egui::Slider::new(&mut c.size, 0.6..=1.6)
+                .text("Size")
+                .step_by(0.05),
+        )
+        .changed();
+    egui::Grid::new("card-fields")
+        .num_columns(3)
+        .spacing([16.0, 2.0])
+        .show(ui, |ui| {
+            changed |= tick(ui, &mut c.artwork, "Cover art");
+            changed |= tick(ui, &mut c.album, "Album");
+            changed |= tick(ui, &mut c.year, "Year");
+            ui.end_row();
+            changed |= tick(ui, &mut c.key, "Key");
+            changed |= tick(ui, &mut c.bpm, "BPM");
+            changed |= tick(ui, &mut c.genre, "Genre");
+            ui.end_row();
+            changed |= tick(ui, &mut c.label, "Label");
+            changed |= tick(ui, &mut c.rating, "Rating");
+            changed |= tick(ui, &mut c.tags, "My Tags");
+            ui.end_row();
+            changed |= tick(ui, &mut c.comment, "Comment");
+            changed |= tick(ui, &mut c.play_count, "Play count");
+            ui.end_row();
+        });
+    ui.label(
+        egui::RichText::new(
+            "Label, rating, My Tags, comment and play count come from your rekordbox collection.",
+        )
+        .small()
+        .weak(),
+    );
 
-    section_help(ui, "Blackout screen", "B during the show blacks the screen out, for breaks and announcements. A logo can sit in the middle.");
+    section_help(
+        ui,
+        "Blackout screen",
+        "B during the show blacks the screen out, for breaks and announcements. A logo can sit in the middle.",
+    );
     let logo = config
         .blackout_logo
         .as_ref()
@@ -905,10 +1168,18 @@ fn screen_tab(ui: &mut egui::Ui, config: &mut Config, colour: egui::Color32, edi
     ui.label(format!("Logo: {logo}"));
     ui.label(egui::RichText::new("Drag an image file (PNG or JPEG) onto this window to use it. Transparent PNGs look best on black.").small().weak());
     changed |= ui
-        .add(egui::Slider::new(&mut config.blackout_logo_size, 0.1..=1.0).text("Logo size").step_by(0.05))
+        .add(
+            egui::Slider::new(&mut config.blackout_logo_size, 0.1..=1.0)
+                .text("Logo size")
+                .step_by(0.05),
+        )
         .changed();
     ui.horizontal(|ui| {
-        if ui.button("Preview blackout").on_hover_text("Blacks out the preview; press again to come back.").clicked() {
+        if ui
+            .button("Preview blackout")
+            .on_hover_text("Blacks out the preview; press again to come back.")
+            .clicked()
+        {
             edits.actions.push(OverlayAction::ToggleBlackout);
         }
         if config.blackout_logo.is_some() && ui.button("Remove logo").clicked() {
@@ -916,8 +1187,18 @@ fn screen_tab(ui: &mut egui::Ui, config: &mut Config, colour: egui::Color32, edi
         }
     });
 
-    section_help(ui, "HUD", "A technical readout for you, not the crowd: frame time, the rekordbox link, the phrase and the drop countdown.");
-    if switch_row(ui, &mut config.show_hud, "Show the HUD", "H toggles it during the show.", colour) {
+    section_help(
+        ui,
+        "HUD",
+        "A technical readout for you, not the crowd: frame time, the rekordbox link, the phrase and the drop countdown.",
+    );
+    if switch_row(
+        ui,
+        &mut config.show_hud,
+        "Show the HUD",
+        "H toggles it during the show.",
+        colour,
+    ) {
         edits.push(OverlayAction::ShowHud(config.show_hud));
     }
     let h = &mut config.hud;
@@ -925,24 +1206,35 @@ fn screen_tab(ui: &mut egui::Ui, config: &mut Config, colour: egui::Color32, edi
         .selected_text(h.corner.label())
         .show_ui(ui, |ui| {
             for corner in Corner::ALL {
-                changed |= ui.selectable_value(&mut h.corner, corner, corner.label()).changed();
+                changed |= ui
+                    .selectable_value(&mut h.corner, corner, corner.label())
+                    .changed();
             }
         });
-    changed |= ui.add(egui::Slider::new(&mut h.size, 0.6..=2.0).text("Text size").step_by(0.05)).changed();
-    egui::Grid::new("hud-fields").num_columns(3).spacing([16.0, 2.0]).show(ui, |ui| {
-        changed |= tick(ui, &mut h.scene, "Scene");
-        changed |= tick(ui, &mut h.performance, "Frame time");
-        changed |= tick(ui, &mut h.transport, "Link and playhead");
-        ui.end_row();
-        changed |= tick(ui, &mut h.tempo, "BPM");
-        changed |= tick(ui, &mut h.key, "Key");
-        changed |= tick(ui, &mut h.phrase, "Phrase");
-        ui.end_row();
-        changed |= tick(ui, &mut h.drop, "Drop countdown");
-        changed |= tick(ui, &mut h.next_cue, "Next cue");
-        changed |= tick(ui, &mut h.analysis, "Bands and vocals");
-        ui.end_row();
-    });
+    changed |= ui
+        .add(
+            egui::Slider::new(&mut h.size, 0.6..=2.0)
+                .text("Text size")
+                .step_by(0.05),
+        )
+        .changed();
+    egui::Grid::new("hud-fields")
+        .num_columns(3)
+        .spacing([16.0, 2.0])
+        .show(ui, |ui| {
+            changed |= tick(ui, &mut h.scene, "Scene");
+            changed |= tick(ui, &mut h.performance, "Frame time");
+            changed |= tick(ui, &mut h.transport, "Link and playhead");
+            ui.end_row();
+            changed |= tick(ui, &mut h.tempo, "BPM");
+            changed |= tick(ui, &mut h.key, "Key");
+            changed |= tick(ui, &mut h.phrase, "Phrase");
+            ui.end_row();
+            changed |= tick(ui, &mut h.drop, "Drop countdown");
+            changed |= tick(ui, &mut h.next_cue, "Next cue");
+            changed |= tick(ui, &mut h.analysis, "Bands and vocals");
+            ui.end_row();
+        });
     if changed {
         edits.push(OverlayAction::Look);
     }
@@ -960,19 +1252,45 @@ fn lyrics_tab(
         ui.label(egui::RichText::new(view.lyrics_status).strong());
     }
     let l = &mut config.lyrics;
-    let mut changed = switch_row(ui, &mut l.enabled, "Show lyrics", "Only while a track with lyrics is playing; nothing appears for instrumentals.", colour);
-    changed |= switch_row(ui, &mut l.online, "Find lyrics online", "Looks each track up on LRCLIB, a free lyrics database, the first time it plays, and keeps a copy. Only the title, artist, album and length are sent. Off: only lyrics already saved are shown.", colour);
-    section_help(ui, "Your library", "Looks up every track now instead of the first time it plays, so lyrics are ready even without internet at the gig. Tracks already checked are instant.");
-    let busy = view.lyrics_progress.starts_with("Checked") || view.lyrics_progress.starts_with("Starting");
+    let mut changed = switch_row(
+        ui,
+        &mut l.enabled,
+        "Show lyrics",
+        "Only while a track with lyrics is playing; nothing appears for instrumentals.",
+        colour,
+    );
+    changed |= switch_row(
+        ui,
+        &mut l.online,
+        "Find lyrics online",
+        "Looks each track up on LRCLIB, a free lyrics database, the first time it plays, and keeps a copy. Only the title, artist, album and length are sent. Off: only lyrics already saved are shown.",
+        colour,
+    );
+    section_help(
+        ui,
+        "Your library",
+        "Looks up every track now instead of the first time it plays, so lyrics are ready even without internet at the gig. Tracks already checked are instant.",
+    );
+    let busy =
+        view.lyrics_progress.starts_with("Checked") || view.lyrics_progress.starts_with("Starting");
     ui.horizontal(|ui| {
-        if ui.add_enabled(!busy, egui::Button::new("Find lyrics for my whole library")).clicked() {
-            edits.actions.push(OverlayAction::Engine(EngineCommand::PrefetchLyrics));
+        if ui
+            .add_enabled(!busy, egui::Button::new("Find lyrics for my whole library"))
+            .clicked()
+        {
+            edits
+                .actions
+                .push(OverlayAction::Engine(EngineCommand::PrefetchLyrics));
         }
     });
     if !view.lyrics_progress.is_empty() {
         ui.label(egui::RichText::new(view.lyrics_progress).small());
     }
-    section_help(ui, "Style", "How the lyrics look. Try each with the preview buttons below.");
+    section_help(
+        ui,
+        "Style",
+        "How the lyrics look. Try each with the preview buttons below.",
+    );
     for style in LyricStyle::ALL {
         ui.horizontal(|ui| {
             changed |= ui.radio_value(&mut l.style, style, style.label()).changed();
@@ -985,12 +1303,36 @@ fn lyrics_tab(
             changed |= ui.radio_value(&mut l.place, place, place.label()).changed();
         }
     });
-    changed |= ui.add(egui::Slider::new(&mut l.size, 0.6..=2.0).text("Size").step_by(0.05)).changed();
-    section_help(ui, "At drops", "How much the lyrics move when the music does: a colour split, a rainbow sweep and a bounce on the kick at drops and build-ups. Nothing flashes.");
-    changed |= effect_slider(ui, &mut l.drop_fx, 0.0..=1.0, "Drop animation",
-        "0 keeps the lyrics still; 1 lets them dance with the drop.", Some(view.fx.drop_hit), colour);
-    changed |= ui.add(egui::Slider::new(&mut l.offset_s, -2.0..=2.0).text("Timing (s)").step_by(0.05))
-        .on_hover_text("Move the lyrics earlier (negative) or later (positive) if a track's lyrics are off.")
+    changed |= ui
+        .add(
+            egui::Slider::new(&mut l.size, 0.6..=2.0)
+                .text("Size")
+                .step_by(0.05),
+        )
+        .changed();
+    section_help(
+        ui,
+        "At drops",
+        "How much the lyrics move when the music does: a colour split, a rainbow sweep and a bounce on the kick at drops and build-ups. Nothing flashes.",
+    );
+    changed |= effect_slider(
+        ui,
+        &mut l.drop_fx,
+        0.0..=1.0,
+        "Drop animation",
+        "0 keeps the lyrics still; 1 lets them dance with the drop.",
+        Some(view.fx.drop_hit),
+        colour,
+    );
+    changed |= ui
+        .add(
+            egui::Slider::new(&mut l.offset_s, -2.0..=2.0)
+                .text("Timing (s)")
+                .step_by(0.05),
+        )
+        .on_hover_text(
+            "Move the lyrics earlier (negative) or later (positive) if a track's lyrics are off.",
+        )
         .changed();
     ui.horizontal(|ui| {
         if ui.button("Preview a drop").clicked() {
@@ -1012,17 +1354,26 @@ fn output_tab(ui: &mut egui::Ui, config: &mut Config, view: &OverlayView<'_>, ed
 
     section(ui, "Graphics card");
     ui.label(format!("Rendering on: {}", view.adapter));
-    let current = config.gpu.clone().unwrap_or_else(|| "Automatic (fastest)".to_string());
+    let current = config
+        .gpu
+        .clone()
+        .unwrap_or_else(|| "Automatic (fastest)".to_string());
     egui::ComboBox::from_id_salt("gpu")
         .width(ui.available_width() - 10.0)
         .selected_text(current)
         .show_ui(ui, |ui| {
-            if ui.selectable_label(config.gpu.is_none(), "Automatic (fastest)").clicked() {
+            if ui
+                .selectable_label(config.gpu.is_none(), "Automatic (fastest)")
+                .clicked()
+            {
                 config.gpu = None;
                 edits.changed = true;
             }
             for name in view.adapters {
-                if ui.selectable_label(config.gpu.as_deref() == Some(name.as_str()), name).clicked() {
+                if ui
+                    .selectable_label(config.gpu.as_deref() == Some(name.as_str()), name)
+                    .clicked()
+                {
                     config.gpu = Some(name.clone());
                     edits.changed = true;
                 }
@@ -1038,7 +1389,11 @@ fn output_tab(ui: &mut egui::Ui, config: &mut Config, view: &OverlayView<'_>, ed
             Quality::High => "Full resolution, every scene. Good for a gaming laptop.",
             Quality::Ultra => "Full resolution with extra ray-march detail.",
         };
-        if ui.radio(config.quality == q, format!("{}  -  {detail}", q.label())).clicked() && config.quality != q {
+        if ui
+            .radio(config.quality == q, format!("{}  -  {detail}", q.label()))
+            .clicked()
+            && config.quality != q
+        {
             config.quality = q;
             edits.push(OverlayAction::Look);
         }
@@ -1058,7 +1413,8 @@ fn output_tab(ui: &mut egui::Ui, config: &mut Config, view: &OverlayView<'_>, ed
             (PresentModeChoice::Fifo, "VSync (smooth, never tears)"),
             (PresentModeChoice::Mailbox, "Low latency"),
         ] {
-            if ui.radio(config.present_mode == mode, name).clicked() && config.present_mode != mode {
+            if ui.radio(config.present_mode == mode, name).clicked() && config.present_mode != mode
+            {
                 config.present_mode = mode;
                 edits.push(OverlayAction::PresentMode(mode));
             }
@@ -1066,7 +1422,11 @@ fn output_tab(ui: &mut egui::Ui, config: &mut Config, view: &OverlayView<'_>, ed
     });
     let mut scale = config.internal_scale;
     if ui
-        .add(egui::Slider::new(&mut scale, onset_render::renderer::MIN_INTERNAL_SCALE..=1.0).text("Extra resolution scale").step_by(0.05))
+        .add(
+            egui::Slider::new(&mut scale, onset_render::renderer::MIN_INTERNAL_SCALE..=1.0)
+                .text("Extra resolution scale")
+                .step_by(0.05),
+        )
         .changed()
     {
         config.internal_scale = scale;
@@ -1074,6 +1434,7 @@ fn output_tab(ui: &mut egui::Ui, config: &mut Config, view: &OverlayView<'_>, ed
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn audio_tab(
     ui: &mut egui::Ui,
     config: &mut Config,
@@ -1083,45 +1444,80 @@ fn audio_tab(
     edits: &mut Edits,
 ) {
     ui.label("Onset listens to the mix to follow the drums and the spectrum.");
-    section_help(ui, "Listening to", "Automatic picks a DJ controller's recording input when one is plugged in (for a DDJ-FLX10 on ASIO that is 'Microphone (DDJ-FLX10)', which carries the master mix) and otherwise listens to what the speakers play. Unplug the controller and Onset moves to the speakers; plug it back in and it moves back.");
+    section_help(
+        ui,
+        "Listening to",
+        "Automatic picks a DJ controller's recording input when one is plugged in (for a DDJ-FLX10 on ASIO that is 'Microphone (DDJ-FLX10)', which carries the master mix) and otherwise listens to what the speakers play. Unplug the controller and Onset moves to the speakers; plug it back in and it moves back.",
+    );
     ui.label(format!("In use: {}", view.audio_device));
     ui.horizontal(|ui| {
-        let current = config.audio_device.clone().unwrap_or_else(|| "Automatic".to_string());
+        let current = config
+            .audio_device
+            .clone()
+            .unwrap_or_else(|| "Automatic".to_string());
         egui::ComboBox::from_id_salt("audio")
             .width(ui.available_width() - 90.0)
             .selected_text(current)
             .show_ui(ui, |ui| {
-                if ui.selectable_label(config.audio_device.is_none(), "Automatic").clicked() {
+                if ui
+                    .selectable_label(config.audio_device.is_none(), "Automatic")
+                    .clicked()
+                {
                     config.audio_device = None;
                     edits.push(OverlayAction::Engine(EngineCommand::SetAudioDevice(None)));
                 }
                 for name in endpoints {
-                    if ui.selectable_label(config.audio_device.as_deref() == Some(name.as_str()), name).clicked() {
+                    if ui
+                        .selectable_label(
+                            config.audio_device.as_deref() == Some(name.as_str()),
+                            name,
+                        )
+                        .clicked()
+                    {
                         config.audio_device = Some(name.clone());
-                        edits.push(OverlayAction::Engine(EngineCommand::SetAudioDevice(Some(name.clone()))));
+                        edits.push(OverlayAction::Engine(EngineCommand::SetAudioDevice(Some(
+                            name.clone(),
+                        ))));
                     }
                 }
             });
-        if ui.button("Rescan").on_hover_text("List the devices again after plugging something in.").clicked() {
+        if ui
+            .button("Rescan")
+            .on_hover_text("List the devices again after plugging something in.")
+            .clicked()
+        {
             edits.rescan_audio = true;
         }
     });
-    ui.label(egui::RichText::new("Changes apply immediately.").small().weak());
+    ui.label(
+        egui::RichText::new("Changes apply immediately.")
+            .small()
+            .weak(),
+    );
 
     section(ui, "What Onset hears");
     let audio = view.audio;
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 70.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 4.0, egui::Color32::from_gray(20));
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 70.0), egui::Sense::hover());
+    ui.painter()
+        .rect_filled(rect, 4.0, egui::Color32::from_gray(20));
     let bands = audio.levels.len() as f32;
     let bar_w = rect.width() / bands;
     for (i, level) in audio.levels.iter().enumerate() {
         let h = rect.height() * level.clamp(0.0, 1.0);
         let x = rect.left() + i as f32 * bar_w;
-        let bar = egui::Rect::from_min_max(egui::pos2(x + 1.0, rect.bottom() - h), egui::pos2(x + bar_w - 1.0, rect.bottom()));
+        let bar = egui::Rect::from_min_max(
+            egui::pos2(x + 1.0, rect.bottom() - h),
+            egui::pos2(x + bar_w - 1.0, rect.bottom()),
+        );
         ui.painter().rect_filled(bar, 1.0, colour);
     }
     ui.horizontal(|ui| {
-        for (name, v) in [("kick", audio.kick), ("snare", audio.snare), ("hats", audio.hat)] {
+        for (name, v) in [
+            ("kick", audio.kick),
+            ("snare", audio.snare),
+            ("hats", audio.hat),
+        ] {
             let (r, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
             let c = egui::Color32::from_gray(50).lerp_to_gamma(colour, v.clamp(0.0, 1.0));
             ui.painter().circle_filled(r.center(), 5.0, c);
@@ -1129,16 +1525,39 @@ fn audio_tab(
         }
     });
     if audio.silent {
-        ui.label(egui::RichText::new("Silence. If music is playing, choose the device that carries it above.").color(egui::Color32::from_rgb(230, 140, 60)));
+        ui.label(
+            egui::RichText::new(
+                "Silence. If music is playing, choose the device that carries it above.",
+            )
+            .color(egui::Color32::from_rgb(230, 140, 60)),
+        );
     } else {
-        ui.label(egui::RichText::new("Bass on the left, treble on the right, each band scaled to its own level.").small().weak());
+        ui.label(
+            egui::RichText::new(
+                "Bass on the left, treble on the right, each band scaled to its own level.",
+            )
+            .small()
+            .weak(),
+        );
     }
 
-    section_help(ui, "What rekordbox's analysis says", "rekordbox analyses every track for its low, mid and high energy and where the vocals are. Onset reads that at the playhead, so scenes know what the track is doing with no delay: vocals light things up, the bands move different parts.");
+    section_help(
+        ui,
+        "What rekordbox's analysis says",
+        "rekordbox analyses every track for its low, mid and high energy and where the vocals are. Onset reads that at the playhead, so scenes know what the track is doing with no delay: vocals light things up, the bands move different parts.",
+    );
     let a = view.analysis;
-    for (name, level) in [("Low", a.low), ("Mid", a.mid), ("High", a.high), ("Vocals", a.vocal)] {
+    for (name, level) in [
+        ("Low", a.low),
+        ("Mid", a.mid),
+        ("High", a.high),
+        ("Vocals", a.vocal),
+    ] {
         ui.horizontal(|ui| {
-            ui.add_sized(egui::vec2(52.0, 14.0), egui::Label::new(egui::RichText::new(name).small()));
+            ui.add_sized(
+                egui::vec2(52.0, 14.0),
+                egui::Label::new(egui::RichText::new(name).small()),
+            );
             meter(ui, level, colour);
         });
     }

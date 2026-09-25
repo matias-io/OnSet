@@ -153,7 +153,10 @@ impl Hud {
         let mut lines = vec![
             on(
                 o.scene,
-                format!("Onset  ·  {}  ·  {}x{}", info.scene, info.size.0, info.size.1),
+                format!(
+                    "Onset  ·  {}  ·  {}x{}",
+                    info.scene, info.size.0, info.size.1
+                ),
             ),
             on(
                 o.performance,
@@ -263,7 +266,11 @@ mod tests {
             ..HudOptions::default()
         };
         let less = hud.items(&ms, &HudInfo::default(), 1.0, &few);
-        assert_eq!(less.len() + 4, all.len(), "two lines (each with a shadow) gone");
+        assert_eq!(
+            less.len() + 4,
+            all.len(),
+            "two lines (each with a shadow) gone"
+        );
         assert!(less.iter().all(|i| !i.text.contains("frame")));
         let tempo_only = HudOptions {
             scene: false,

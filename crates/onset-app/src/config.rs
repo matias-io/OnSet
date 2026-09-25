@@ -39,9 +39,15 @@ impl Preset {
 
     pub fn blurb(self) -> &'static str {
         match self {
-            Self::Chill => "Smooth and calm: slow colour turns, soft build-ups, no shake or inversions.",
-            Self::Club => "Punchy: light sweeps before drops, a soft flash when they land, a slide on every new phrase.",
-            Self::Festival => "Everything big: full build-ups, bold drops with sway, inversions and glitches.",
+            Self::Chill => {
+                "Smooth and calm: slow colour turns, soft build-ups, no shake or inversions."
+            }
+            Self::Club => {
+                "Punchy: light sweeps before drops, a soft flash when they land, a slide on every new phrase."
+            }
+            Self::Festival => {
+                "Everything big: full build-ups, bold drops with sway, inversions and glitches."
+            }
             Self::Custom => "Your own mix of the sliders below.",
         }
     }

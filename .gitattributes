@@ -6,3 +6,6 @@
 *.otf binary
 *.wav binary
 *.flac binary
+
+# Generated dependency license inventory, separate from application source diffs.
+THIRD_PARTY_NOTICES.txt -diff linguist-generated=true

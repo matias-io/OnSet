@@ -168,7 +168,14 @@ pub fn library_line(meta: &TrackMeta, o: &CardOptions) -> String {
         parts.push(format!("{}{}", "★".repeat(full), "☆".repeat(5 - full)));
     }
     if o.tags && !x.my_tags.is_empty() {
-        parts.push(x.my_tags.iter().take(4).cloned().collect::<Vec<_>>().join(", "));
+        parts.push(
+            x.my_tags
+                .iter()
+                .take(4)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
     }
     if o.play_count && x.play_count > 0 {
         parts.push(format!("played {}×", x.play_count));
@@ -180,10 +187,7 @@ impl Card {
     pub fn new(gpu: &Gpu, format: wgpu::TextureFormat) -> Self {
         let quads = QuadPipeline::new(gpu, format);
         let scrim = quads.upload(gpu, &scrim_image(0.85, 64));
-        let scrim_top = quads.upload(
-            gpu,
-            &image::imageops::flip_vertical(&scrim_image(0.85, 64)),
-        );
+        let scrim_top = quads.upload(gpu, &image::imageops::flip_vertical(&scrim_image(0.85, 64)));
         Self {
             quads,
             loader: ArtworkLoader::new(),
@@ -248,6 +252,7 @@ impl Card {
     }
 
     /// Places and draws the quads in their own pass and returns the text to draw over them.
+    #[allow(clippy::too_many_lines)]
     pub fn draw(
         &mut self,
         gpu: &Gpu,
@@ -295,12 +300,29 @@ impl Card {
         );
         let art_side = if options.artwork { ART_SIDE * k } else { 0.0 };
         let gap = if options.artwork { GAP * k } else { 0.0 };
-        let art_x = if right { w - MARGIN * k - art_side } else { MARGIN * k };
-        let art_y = if top { MARGIN * k } else { h - MARGIN * k - art_side };
+        let art_x = if right {
+            w - MARGIN * k - art_side
+        } else {
+            MARGIN * k
+        };
+        let art_y = if top {
+            MARGIN * k
+        } else {
+            h - MARGIN * k - art_side
+        };
         let art_rect = [art_x, art_y, art_side, art_side];
         // The text's edge next to the artwork: its left edge on the left, right edge on the right.
-        let text_edge = if right { art_x - gap } else { art_x + art_side + gap };
-        let max_w = (if right { text_edge - MARGIN * k } else { w - text_edge - MARGIN * k }).max(64.0);
+        let text_edge = if right {
+            art_x - gap
+        } else {
+            art_x + art_side + gap
+        };
+        let max_w = (if right {
+            text_edge - MARGIN * k
+        } else {
+            w - text_edge - MARGIN * k
+        })
+        .max(64.0);
         let text_rgb = theme[1];
         let place = Placement {
             edge: text_edge,
@@ -398,7 +420,13 @@ fn layout_text(
     let library = small(library_line(meta, options), 0.7);
     let comment = small(
         if options.comment {
-            meta.extra.comment.as_deref().unwrap_or("").chars().take(90).collect()
+            meta.extra
+                .comment
+                .as_deref()
+                .unwrap_or("")
+                .chars()
+                .take(90)
+                .collect()
         } else {
             String::new()
         },

@@ -88,7 +88,12 @@ mod tests {
 
     fn bands() -> TrackBands {
         // 2 frames a second: a kick frame, then a hat frame, then silence.
-        TrackBands::new(2.0, vec![[200, 10, 0], [0, 10, 100], [0, 0, 0]], 1.0, vec![0, 4])
+        TrackBands::new(
+            2.0,
+            vec![[200, 10, 0], [0, 10, 100], [0, 0, 0]],
+            1.0,
+            vec![0, 4],
+        )
     }
 
     #[test]

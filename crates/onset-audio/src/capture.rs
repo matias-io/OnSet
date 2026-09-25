@@ -116,7 +116,14 @@ impl LoopbackCapture {
 
         let (tx, rx) = bounded::<Vec<f32>>(CHANNEL_CAPACITY);
         let lost = Arc::new(AtomicBool::new(false));
-        let stream = build_stream(&device, &stream_config, sample_format, channels, tx, lost.clone())?;
+        let stream = build_stream(
+            &device,
+            &stream_config,
+            sample_format,
+            channels,
+            tx,
+            lost.clone(),
+        )?;
         stream
             .play()
             .context("failed to start the loopback stream")?;

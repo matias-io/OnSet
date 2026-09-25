@@ -137,7 +137,11 @@ impl StreamMatcher {
         let mut scored: Vec<(f32, &Candidate)> = self
             .candidates
             .iter()
-            .filter(|c| c.meta.duration_s.is_none_or(|d| f64::from(d) + 1.0 >= playhead))
+            .filter(|c| {
+                c.meta
+                    .duration_s
+                    .is_none_or(|d| f64::from(d) + 1.0 >= playhead)
+            })
             .map(|c| (self.score(&c.bands), c))
             .collect();
         scored.sort_by(|a, b| b.0.total_cmp(&a.0));
@@ -195,8 +199,14 @@ mod tests {
         let right = bands(|t| [pulse(t, 0.47), pulse(t + 0.2, 1.9), pulse(t, 0.23)]);
         let wrong = bands(|t| [pulse(t, 0.61), pulse(t, 2.7), pulse(t + 0.1, 0.31)]);
         let mut m = StreamMatcher::new(vec![
-            Candidate { meta: meta(2), bands: wrong },
-            Candidate { meta: meta(1), bands: right.clone() },
+            Candidate {
+                meta: meta(2),
+                bands: wrong,
+            },
+            Candidate {
+                meta: meta(1),
+                bands: right.clone(),
+            },
         ]);
         assert!(m.best().is_none(), "nothing heard yet");
         // Listen from 60 s, hearing the right track with 0.1 s of latency.
@@ -214,8 +224,14 @@ mod tests {
         let a = bands(|t| [pulse(t, 0.47), 40, 40]);
         let b = bands(|t| [pulse(t, 0.61), 40, 40]);
         let mut m = StreamMatcher::new(vec![
-            Candidate { meta: meta(1), bands: a },
-            Candidate { meta: meta(2), bands: b },
+            Candidate {
+                meta: meta(1),
+                bands: a,
+            },
+            Candidate {
+                meta: meta(2),
+                bands: b,
+            },
         ]);
         for k in 0..300 {
             let now = f64::from(k) / 25.0;

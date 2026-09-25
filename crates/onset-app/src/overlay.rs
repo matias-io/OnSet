@@ -534,7 +534,9 @@ pub fn audio_section(
                 let selected = config.audio_device.as_deref() == Some(name.as_str());
                 if ui.selectable_label(selected, name).clicked() {
                     config.audio_device = Some(name.clone());
-                    edits.push(OverlayAction::Engine(EngineCommand::SetAudioDevice(Some(name.clone()))));
+                    edits.push(OverlayAction::Engine(EngineCommand::SetAudioDevice(Some(
+                        name.clone(),
+                    ))));
                 }
             }
         });

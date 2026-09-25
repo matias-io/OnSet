@@ -226,7 +226,11 @@ fn main() -> anyhow::Result<()> {
             analyze,
             seconds,
         } => live::sim(app_dir, &title, seek, gain, analyze, seconds)?,
-        Command::Lyrics { app_dir, grep, offline } => library_cmds::lyrics(app_dir, grep, offline)?,
+        Command::Lyrics {
+            app_dir,
+            grep,
+            offline,
+        } => library_cmds::lyrics(app_dir, grep, offline)?,
         #[cfg(windows)]
         Command::Memids { ids, offsets_dir } => memscan::memids(
             &offsets_dir.unwrap_or_else(calibrate::default_out_dir),
@@ -236,7 +240,9 @@ fn main() -> anyhow::Result<()> {
         Command::Memids { .. } => anyhow::bail!("memids needs Windows"),
         #[cfg(windows)]
         Command::Handles { all } => {
-            let p = onset_transport::memory::process::Process::open(onset_transport::memory::REKORDBOX_EXE)?;
+            let p = onset_transport::memory::process::Process::open(
+                onset_transport::memory::REKORDBOX_EXE,
+            )?;
             let files = if all {
                 onset_transport::memory::handles::open_files(p.pid)?
             } else {

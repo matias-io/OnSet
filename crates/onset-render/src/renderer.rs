@@ -339,12 +339,18 @@ impl Renderer {
         if !(0.0..HINT_S).contains(&age) {
             return Vec::new();
         }
-        let alpha = (age / 0.4).min(1.0).min((HINT_S - age) / 1.0).clamp(0.0, 1.0);
+        let alpha = (age / 0.4)
+            .min(1.0)
+            .min((HINT_S - age) / 1.0)
+            .clamp(0.0, 1.0);
         let px = 18.0 * self.scale.max(1.0);
         let text = "H  stats   ·   C  now-playing card   ·   B  blackout   ·   Left / Right  scene   ·   Esc  back to the launcher";
-        let mut item = TextItem::new(text, px, (0.0, 0.0))
-            .weight(500)
-            .color([255, 255, 255, (220.0 * alpha) as u8]);
+        let mut item = TextItem::new(text, px, (0.0, 0.0)).weight(500).color([
+            255,
+            255,
+            255,
+            (220.0 * alpha) as u8,
+        ]);
         let (w, _) = self.text.measure(&item);
         item.pos = (
             (self.size.0 as f32 - w) * 0.5,
@@ -435,7 +441,13 @@ impl Renderer {
     }
 
     /// Draws the blackout logo, fading in over the first moments of the blackout.
-    fn draw_logo(&self, gpu: &Gpu, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, time_s: f32) {
+    fn draw_logo(
+        &self,
+        gpu: &Gpu,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        time_s: f32,
+    ) {
         let Some(logo) = &self.logo else {
             return;
         };
@@ -444,7 +456,12 @@ impl Renderer {
         let fit = (w * self.logo_size / lw).min(h * self.logo_size / lh);
         let (dw, dh) = (lw * fit, lh * fit);
         let t = ((time_s - self.blackout_since) / 0.8).clamp(0.0, 1.0);
-        logo.place(gpu, [(w - dw) * 0.5, (h - dh) * 0.5, dw, dh], self.size, t * t * (3.0 - 2.0 * t));
+        logo.place(
+            gpu,
+            [(w - dw) * 0.5, (h - dh) * 0.5, dw, dh],
+            self.size,
+            t * t * (3.0 - 2.0 * t),
+        );
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("blackout logo"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -482,8 +499,9 @@ impl Renderer {
 
     /// The size scenes actually render at.
     pub fn internal_size(&self) -> (u32, u32) {
-        let k = (self.internal_scale * self.settings.quality.internal_scale() * self.adaptive_scale)
-            .max(0.25);
+        let k =
+            (self.internal_scale * self.settings.quality.internal_scale() * self.adaptive_scale)
+                .max(0.25);
         if k >= 0.999 {
             self.size
         } else {
@@ -522,7 +540,10 @@ impl Renderer {
         if self.window_frames >= 60 {
             if self.slow_frames >= SLOW_PER_SECOND && self.adaptive_scale > MIN_ADAPTIVE + 1e-3 {
                 self.adaptive_scale = (self.adaptive_scale - 0.1).max(MIN_ADAPTIVE);
-                tracing::info!(scale = self.adaptive_scale, "frames running slow; rendering smaller");
+                tracing::info!(
+                    scale = self.adaptive_scale,
+                    "frames running slow; rendering smaller"
+                );
                 changed = true;
             }
             self.window_frames = 0;
@@ -999,7 +1020,11 @@ impl Renderer {
                 size: self.size,
                 gpu_ms: None,
                 adapter: if self.adaptive_scale < 0.999 {
-                    format!("{}  ·  res {:.0}%", self.adapter, self.adaptive_scale * 100.0)
+                    format!(
+                        "{}  ·  res {:.0}%",
+                        self.adapter,
+                        self.adaptive_scale * 100.0
+                    )
                 } else {
                     self.adapter.clone()
                 },

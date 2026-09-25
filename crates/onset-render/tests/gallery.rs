@@ -47,7 +47,11 @@ fn audio(t: f32, bass: f32, treble: f32) -> AudioFeatures {
     let phase = beat.fract();
     let kick = (1.0 - phase).powf(6.0);
     let hat = (1.0 - (phase + 0.5).fract()).powf(10.0);
-    let snare = if (beat as u32) % 2 == 1 { (1.0 - phase).powf(8.0) } else { 0.0 };
+    let snare = if (beat as u32) % 2 == 1 {
+        (1.0 - phase).powf(8.0)
+    } else {
+        0.0
+    };
     let mut a = AudioFeatures::silent();
     a.silent = false;
     for (i, l) in a.levels.iter_mut().enumerate() {
@@ -63,10 +67,10 @@ fn audio(t: f32, bass: f32, treble: f32) -> AudioFeatures {
         .clamp(0.0, 1.0);
     }
     a.bands = a.levels;
-    for (g, (lo, hi)) in a
-        .groups
-        .iter_mut()
-        .zip([(0, 3), (3, 6), (6, 10), (10, 14), (14, 18), (18, 24)])
+    for (g, (lo, hi)) in
+        a.groups
+            .iter_mut()
+            .zip([(0, 3), (3, 6), (6, 10), (10, 14), (14, 18), (18, 24)])
     {
         *g = a.levels[lo..hi].iter().sum::<f32>() / (hi - lo) as f32;
     }
@@ -93,11 +97,23 @@ fn state(t: f32, drop_at: f32, bass: f32, treble: f32) -> MusicState {
         beat_phase: beats.fract(),
         bar_phase: (beats / 4.0).fract(),
         phrase_phase: (beats / 32.0).fract(),
-        phrase: Some(if chorus { PhraseKind::Chorus } else { PhraseKind::Up }),
-        next_phrase: Some(if chorus { PhraseKind::Down } else { PhraseKind::Chorus }),
+        phrase: Some(if chorus {
+            PhraseKind::Chorus
+        } else {
+            PhraseKind::Up
+        }),
+        next_phrase: Some(if chorus {
+            PhraseKind::Down
+        } else {
+            PhraseKind::Chorus
+        }),
         beats_to_next_phrase: Some(if chorus { 32 } else { beats_to_drop }),
         drop_countdown_beats: (!chorus).then_some(beats_to_drop),
-        intensity: if chorus { 1.0 } else { 0.55 + 0.25 * (t / drop_at) },
+        intensity: if chorus {
+            1.0
+        } else {
+            0.55 + 0.25 * (t / drop_at)
+        },
         audio: audio(t, bass, treble),
         track: Some(track()),
         beat_index: Some(128 + beats as u32),
@@ -147,7 +163,12 @@ impl Gallery {
         };
         let h = Headless::new(size, dump.is_none()).expect("adapter");
         let mut r = Renderer::new(&h.gpu, size, h.format);
-        let loaded = builtin_scenes(&h.gpu, r.scene_format(), &r.bindings().layout, &shader_dir());
+        let loaded = builtin_scenes(
+            &h.gpu,
+            r.scene_format(),
+            &r.bindings().layout,
+            &shader_dir(),
+        );
         assert!(loaded.errors.is_empty(), "{:?}", loaded.errors);
         for s in loaded.scenes {
             r.add_scene(s);
@@ -160,7 +181,11 @@ impl Gallery {
                 auto_change: AutoChange::Off,
                 // Readbacks make test frames slow; a fixed resolution keeps them comparable.
                 adaptive: false,
-                quality: if dump.is_some() { Quality::High } else { Quality::Low },
+                quality: if dump.is_some() {
+                    Quality::High
+                } else {
+                    Quality::Low
+                },
                 ..RenderSettings::default()
             },
         );
@@ -192,7 +217,8 @@ impl Gallery {
         let mut out = image::RgbaImage::new(w, h);
         for (i, px) in frames.iter().enumerate() {
             let img = image::RgbaImage::from_raw(w, h, px.to_vec()).unwrap();
-            let small = image::imageops::resize(&img, w / 2, h / 2, image::imageops::FilterType::Triangle);
+            let small =
+                image::imageops::resize(&img, w / 2, h / 2, image::imageops::FilterType::Triangle);
             let (x, y) = ((i as u32 % 2) * w / 2, (i as u32 / 2) * h / 2);
             image::imageops::overlay(&mut out, &small, i64::from(x), i64::from(y));
         }
@@ -201,7 +227,8 @@ impl Gallery {
 
     fn save(&self, name: &str, px: &[u8]) {
         if let Some(dir) = &self.dump {
-            let img = image::RgbaImage::from_raw(self.h.size.0, self.h.size.1, px.to_vec()).unwrap();
+            let img =
+                image::RgbaImage::from_raw(self.h.size.0, self.h.size.1, px.to_vec()).unwrap();
             img.save(dir.join(format!("{name}.png"))).unwrap();
         }
     }
@@ -214,7 +241,10 @@ fn every_scene_reacts_to_the_music_and_the_drop() {
     let drop_at = 1.6;
     let only = std::env::var("ONSET_GALLERY_ONLY").ok();
     for name in names {
-        if only.as_deref().is_some_and(|o| !o.split(',').any(|x| x == name)) {
+        if only
+            .as_deref()
+            .is_some_and(|o| !o.split(',').any(|x| x == name))
+        {
             continue;
         }
         assert!(gallery.r.set_scene(&name));
@@ -230,7 +260,10 @@ fn every_scene_reacts_to_the_music_and_the_drop() {
         }
         gallery.save(&format!("{name}_0_idle"), &px_idle);
         let (_, spread) = luma_stats(&px_idle);
-        assert!(spread > 3.0, "{name}: idle frame is flat (spread {spread:.1})");
+        assert!(
+            spread > 3.0,
+            "{name}: idle frame is flat (spread {spread:.1})"
+        );
 
         let mut build = Vec::new();
         let mut drop = Vec::new();
@@ -255,7 +288,10 @@ fn every_scene_reacts_to_the_music_and_the_drop() {
         gallery.save(&format!("{name}_3_chorus"), &chorus);
         gallery.sheet(&name, [&px_idle, &build, &drop, &chorus]);
         let change = diff(&build, &drop);
-        assert!(change > 4.0, "{name}: the drop barely changes the picture ({change:.1})");
+        assert!(
+            change > 4.0,
+            "{name}: the drop barely changes the picture ({change:.1})"
+        );
 
         // Same moment, bass only versus treble only: the picture must differ. The classic
         // scenes predate the frequency split and stay out of Auto mode.
@@ -268,7 +304,10 @@ fn every_scene_reacts_to_the_music_and_the_drop() {
         let a = gallery.frame(&bass_only, 300.0, true).unwrap();
         let b = gallery.frame(&treble_only, 300.0, true).unwrap();
         let change = diff(&a, &b);
-        assert!(change > 1.0, "{name}: bass and treble look the same ({change:.2})");
+        assert!(
+            change > 1.0,
+            "{name}: bass and treble look the same ({change:.2})"
+        );
     }
 }
 
@@ -291,7 +330,9 @@ fn lyrics_follow_the_playhead_in_every_style() {
     ] {
         let mut plain = None;
         for show in [false, true] {
-            gallery.r.set_lyrics(track().id, Some(lyrics.clone()), String::new());
+            gallery
+                .r
+                .set_lyrics(track().id, Some(lyrics.clone()), String::new());
             gallery.r.set_lyrics_options(LyricsOptions {
                 enabled: show,
                 style,
@@ -310,7 +351,10 @@ fn lyrics_follow_the_playhead_in_every_style() {
             }
             if show {
                 let d = plain.as_ref().map_or(0.0, |p: &Vec<u8>| diff(p, &px));
-                assert!(d > 0.3, "{style:?} at {at}: the lyrics barely show ({d:.2})");
+                assert!(
+                    d > 0.3,
+                    "{style:?} at {at}: the lyrics barely show ({d:.2})"
+                );
                 shots.push(px);
             } else {
                 plain = Some(px);
@@ -328,7 +372,12 @@ fn bench_scenes_headless() {
     let size = (1920, 1080);
     let h = Headless::new(size, false).expect("adapter");
     let mut r = Renderer::new(&h.gpu, size, h.format);
-    let loaded = builtin_scenes(&h.gpu, r.scene_format(), &r.bindings().layout, &shader_dir());
+    let loaded = builtin_scenes(
+        &h.gpu,
+        r.scene_format(),
+        &r.bindings().layout,
+        &shader_dir(),
+    );
     for s in loaded.scenes {
         r.add_scene(s);
     }
@@ -354,7 +403,10 @@ fn bench_scenes_headless() {
             for f in 0..frames {
                 let t = start + f as f32 / 60.0;
                 let ms = state(t % 3.0, 1.6, 1.0, 1.0);
-                let mut enc = h.gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("b") });
+                let mut enc = h
+                    .gpu
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("b") });
                 let c0 = std::time::Instant::now();
                 r.render(&h.gpu, &mut enc, &view, &ms, 1000.0 + t);
                 cpu += c0.elapsed().as_secs_f64() * 1000.0;

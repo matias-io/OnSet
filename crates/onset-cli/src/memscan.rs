@@ -741,7 +741,10 @@ fn capture_flag_states(
     };
     let mut states: FlagStates = vec![Vec::new(); probes.len()];
     for (s, &label) in labels.iter().enumerate() {
-        println!("State {s} (label {label}): set it up, then create {}", trigger.display());
+        println!(
+            "State {s} (label {label}): set it up, then create {}",
+            trigger.display()
+        );
         while !trigger.exists() {
             std::thread::sleep(Duration::from_millis(200));
         }
@@ -823,7 +826,10 @@ pub fn memids(offsets_dir: &std::path::Path, ids: &[u32]) -> anyhow::Result<()> 
                 }
                 let obj2 = read_zero_filled(mem, t2, 0x400);
                 for (off, v) in find(&obj2) {
-                    println!("deck {d}: id {v} at [[position {at:+#x}] + {:#x}] + {off:#x}", k2 * 8);
+                    println!(
+                        "deck {d}: id {v} at [[position {at:+#x}] + {:#x}] + {off:#x}",
+                        k2 * 8
+                    );
                 }
             }
         }
@@ -834,7 +840,11 @@ pub fn memids(offsets_dir: &std::path::Path, ids: &[u32]) -> anyhow::Result<()> 
             let needle: Vec<u8> = match form {
                 "u32" => id.to_le_bytes().to_vec(),
                 "u64" => u64::from(*id).to_le_bytes().to_vec(),
-                _ => id.to_string().encode_utf16().flat_map(u16::to_le_bytes).collect(),
+                _ => id
+                    .to_string()
+                    .encode_utf16()
+                    .flat_map(u16::to_le_bytes)
+                    .collect(),
             };
             let found = find_bytes(mem, &needle, 400);
             let near: Vec<String> = found
@@ -849,7 +859,10 @@ pub fn memids(offsets_dir: &std::path::Path, ids: &[u32]) -> anyhow::Result<()> 
                         .map(|(d, dist)| format!("deck {d} {dist:+#x}"))
                 })
                 .collect();
-            println!("  {id} as {form}: {} hit(s); near a deck: {near:?}", found.len());
+            println!(
+                "  {id} as {form}: {} hit(s); near a deck: {near:?}",
+                found.len()
+            );
         }
     }
     Ok(())

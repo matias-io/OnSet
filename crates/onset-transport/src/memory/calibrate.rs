@@ -148,8 +148,8 @@ pub fn master_flags(decks: &[Vec<(Vec<u8>, Vec<u8>)>], labels: &[usize]) -> Vec<
         .flat_map(|(a, b)| [a.len(), b.len()])
         .min()
         .unwrap_or(0);
-    let every_deck_has_both = (0..decks.len())
-        .all(|d| labels.contains(&d) && labels.iter().any(|&l| l != d));
+    let every_deck_has_both =
+        (0..decks.len()).all(|d| labels.contains(&d) && labels.iter().any(|&l| l != d));
     if decks.len() < 2 || !every_deck_has_both {
         return Vec::new();
     }
@@ -162,7 +162,11 @@ pub fn master_flags(decks: &[Vec<(Vec<u8>, Vec<u8>)>], labels: &[usize]) -> Vec<
                 if a[i] != b[i] {
                     continue 'offset;
                 }
-                let slot = if labels.get(s) == Some(&d) { &mut on } else { &mut off };
+                let slot = if labels.get(s) == Some(&d) {
+                    &mut on
+                } else {
+                    &mut off
+                };
                 match slot {
                     Some(v) if *v != a[i] => continue 'offset,
                     Some(_) => {}

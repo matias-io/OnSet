@@ -108,12 +108,20 @@ impl LyricsLayer {
         let mut rows: Vec<Vec<usize>> = vec![Vec::new()];
         let mut row_w = 0.0;
         for (i, (w, _)) in sizes.iter().enumerate() {
-            let add = if rows.last().is_some_and(Vec::is_empty) { *w } else { space + w };
+            let add = if rows.last().is_some_and(Vec::is_empty) {
+                *w
+            } else {
+                space + w
+            };
             if row_w + add > max_w && !rows.last().is_some_and(Vec::is_empty) {
                 rows.push(Vec::new());
                 row_w = 0.0;
             }
-            let add = if rows.last().is_some_and(Vec::is_empty) { *w } else { space + w };
+            let add = if rows.last().is_some_and(Vec::is_empty) {
+                *w
+            } else {
+                space + w
+            };
             rows.last_mut().expect("a row").push(i);
             row_w += add;
         }
@@ -161,11 +169,12 @@ impl LyricsLayer {
 
         let (width, height) = (frame.size.0 as f32, frame.size.1 as f32);
         let px = LINE_PX * height / 1080.0 * opts.size.clamp(0.5, 2.5);
-        let centre_y = height * match opts.place {
-            LyricPlace::Top => 0.2,
-            LyricPlace::Centre => 0.5,
-            LyricPlace::Lower => 0.72,
-        };
+        let centre_y = height
+            * match opts.place {
+                LyricPlace::Top => 0.2,
+                LyricPlace::Centre => 0.5,
+                LyricPlace::Lower => 0.72,
+            };
         let accent = accent(frame.theme);
         // How much the lyrics move: the drop and, more gently, the build-up towards it.
         let amount = opts.drop_fx.clamp(0.0, 1.0) * frame.fx.drop_hit.max(frame.fx.build * 0.6);
@@ -216,7 +225,12 @@ impl LyricsLayer {
                 LyricStyle::Karaoke => ([1.0; 3], accent),
             };
             let mut col = mix(base, lit_col, sung);
-            let mut alpha = appear * if opts.style == LyricStyle::Karaoke { 0.6 + 0.4 * sung } else { 1.0 };
+            let mut alpha = appear
+                * if opts.style == LyricStyle::Karaoke {
+                    0.6 + 0.4 * sung
+                } else {
+                    1.0
+                };
             // Drop motion: a rainbow sweep across the words, a wave, a lift on the kick.
             let hue = (index as f32 * 0.09 + frame.time_s * 0.2).fract();
             col = mix(col, hsv(hue, 0.75, 1.0), amount * 0.8);
@@ -235,9 +249,13 @@ impl LyricsLayer {
             if opts.style == LyricStyle::Glow && sung > 0.0 {
                 for (dx, dy) in [(-1.0f32, 0.0f32), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
                     items.push(
-                        TextItem::new(word.text.as_str(), px, (wx + dx * px * 0.03, wy + dy * px * 0.03))
-                            .weight(700)
-                            .color(linear_to_srgb8(accent, 0.22 * alpha)),
+                        TextItem::new(
+                            word.text.as_str(),
+                            px,
+                            (wx + dx * px * 0.03, wy + dy * px * 0.03),
+                        )
+                        .weight(700)
+                        .color(linear_to_srgb8(accent, 0.22 * alpha)),
                     );
                 }
             }
@@ -269,7 +287,13 @@ impl LyricsLayer {
             let small = px * 0.55;
             let words: Vec<String> = next.words.iter().map(|w| w.text.clone()).collect();
             let rows = Self::layout(text, &words, small, width, 0.0);
-            let below = centre_y + px * 1.25 + if rows.iter().any(|p| p.y > rows[0].y) { small * 0.6 } else { 0.0 };
+            let below = centre_y
+                + px * 1.25
+                + if rows.iter().any(|p| p.y > rows[0].y) {
+                    small * 0.6
+                } else {
+                    0.0
+                };
             for word in Self::layout(text, &words, small, width, below) {
                 items.push(
                     TextItem::new(word.text, small, (word.x, word.y))

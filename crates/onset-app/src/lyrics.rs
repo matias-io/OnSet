@@ -43,7 +43,14 @@ impl LyricsWorker {
                         Outcome::Synced(l) => Some(Arc::new(l)),
                         _ => None,
                     };
-                    if ans_tx.send(Answer { track, lyrics, status }).is_err() {
+                    if ans_tx
+                        .send(Answer {
+                            track,
+                            lyrics,
+                            status,
+                        })
+                        .is_err()
+                    {
                         break;
                     }
                 }

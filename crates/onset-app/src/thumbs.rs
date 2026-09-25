@@ -5,17 +5,44 @@ use std::collections::HashMap;
 /// JPEG bytes by scene name.
 const THUMBS: &[(&str, &[u8])] = &[
     ("cover", include_bytes!("../../../assets/thumbs/cover.jpg")),
-    ("crystal", include_bytes!("../../../assets/thumbs/crystal.jpg")),
-    ("kaleido", include_bytes!("../../../assets/thumbs/kaleido.jpg")),
-    ("lasers", include_bytes!("../../../assets/thumbs/lasers.jpg")),
-    ("liquid", include_bytes!("../../../assets/thumbs/liquid.jpg")),
-    ("nebula", include_bytes!("../../../assets/thumbs/nebula.jpg")),
+    (
+        "crystal",
+        include_bytes!("../../../assets/thumbs/crystal.jpg"),
+    ),
+    (
+        "kaleido",
+        include_bytes!("../../../assets/thumbs/kaleido.jpg"),
+    ),
+    (
+        "lasers",
+        include_bytes!("../../../assets/thumbs/lasers.jpg"),
+    ),
+    (
+        "liquid",
+        include_bytes!("../../../assets/thumbs/liquid.jpg"),
+    ),
+    (
+        "nebula",
+        include_bytes!("../../../assets/thumbs/nebula.jpg"),
+    ),
     ("pulse", include_bytes!("../../../assets/thumbs/pulse.jpg")),
-    ("ribbons", include_bytes!("../../../assets/thumbs/ribbons.jpg")),
+    (
+        "ribbons",
+        include_bytes!("../../../assets/thumbs/ribbons.jpg"),
+    ),
     ("ring", include_bytes!("../../../assets/thumbs/ring.jpg")),
-    ("synthwave", include_bytes!("../../../assets/thumbs/synthwave.jpg")),
-    ("tunnel", include_bytes!("../../../assets/thumbs/tunnel.jpg")),
-    ("voronoi", include_bytes!("../../../assets/thumbs/voronoi.jpg")),
+    (
+        "synthwave",
+        include_bytes!("../../../assets/thumbs/synthwave.jpg"),
+    ),
+    (
+        "tunnel",
+        include_bytes!("../../../assets/thumbs/tunnel.jpg"),
+    ),
+    (
+        "voronoi",
+        include_bytes!("../../../assets/thumbs/voronoi.jpg"),
+    ),
     ("warp", include_bytes!("../../../assets/thumbs/warp.jpg")),
     ("zerog", include_bytes!("../../../assets/thumbs/zerog.jpg")),
 ];

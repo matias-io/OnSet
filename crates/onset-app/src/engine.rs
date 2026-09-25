@@ -274,7 +274,10 @@ fn load_current(
 
 /// Library tracks rekordbox streams (TIDAL, Beatport...) rather than reads from a file,
 /// with their 3-band waveforms, for [`crate::stream_match::StreamMatcher`].
-fn streaming_candidates(library: &Library, paths: &RekordboxPaths) -> Vec<crate::stream_match::Candidate> {
+fn streaming_candidates(
+    library: &Library,
+    paths: &RekordboxPaths,
+) -> Vec<crate::stream_match::Candidate> {
     library
         .tracks()
         .iter()
@@ -609,8 +612,15 @@ impl Running {
         if snapshot.track == TrackRef::Unknown {
             // A deck with no file (a streamed track): keep what is known about this deck,
             // but never show the previous deck's track over it.
-            if self.current.as_ref().is_some_and(|c| c.deck != Some(snapshot.deck)) {
-                tracing::info!(deck = snapshot.deck, "playing deck's track is not identified yet");
+            if self
+                .current
+                .as_ref()
+                .is_some_and(|c| c.deck != Some(snapshot.deck))
+            {
+                tracing::info!(
+                    deck = snapshot.deck,
+                    "playing deck's track is not identified yet"
+                );
                 self.current = None;
                 self.clock = Clock::new();
             }
@@ -632,7 +642,8 @@ impl Running {
                 s.set_track_sample_rate(meta.sample_rate);
                 s.set_track_bpm(meta.bpm);
             }
-            let mut current = load_current(&self.library, &self.paths, meta, snapshot.track.clone());
+            let mut current =
+                load_current(&self.library, &self.paths, meta, snapshot.track.clone());
             current.deck = Some(snapshot.deck);
             self.current = Some(current);
             self.clock = Clock::new();
@@ -656,10 +667,17 @@ impl Running {
         }
         if self.matcher.is_none() {
             let candidates = streaming_candidates(&self.library, &self.paths);
-            tracing::info!(tracks = candidates.len(), "streaming tracks that can be recognised by ear");
+            tracing::info!(
+                tracks = candidates.len(),
+                "streaming tracks that can be recognised by ear"
+            );
             self.matcher = Some(crate::stream_match::StreamMatcher::new(candidates));
         }
-        if !self.matcher.as_ref().is_some_and(crate::stream_match::StreamMatcher::has_candidates) {
+        if !self
+            .matcher
+            .as_ref()
+            .is_some_and(crate::stream_match::StreamMatcher::has_candidates)
+        {
             return;
         }
         let Some(playhead) = self.clock.playhead_at(now) else {
@@ -673,7 +691,11 @@ impl Running {
         matcher.listen(
             time_s,
             playhead,
-            [f32::midpoint(g[0], g[1]), f32::midpoint(g[2], g[3]), f32::midpoint(g[4], g[5])],
+            [
+                f32::midpoint(g[0], g[1]),
+                f32::midpoint(g[2], g[3]),
+                f32::midpoint(g[4], g[5]),
+            ],
         );
         if let Some(meta) = matcher.best().cloned() {
             tracing::info!(title = %meta.title, artist = %meta.artist, "streamed track recognised by ear");

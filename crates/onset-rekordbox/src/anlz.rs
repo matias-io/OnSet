@@ -158,7 +158,9 @@ pub fn parse_2ex(bytes: &[u8]) -> Option<TrackBands> {
             b"PVDI" => {
                 // Header: hop in samples (u32), sample rate (u16), unknown (u16), count (u32).
                 let hop = be_u32(head, 0).unwrap_or(0);
-                let sr = head.get(4..6).map_or(0, |r| u16::from_be_bytes([r[0], r[1]]));
+                let sr = head
+                    .get(4..6)
+                    .map_or(0, |r| u16::from_be_bytes([r[0], r[1]]));
                 let count = be_u32(head, 8).unwrap_or(0) as usize;
                 if hop > 0 && sr > 0 {
                     vocal_rate_hz = f32::from(sr) / hop as f32;

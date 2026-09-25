@@ -23,7 +23,9 @@ fn padded_bytes_per_row(width: u32) -> u32 {
 
 impl Headless {
     pub fn new(size: (u32, u32), prefer_software: bool) -> anyhow::Result<Self> {
-        let serial = GPU_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let serial = GPU_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let gpu = Gpu::new_headless(prefer_software)?;
         let mut h = Self::with_gpu(gpu, size);
         h.serial = Some(serial);

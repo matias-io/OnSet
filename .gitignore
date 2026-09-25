@@ -8,6 +8,13 @@ CLAUDE.md
 AGENTS.md
 docs/superpowers/
 docs/internal/
+docs/screenshots/
+docs/adr/
+docs/architecture.md
+.env
+.env.*
+!.env.example
+.codex/
 
 # Private fixtures copied from a real rekordbox install (personal library data)
 fixtures/private/

@@ -52,9 +52,9 @@ impl Gpu {
     /// Names of the graphics adapters that could run Onset (for the launcher's picker).
     pub fn adapter_names() -> Vec<String> {
         let instance = Self::instance();
-        let mut names: Vec<String> = pollster::block_on(instance.enumerate_adapters(
-            wgpu::Backends::DX12 | wgpu::Backends::VULKAN,
-        ))
+        let mut names: Vec<String> = pollster::block_on(
+            instance.enumerate_adapters(wgpu::Backends::DX12 | wgpu::Backends::VULKAN),
+        )
         .iter()
         .map(wgpu::Adapter::get_info)
         .filter(|i| i.device_type != wgpu::DeviceType::Cpu)

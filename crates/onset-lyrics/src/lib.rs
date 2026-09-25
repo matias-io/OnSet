@@ -55,7 +55,13 @@ impl Query {
         )
         .to_lowercase();
         raw.chars()
-            .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == ' ' || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect::<String>()
             .trim()
             .to_string()
@@ -137,7 +143,11 @@ pub fn clean_title(title: &str) -> String {
         .min()
         .unwrap_or(out.len());
     let t = out[..cut].trim().trim_end_matches(['-', ' ']).trim();
-    if t.is_empty() { title.trim().to_string() } else { t.to_string() }
+    if t.is_empty() {
+        title.trim().to_string()
+    } else {
+        t.to_string()
+    }
 }
 
 /// The first credited artist: "Disclosure, Sam Smith" or "Fred again.. & Swedish House
@@ -191,7 +201,11 @@ fn to_cached(r: &LrcRecord) -> Cached {
         ("instrumental", String::new())
     } else if let Some(s) = r.synced_lyrics.as_ref().filter(|s| !s.trim().is_empty()) {
         ("synced", s.clone())
-    } else if r.plain_lyrics.as_ref().is_some_and(|p| !p.trim().is_empty()) {
+    } else if r
+        .plain_lyrics
+        .as_ref()
+        .is_some_and(|p| !p.trim().is_empty())
+    {
         ("plain", String::new())
     } else {
         ("none", String::new())
@@ -208,7 +222,11 @@ fn outcome(c: &Cached) -> Outcome {
     match c.status.as_str() {
         "synced" => {
             let l = Lyrics::parse_lrc(&c.lrc, &c.source);
-            if l.lines.is_empty() { Outcome::Plain } else { Outcome::Synced(l) }
+            if l.lines.is_empty() {
+                Outcome::Plain
+            } else {
+                Outcome::Synced(l)
+            }
         }
         "plain" => Outcome::Plain,
         "instrumental" => Outcome::Instrumental,
@@ -279,7 +297,8 @@ impl LyricsStore {
     /// "not found" is retried after two weeks, in case someone has added the lyrics since.
     pub fn lookup(&self, q: &Query, online: bool) -> Outcome {
         if let Some(c) = self.read_cache(q) {
-            let stale = c.status == "none" && now_unix().saturating_sub(c.fetched_unix) > RETRY_NOT_FOUND_S;
+            let stale =
+                c.status == "none" && now_unix().saturating_sub(c.fetched_unix) > RETRY_NOT_FOUND_S;
             if !stale || !online {
                 return outcome(&c);
             }
@@ -388,9 +407,7 @@ impl LyricsStore {
                 .query("artist_name", artist)
                 .call()
         };
-        let results: Vec<LrcRecord> = with_retry("LRCLIB search", call)?
-            .body_mut()
-            .read_json()?;
+        let results: Vec<LrcRecord> = with_retry("LRCLIB search", call)?.body_mut().read_json()?;
         Ok(best_match(&results, duration_s).map(|r| {
             tracing::debug!(found = %r.track_name, by = %r.artist_name, "lyrics by search");
             to_cached(r)
@@ -460,7 +477,10 @@ mod tests {
     #[test]
     fn the_first_artist_is_used() {
         assert_eq!(main_artist("Disclosure, Sam Smith"), "Disclosure");
-        assert_eq!(main_artist("Fred again.. & Swedish House Mafia"), "Fred again..");
+        assert_eq!(
+            main_artist("Fred again.. & Swedish House Mafia"),
+            "Fred again.."
+        );
         assert_eq!(main_artist("FISHER x Kita Alexander"), "FISHER");
         assert_eq!(main_artist("Drake"), "Drake");
     }
@@ -481,7 +501,10 @@ mod tests {
         let r = [rec(200.0, false), rec(230.0, true), rec(205.0, true)];
         let best = best_match(&r, Some(201.0)).unwrap();
         assert_eq!(best.duration, Some(205.0));
-        assert!(best_match(&[rec(400.0, true)], Some(200.0)).is_none(), "a different version");
+        assert!(
+            best_match(&[rec(400.0, true)], Some(200.0)).is_none(),
+            "a different version"
+        );
     }
 
     #[test]
@@ -536,7 +559,10 @@ mod tests {
             isrc: None,
         };
         assert_eq!(known_without_lookup(&q("HORN", "", 4.0)), Some("none"));
-        assert_eq!(known_without_lookup(&q("Riser", "Someone", 12.0)), Some("none"));
+        assert_eq!(
+            known_without_lookup(&q("Riser", "Someone", 12.0)),
+            Some("none")
+        );
         assert_eq!(
             known_without_lookup(&q("Danielle (Instrumental)", "Fred again..", 200.0)),
             Some("instrumental")

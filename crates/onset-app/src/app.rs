@@ -250,13 +250,16 @@ fn fit_launcher(screen: (f64, f64)) -> (f64, f64) {
     )
 }
 
-
 /// Size and centred position of the launcher on monitor `m`.
-fn launcher_placement(monitor: &MonitorHandle) -> (LogicalSize<f64>, winit::dpi::PhysicalPosition<i32>) {
+fn launcher_placement(
+    monitor: &MonitorHandle,
+) -> (LogicalSize<f64>, winit::dpi::PhysicalPosition<i32>) {
     let scale = monitor.scale_factor();
     let phys = monitor.size();
-    let (width, height) =
-        fit_launcher((f64::from(phys.width) / scale, f64::from(phys.height) / scale));
+    let (width, height) = fit_launcher((
+        f64::from(phys.width) / scale,
+        f64::from(phys.height) / scale,
+    ));
     let origin = monitor.position();
     // Centred horizontally; a little above centre, so the title bar clears the top.
     let left = origin.x + ((f64::from(phys.width) - width * scale) / 2.0) as i32;
@@ -455,7 +458,8 @@ impl OnsetApp {
         let launcher = self.mode == Mode::Launcher;
         let instance = Gpu::new_instance();
         let surface = instance.create_surface(window.clone())?;
-        let gpu = Gpu::new_for_surface_preferring(instance, &surface, self.opts.config.gpu.as_deref())?;
+        let gpu =
+            Gpu::new_for_surface_preferring(instance, &surface, self.opts.config.gpu.as_deref())?;
         let caps = surface.get_capabilities(&gpu.adapter);
         let format = caps
             .formats
@@ -596,8 +600,11 @@ impl OnsetApp {
             .engine
             .as_ref()
             .map_or_else(|| Arc::new(MusicState::default()), Engine::state);
-        self.lyrics
-            .tend(&mut s.renderer, ms.track.as_ref(), self.opts.config.lyrics.online);
+        self.lyrics.tend(
+            &mut s.renderer,
+            ms.track.as_ref(),
+            self.opts.config.lyrics.online,
+        );
         let mut enc = s
             .gpu
             .device
@@ -748,8 +755,10 @@ impl OnsetApp {
                 if let Some(s) = self.surface.as_mut() {
                     s.renderer.set_settings(&s.gpu, settings);
                     s.renderer.set_overlay_options(hud, card);
-                    s.renderer.set_lyrics_options(self.opts.config.lyrics.clone());
-                    s.renderer.set_blackout_logo_size(self.opts.config.blackout_logo_size);
+                    s.renderer
+                        .set_lyrics_options(self.opts.config.lyrics.clone());
+                    s.renderer
+                        .set_blackout_logo_size(self.opts.config.blackout_logo_size);
                 }
             }
             OverlayAction::Preview(event) => {
@@ -1134,7 +1143,10 @@ mod placement_tests {
     fn the_launcher_fits_a_small_screen_and_keeps_its_size_on_a_big_one() {
         // A 2400x1600 laptop at 150 % is 1600x1067 logical: too short for 820 + chrome.
         let (w, h) = fit_launcher((1600.0, 1066.7));
-        assert!((w - LAUNCHER_SIZE.0).abs() < 1e-6 && h < 1066.7 * 0.87 && h > 800.0, "{w} {h}");
+        assert!(
+            (w - LAUNCHER_SIZE.0).abs() < 1e-6 && h < 1066.7 * 0.87 && h > 800.0,
+            "{w} {h}"
+        );
         assert_eq!(fit_launcher((3840.0, 2160.0)), LAUNCHER_SIZE);
         let (w, _) = fit_launcher((1280.0, 800.0));
         assert!(w < 1280.0);

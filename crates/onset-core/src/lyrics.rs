@@ -131,15 +131,19 @@ impl Lyrics {
 
     /// When line `i` ends: the next line's start, or a few seconds after the last.
     pub fn line_end(&self, i: usize) -> f32 {
-        self.lines
-            .get(i + 1)
-            .map_or_else(|| self.lines.get(i).map_or(0.0, |l| l.time_s + LAST_LINE_S), |n| n.time_s)
+        self.lines.get(i + 1).map_or_else(
+            || self.lines.get(i).map_or(0.0, |l| l.time_s + LAST_LINE_S),
+            |n| n.time_s,
+        )
     }
 
     /// The line and word being sung at `t_s`, or `None` before the first line and after the
     /// last one has been held.
     pub fn at(&self, t_s: f32) -> Option<LyricAt> {
-        let i = self.lines.partition_point(|l| l.time_s <= t_s).checked_sub(1)?;
+        let i = self
+            .lines
+            .partition_point(|l| l.time_s <= t_s)
+            .checked_sub(1)?;
         let line = &self.lines[i];
         let end = self.line_end(i);
         if t_s >= end {
@@ -151,7 +155,10 @@ impl Lyrics {
             .partition_point(|w| w.time_s <= t_s)
             .saturating_sub(1);
         let w_start = line.words.get(w).map_or(line.time_s, |x| x.time_s);
-        let w_end = line.words.get(w + 1).map_or(end.min(w_start + MAX_WORD_S), |x| x.time_s);
+        let w_end = line
+            .words
+            .get(w + 1)
+            .map_or(end.min(w_start + MAX_WORD_S), |x| x.time_s);
         Some(LyricAt {
             line: i,
             line_progress: ((t_s - line.time_s) / span).clamp(0.0, 1.0),
@@ -212,9 +219,15 @@ mod tests {
         let a = l.at(17.5).unwrap();
         assert_eq!(a.line, 0);
         assert!(a.line_progress > 0.2 && a.line_progress < 0.4, "{a:?}");
-        assert!(a.word >= 1, "a second into the line we are past the first word: {a:?}");
+        assert!(
+            a.word >= 1,
+            "a second into the line we are past the first word: {a:?}"
+        );
         assert_eq!(l.at(20.5).unwrap().line, 1);
-        assert!(l.at(24.36 + 6.0).is_none(), "the last line is held, then cleared");
+        assert!(
+            l.at(24.36 + 6.0).is_none(),
+            "the last line is held, then cleared"
+        );
     }
 
     #[test]
@@ -224,7 +237,10 @@ mod tests {
         assert_eq!(w.len(), 3);
         assert!((w[0].time_s - 10.0).abs() < 1e-3);
         assert!(w[1].time_s > w[0].time_s && w[2].time_s > w[1].time_s);
-        assert!(w[2].time_s < 12.0, "three words are sung in under two seconds: {w:?}");
+        assert!(
+            w[2].time_s < 12.0,
+            "three words are sung in under two seconds: {w:?}"
+        );
     }
 
     #[test]
