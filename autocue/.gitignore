@@ -1,0 +1,31 @@
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local credentials
+.env
+.env.*
+!.env.example
+
+# Audio copies and generated images
+proxies/
+spectrograms/
+spectrograms_extra/
+
+# Runtime output and local databases
+*.log
+*.err
+*.pid
+*.db
+*.db-*
+*.bak
+_trash
+
+# Editor and operating system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
