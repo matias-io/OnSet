@@ -40,6 +40,11 @@
       setLiveOnTop: (onTop) => invoke('set_live_on_top', { onTop }),
       providers: () => invoke('providers_status', {}),
       testProvider: (provider) => invoke('providers_test', { provider }),
+      lookUpDetails: (providers, trackIds, web) =>
+        invoke('ai_details', { providers, trackIds, web }),
+      compareSets: (providers, brief, plans) => invoke('ai_compare_sets', { providers, brief, plans }),
+      readStructure: (providers, trackId, audio) =>
+        invoke('ai_read_structure', { providers, trackId, audio }),
     }),
   });
 })();

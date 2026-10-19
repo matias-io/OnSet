@@ -7,6 +7,7 @@
 //! only for files the service names, and nothing here writes to rekordbox by itself.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ai;
 mod chatgpt;
 mod live;
 mod providers;
@@ -470,6 +471,226 @@ async fn providers_status(state: State<'_, AppState>) -> Result<Value, String> {
     }))
 }
 
+/// One line per provider for the screens: how it went, never tokens or raw output.
+fn provider_report(
+    provider: providers::Provider,
+    outcome: &Result<providers::Answer, String>,
+) -> Value {
+    match outcome {
+        Ok(a) => json!({"provider": provider.name(), "ok": true, "seconds": a.seconds,
+                        "consulted": a.consulted.len()}),
+        Err(e) => {
+            tracing::warn!(provider = provider.name(), "AI request failed: {e}");
+            json!({"provider": provider.name(), "ok": false, "error": e})
+        }
+    }
+}
+
+/// Genre, mood, instrumentation, release and description for the chosen tracks from each
+/// chosen provider, imported as cited claims labelled with their provider.
+#[tauri::command]
+async fn ai_details(
+    state: State<'_, AppState>,
+    providers: Vec<providers::Provider>,
+    track_ids: Vec<String>,
+    web: bool,
+) -> Result<Value, String> {
+    if providers.is_empty() || track_ids.is_empty() {
+        return Err("Choose at least one AI provider and one track".into());
+    }
+    let context = state
+        .service
+        .call("ai-context", json!({"track_ids": track_ids}))
+        .await?;
+    let chat = state.chatgpt.clone();
+    let ctx = context.clone();
+    let results = blocking(move || {
+        Ok(ai::ask_all(
+            &providers,
+            &|_| ai::details_ask(&ctx, web),
+            &chat,
+        ))
+    })
+    .await?;
+    let report: Vec<Value> = results
+        .iter()
+        .map(|(p, r)| provider_report(*p, r))
+        .collect();
+    let answers: Vec<providers::Answer> = results.into_iter().filter_map(|(_, r)| r.ok()).collect();
+    if answers.is_empty() {
+        return Ok(json!({"providers": report, "imported": Value::Null}));
+    }
+    let mut merged = ai::merge_details(&answers, web);
+    merged["allowed_ids"] = json!(track_ids);
+    let imported = state.service.call("enrichment-import", merged).await?;
+    Ok(json!({"providers": report, "imported": imported}))
+}
+
+/// The planner's best set beside each AI's own pick and its critique of the planner's.
+/// Every AI set is checked by the service's validator; valid ones are saved as sets.
+#[tauri::command]
+async fn ai_compare_sets(
+    state: State<'_, AppState>,
+    providers: Vec<providers::Provider>,
+    brief: Value,
+    plans: Vec<Value>,
+) -> Result<Value, String> {
+    let planner = plans
+        .first()
+        .cloned()
+        .ok_or("Find sets with the planner first")?;
+    if providers.is_empty() {
+        return Err("Choose at least one AI provider".into());
+    }
+    let ids = ai::shortlist(&plans, &brief, 40);
+    let mut short_brief = brief.clone();
+    short_brief["track_ids"] = json!(ids);
+    let context = state
+        .service
+        .call(
+            "ai-context",
+            json!({"track_ids": ids, "brief": short_brief}),
+        )
+        .await?;
+    let planner_choice = json!({
+        "track_ids": planner["track_ids"], "transition_ids": planner["transition_ids"],
+        "duration_seconds": planner["duration_seconds"], "explanation": planner["explanation"],
+    });
+    let chat = state.chatgpt.clone();
+    let ctx = context.clone();
+    let results = blocking(move || {
+        Ok(ai::ask_all(
+            &providers,
+            &|_| ai::set_ask(&ctx, &planner_choice),
+            &chat,
+        ))
+    })
+    .await?;
+    let revisions: serde_json::Map<String, Value> = context["tracks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|t| Some((t["id"].as_str()?.to_owned(), t["revision"].clone())))
+        .collect();
+    let planner_ids: Vec<String> = planner["track_ids"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_owned))
+        .collect();
+    let mut picks = Vec::new();
+    for (provider, outcome) in results {
+        let mut row = provider_report(provider, &outcome);
+        if let Ok(answer) = outcome {
+            let ai_ids: Vec<String> = answer.value["track_ids"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect();
+            let plan = json!({
+                "schema_version": 1, "track_ids": answer.value["track_ids"],
+                "transition_ids": answer.value["transition_ids"], "brief": short_brief,
+                "explanation": answer.value["explanation"], "revisions": revisions,
+            });
+            row["explanation"] = answer.value["explanation"].clone();
+            row["critique"] = answer.value["critique"].clone();
+            row["prefers"] = answer.value["prefers"].clone();
+            row["track_ids"] = json!(ai_ids);
+            row["agreement"] = ai::agreement(&planner_ids, &ai_ids);
+            match state
+                .service
+                .call("import-plan", json!({"plan": plan}))
+                .await
+            {
+                Ok(saved) => {
+                    row["valid"] = true.into();
+                    row["set"] = saved;
+                }
+                Err(reason) => {
+                    tracing::warn!(provider = provider.name(), "AI set rejected: {reason}");
+                    row["valid"] = false.into();
+                    row["reason"] = reason.into();
+                }
+            }
+        }
+        picks.push(row);
+    }
+    Ok(json!({"planner": planner, "shortlist": ids, "ai": picks}))
+}
+
+/// Where the first full groove, breakdown, later drop and outro are, read by each chosen
+/// provider from the bar-gridded spectrogram, or with `audio` by Gemini from the audio file.
+/// Sending audio is a deliberate choice made for this one track.
+#[tauri::command]
+async fn ai_read_structure(
+    state: State<'_, AppState>,
+    providers: Vec<providers::Provider>,
+    track_id: String,
+    audio: bool,
+) -> Result<Value, String> {
+    if providers.is_empty() {
+        return Err("Choose at least one AI provider".into());
+    }
+    if audio && providers.iter().any(|p| *p != providers::Provider::Gemini) {
+        return Err("Only Gemini listens to audio; choose Gemini alone for an audio read".into());
+    }
+    if providers.contains(&providers::Provider::ChatGpt) {
+        return Err("ChatGPT can't read images here; choose Claude, Codex or Gemini".into());
+    }
+    let image = state
+        .service
+        .call("spectrogram-image", json!({"id": track_id}))
+        .await?;
+    let attachment = if audio {
+        let track = state.service.call("track", json!({"id": track_id})).await?;
+        PathBuf::from(
+            track["path"]
+                .as_str()
+                .ok_or("This track has no audio file")?,
+        )
+    } else {
+        PathBuf::from(image["path"].as_str().ok_or("No spectrogram image")?)
+    };
+    if !attachment.exists() {
+        return Err("The audio file is missing; locate it first".into());
+    }
+    let chat = state.chatgpt.clone();
+    let img = image.clone();
+    let results = blocking(move || {
+        Ok(ai::ask_all(
+            &providers,
+            &|_| ai::structure_ask(&img, attachment.clone(), audio),
+            &chat,
+        ))
+    })
+    .await?;
+    let mut reads = Vec::new();
+    for (provider, outcome) in results {
+        let mut row = provider_report(provider, &outcome);
+        if let Ok(answer) = outcome {
+            match state
+                .service
+                .call(
+                    "observations-import",
+                    ai::structure_import(&answer, &image, audio),
+                )
+                .await
+            {
+                Ok(stored) => row["observations"] = stored["observations"].clone(),
+                Err(reason) => {
+                    row["ok"] = false.into();
+                    row["error"] = reason.into();
+                }
+            }
+        }
+        reads.push(row);
+    }
+    Ok(
+        json!({"track_id": track_id, "medium": if audio { "audio" } else { "spectrogram" }, "reads": reads}),
+    )
+}
+
 /// Checks that one CLI answers: a tiny request with no web access. A failure usually means
 /// the tool is not signed in.
 #[tauri::command]
@@ -701,6 +922,9 @@ fn main() {
             open_live_window,
             providers_status,
             providers_test,
+            ai_details,
+            ai_compare_sets,
+            ai_read_structure,
             set_live_on_top,
         ])
         .setup(move |app| {
