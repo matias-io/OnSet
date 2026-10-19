@@ -158,7 +158,7 @@ Installer: `release-0.2.0-audit-gaps/Autocue Setup 0.2.0.exe`, 212,965,009 bytes
 3. **Seeking (outside these changes).** Clicking the waveform on Fragments and on Stop It left the playhead at 0:00.0, so "Use playhead" was only exercised at bar 0. Not investigated; seeking was never covered by earlier acceptance either.
 4. **Cosmetic.** While a set search runs, the sidebar reads "Analysing · 0%" and the job's progress stays at 0% until it completes.
 
-**Follow-up (source only, not packaged or rechecked in the installed app).** Findings 1, 2 and 4 are fixed in source:
+**Follow-up.** Findings 1, 2 and 4 are fixed in source; all four fixes were later rechecked in the running OnSet app (see "Four acceptance fixes rechecked in OnSet" below):
 
 - Replan now recalculates kept transitions that do not match the current key shifts or timing, keeping the same technique where possible, and says so in the plan explanation.
 - The set search checks for cancellation for every candidate pair, not only between depths.
@@ -167,3 +167,20 @@ Installer: `release-0.2.0-audit-gaps/Autocue Setup 0.2.0.exe`, 212,965,009 bytes
 Regressions: `test_replan_recalculates_kept_transitions_after_a_key_shift` and `test_set_search_reports_progress_and_cancels_within_the_first_pass`. 120 Python tests, 33 desktop tests and the build pass. Finding 3 (waveform seeking) is fixed in source too. The `onset-media` handler forwarded requests with `net.fetch(file://)`, which did not answer range requests with 206 Partial Content, so Chromium treated audio as unseekable and reset the playhead. `desktop/media.ts` now serves byte ranges itself (`desktop/media.test.ts` covers 200, 206 and 416 responses). A development Electron build was run with Computer Use on an isolated workspace with one generated track. Clicking the waveform held the playhead at 0:44.5, and playback continued to 0:47.7. Not yet checked in a rebuilt installer.
 
 **Side effects:** two Set search jobs (one complete, one cancelled) and their set and transition artifacts were saved to the workspace. The brief's length and tolerance were set to 12 and 8 minutes for one search, then restored to 60 and 2. Stop It's key shift was set and reset. No cues were approved, nothing was written to rekordbox, no audio was uploaded, and the three paused deep-analysis jobs were not touched.
+
+## Four acceptance fixes rechecked in OnSet (2026-10-19, 15:55–15:57)
+
+These checks ran against the running OnSet desktop app: `C:\Users\water\Music\OnSet-app\bin\OnSet.exe`, PID 41532, release `onset-desktop` built from OnSet `merge-autocue` at bf4f886. It uses the real 160-track workspace. The app was not relaunched or rebuilt. Before testing, I confirmed the four fixes are present in `OnSet-app/autocue`: `refresh_prefix`, per-candidate cancellation, the `Set search` sidebar label, and range-aware `desktop/media.ts`.
+
+| Finding | Result in OnSet |
+|---|---|
+| Waveform seek | **Fixed.** On Fragments, a waveform click moved the playhead to 1:44.3 and it stayed there. Benchmark "Use playhead" then offered bar 38, which is correct: 88 BPM puts 1:44.3 about 38 bars in. |
+| Key shift then replan | **Fixed.** On Option 1 (Stop It → STAY → La Danza → World Hold On), STAY was set to +1 st. "Keep tracks 1–2 and replan the rest" returned validated options saying "Keeps the first 2 tracks and replans the rest. Recalculated 1 kept transition(s) for the current key shifts." With the 60-minute brief, the same replan was refused only for duration (candidates total about 17 minutes), not for the key shift. |
+| Cancel latency | **Fixed.** A Set search over all 160 tracks was cancelled within 2 s and recorded as Cancelled at 8%. It previously took about 20–25 s. |
+| Sidebar label / progress | **Fixed.** The sidebar showed "Set search · 4%", then 7%, instead of "Analysing · 0%". |
+
+**Also observed:** the planner's ChatGPT adviser shows "Continue with ChatGPT" in OnSet. The account signed in under the Electron app is not available there. This was not investigated.
+
+**Side effects:** one cancelled Set search job and the replanned set and transition artifacts were saved. For the replan, the brief's length and tolerance were set to 12 and 8 minutes, then restored to 60 and 2. STAY's key shift was set to +1 st and reset to ±0. No cues were approved, nothing was written to rekordbox, no audio was uploaded, and the three paused deep-analysis jobs were not touched.
+
+During the seek check, the user's administrator Windows Terminal briefly came to the front, and one left click may have landed on it. No keys were sent. The user then closed that terminal.
