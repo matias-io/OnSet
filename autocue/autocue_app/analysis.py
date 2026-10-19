@@ -12,13 +12,16 @@ from .structure import infer, scale
 from .metrics import measure_resources
 
 ALGORITHM = "native-analysis-3"
-RESOLUTION_VERSION = "structure-resolution-2"
+RESOLUTION_VERSION = "structure-resolution-3"
 
 
 def cached_outputs_exist(result):
-    paths=[result.get("features",{}).get("path")]
-    paths.extend(result.get("deep",{}).get("stems",{}).values())
-    for model in result.get("deep",{}).get("models",{}).values():
+    return bool(result.get("features",{}).get("path")) and Path(result["features"]["path"]).is_file() and deep_outputs_exist(result.get("deep",{}))
+
+
+def deep_outputs_exist(deep):
+    paths=list(deep.get("stems",{}).values())
+    for model in deep.get("models",{}).values():
         data=model.get("data",{})
         if isinstance(data,dict):
             if isinstance(data.get("embeddings"),str):paths.append(data["embeddings"])
@@ -174,8 +177,29 @@ def analyse(profile, home, deep=False, checkpoint=lambda *a: None, experimental=
     deep_results = {}
     if deep:
         checkpoint("stems/models", .5)
-        from .deep import run_deep
-        deep_results = run_deep(model_pcm, home, checkpoint, experimental, settings.get("model_dir"))
+        # Completed deep outputs are reused when only the resolution stage changes,
+        # so a structure/version update does not rerun hours of model inference.
+        deep_cache = cache / "deep-results.json"
+        if deep_cache.exists():
+            try:
+                saved_deep = json.loads(deep_cache.read_text(encoding="utf-8"))
+                if saved_deep.get("pcm_sha256") == file_hash(model_pcm) and deep_outputs_exist(saved_deep["result"]):
+                    deep_results = saved_deep["result"]
+            except (OSError, ValueError, KeyError):
+                deep_results = {}
+        elif cached.exists():
+            # Results written before deep-results.json existed still carry complete model outputs.
+            try:
+                older = json.loads(cached.read_text(encoding="utf-8")).get("deep") or {}
+                if older.get("models") and all(v.get("state") == "complete" for v in older["models"].values()) and deep_outputs_exist(older):
+                    deep_results = older
+            except (OSError, ValueError):
+                deep_results = {}
+        if not deep_results:
+            from .deep import run_deep
+            deep_results = run_deep(model_pcm, home, checkpoint, experimental, settings.get("model_dir"))
+            if deep_results.get("models") and all(v.get("state") == "complete" for v in deep_results["models"].values()):
+                atomic_json(deep_cache, {"schema_version": 1, "pcm_sha256": file_hash(model_pcm), "result": deep_results})
         stem_paths = deep_results.get("stems", {})
         if "vocals" in stem_paths:
             vocals, vsr = sf.read(stem_paths["vocals"], always_2d=True)
@@ -190,7 +214,7 @@ def analyse(profile, home, deep=False, checkpoint=lambda *a: None, experimental=
     harmonic_density=np.asarray(f["harmonic"])/np.maximum(np.asarray(f["harmonic"])+np.asarray(f["percussive"]),1e-8)
     bass_activity=scale(f["low"])
     density=.5*scale(f["onset"])+.5*scale(f["flux"])
-    for window in structure["windows"]+structure.get("loop_candidates",[]):
+    for window in structure["windows"]+structure.get("loop_candidates",[])+structure.get("mix_windows",[]):
         start_bar,end_bar=window["start_bar"],window["end_bar"]
         window.update(tonal_density=float(np.mean(harmonic_density[start_bar:end_bar])),
                       bass_activity=float(np.mean(bass_activity[start_bar:end_bar])),
@@ -258,6 +282,7 @@ def analyse(profile, home, deep=False, checkpoint=lambda *a: None, experimental=
               "grid_observation": grid_observation, "structure": structure, "events": events,
               "sections": {k: baseline[k] for k in event_names}, "flags": baseline["flags"],
               "energy": combined.tolist(), "energy_hi": f["high"], "energy_profile": energy,
+              "vocal_activity": f.get("vocal"),
               "key": key, "key_observations": key_observations, "local_keys": local, "deep": deep_results,
               "features": {"path": str(feature_path), "version": ALGORITHM}, "waveform": waveform,
               "spectrogram": spectrogram,
