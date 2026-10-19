@@ -188,7 +188,9 @@ pub fn gemini(stdout: &str) -> Result<Parsed, String> {
             let r = &e["result"];
             if r.get("status").and_then(Value::as_str) != Some("SUCCESS") {
                 let why = r
-                    .get("status")
+                    .get("error")
+                    .or_else(|| r.get("error_message"))
+                    .or_else(|| r.get("status"))
                     .and_then(Value::as_str)
                     .unwrap_or("did not complete");
                 return Err(format!("Gemini: {why}"));

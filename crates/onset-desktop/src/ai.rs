@@ -72,6 +72,13 @@ pub fn ask_all(
 pub fn details_ask(context: &Value, web: bool) -> Ask {
     let mut evidence = context.clone();
     evidence["task"] = "enrichment".into();
+    // Each provider looks things up for itself: earlier providers' claims are not shown,
+    // or they would be repeated rather than checked.
+    for track in evidence["tracks"].as_array_mut().into_iter().flatten() {
+        if let Some(t) = track.as_object_mut() {
+            t.remove("evidence");
+        }
+    }
     Ask {
         instructions: format!(
             "{}\nThis request: enrichment for every supplied track.",
@@ -89,8 +96,35 @@ pub fn details_ask(context: &Value, web: bool) -> Ask {
 /// One enrichment record per track from all providers' answers. Every claim keeps which
 /// provider made it and passes the same citation check: a web claim whose page that provider
 /// did not consult becomes an unverified model interpretation.
-pub fn merge_details(answers: &[Answer], web: bool) -> Value {
+/// `existing` holds each track's saved record: claims from providers that did not answer
+/// this time are kept, so a new lookup only replaces what its own providers said before.
+pub fn merge_details(answers: &[Answer], web: bool, existing: &BTreeMap<String, Value>) -> Value {
+    let answered: BTreeSet<&str> = answers.iter().map(|a| a.provider.name()).collect();
     let mut by_track: BTreeMap<String, Value> = BTreeMap::new();
+    for (id, record) in existing {
+        let kept: Vec<Value> = record["claims"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|c| c["provider"].as_str().is_none_or(|p| !answered.contains(p)))
+            .cloned()
+            .collect();
+        let earlier: Vec<Value> = record["research"]["providers"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|p| {
+                p["provider"]
+                    .as_str()
+                    .is_some_and(|p| !answered.contains(p))
+            })
+            .cloned()
+            .collect();
+        if !kept.is_empty() {
+            by_track.insert(id.clone(), json!({"track_id": id, "claims": kept, "research": {
+                "requested": web, "completed": true, "providers": earlier, "consulted_sources": []}}));
+        }
+    }
     for a in answers {
         let mut value = a.value.clone();
         chatgpt::citations::retain_enrichment_evidence(
@@ -320,7 +354,7 @@ mod tests {
                  "url": "https://invented.example", "confidence": "high"}]}]}),
             &["https://example.com/b"],
         );
-        let merged = merge_details(&[claude, codex], true);
+        let merged = merge_details(&[claude, codex], true, &BTreeMap::new());
         let records = merged["records"].as_array().unwrap();
         assert_eq!(records.len(), 1);
         let claims = records[0]["claims"].as_array().unwrap();
@@ -333,6 +367,50 @@ mod tests {
             records[0]["research"]["consulted_sources"],
             json!(["https://example.com/a", "https://example.com/b"])
         );
+    }
+
+    #[test]
+    fn a_new_lookup_keeps_other_providers_claims_and_replaces_its_own() {
+        let existing: BTreeMap<String, Value> = [(
+            "t1".to_owned(),
+            json!({"track_id": "t1", "claims": [
+                {"kind": "genre", "value": "Old Claude", "provider": "Claude"},
+                {"kind": "genre", "value": "Kept Codex", "provider": "Codex"},
+                {"kind": "genre", "value": "Unlabelled older claim"}],
+              "research": {"providers": [{"provider": "Codex", "consulted_sources": ["https://x.example"]}]}}),
+        )]
+        .into();
+        let claude = answer(
+            Provider::Claude,
+            json!({"schema_version": 1, "records": [{"track_id": "t1", "claims": [
+                {"kind": "genre", "value": "New Claude", "source_type": "model", "url": null, "confidence": "low"}]}]}),
+            &[],
+        );
+        let merged = merge_details(&[claude], false, &existing);
+        let values: Vec<&str> = merged["records"][0]["claims"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["value"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            values,
+            ["Kept Codex", "Unlabelled older claim", "New Claude"]
+        );
+        assert_eq!(
+            merged["records"][0]["research"]["consulted_sources"],
+            json!(["https://x.example"])
+        );
+    }
+
+    #[test]
+    fn details_requests_do_not_show_earlier_claims() {
+        let ask = details_ask(
+            &json!({"tracks": [{"id": "t1", "evidence": {"claims": [1]}}]}),
+            false,
+        );
+        assert!(ask.evidence["tracks"][0].get("evidence").is_none());
+        assert_eq!(ask.evidence["task"], "enrichment");
     }
 
     #[test]

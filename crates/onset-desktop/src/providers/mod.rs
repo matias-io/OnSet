@@ -199,6 +199,27 @@ fn codex_args(
     Ok(())
 }
 
+/// Gemini accepts only string enums; others are dropped. The service still checks every
+/// value it imports, so nothing becomes less strict.
+fn gemini_schema(schema: &Value) -> Value {
+    match schema {
+        Value::Object(map) => {
+            let string_enum = map
+                .get("enum")
+                .and_then(Value::as_array)
+                .is_some_and(|values| values.iter().all(Value::is_string));
+            Value::Object(
+                map.iter()
+                    .filter(|(k, _)| *k != "enum" || string_enum)
+                    .map(|(k, v)| (k.clone(), gemini_schema(v)))
+                    .collect(),
+            )
+        }
+        Value::Array(items) => Value::Array(items.iter().map(gemini_schema).collect()),
+        other => other.clone(),
+    }
+}
+
 /// Gemini through `agy`: sandboxed; the prompt is an argument, or a file when too long.
 /// `agy` cannot block its web search tool, so pages it reads are ignored unless asked for.
 fn gemini_args(
@@ -209,6 +230,8 @@ fn gemini_args(
     schema: &str,
 ) -> Result<(), String> {
     let schema_file = ws.0.join("schema.json");
+    let schema = serde_json::from_str::<Value>(schema)
+        .map_or_else(|_| schema.to_owned(), |v| gemini_schema(&v).to_string());
     std::fs::write(&schema_file, schema).map_err(|e| e.to_string())?;
     let arg = if text.len() > ARG_LIMIT {
         std::fs::write(ws.0.join("request.md"), &text).map_err(|e| e.to_string())?;
@@ -299,6 +322,19 @@ mod tests {
         assert!(p.contains("Do not search the web."));
         assert!(!prompt(&ask(true), &[]).contains("Do not search"));
         assert!(prompt(&ask(true), &["image-1.png".into()]).contains("image-1.png"));
+    }
+
+    #[test]
+    fn gemini_schemas_drop_only_non_string_enums() {
+        let schema = json!({"type": "object", "properties": {
+            "schema_version": {"type": "integer", "enum": [1]},
+            "kind": {"type": "string", "enum": ["genre", "mood"]},
+            "items": {"type": "array", "items": {"type": "integer", "enum": [1, 2]}}}});
+        let g = gemini_schema(&schema);
+        assert!(g["properties"]["schema_version"].get("enum").is_none());
+        assert_eq!(g["properties"]["kind"]["enum"], json!(["genre", "mood"]));
+        assert!(g["properties"]["items"]["items"].get("enum").is_none());
+        assert_eq!(g["properties"]["schema_version"]["type"], "integer");
     }
 
     #[test]

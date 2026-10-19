@@ -520,7 +520,15 @@ async fn ai_details(
     if answers.is_empty() {
         return Ok(json!({"providers": report, "imported": Value::Null}));
     }
-    let mut merged = ai::merge_details(&answers, web);
+    // Claims other providers made earlier stay; only these providers' are replaced.
+    let mut existing = std::collections::BTreeMap::new();
+    for id in &track_ids {
+        let ev = state.service.call("evidence", json!({"id": id})).await?;
+        if ev["enrichment"].is_object() {
+            existing.insert(id.clone(), ev["enrichment"].clone());
+        }
+    }
+    let mut merged = ai::merge_details(&answers, web, &existing);
     merged["allowed_ids"] = json!(track_ids);
     let imported = state.service.call("enrichment-import", merged).await?;
     Ok(json!({"providers": report, "imported": imported}))
