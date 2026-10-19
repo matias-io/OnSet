@@ -4,7 +4,8 @@ The geometry matches assets/brand/onset-mark.svg (a 64-unit grid). It is drawn h
 signed distances and 4x4 supersampling, so no SVG renderer is needed.
 
 Usage: python scripts/render-brand-icons.py   (needs numpy)
-Writes crates/onset-desktop/icons/icon.png (256 px) and icon.ico (16 to 256 px).
+Writes crates/onset-desktop/icons/icon.png (256 px) and icon.ico (16 to 256 px), and
+assets/brand/onset-icon-64.png for the visuals app's window icon.
 """
 import struct
 import zlib
@@ -92,7 +93,10 @@ def main():
         entries += struct.pack("<BBBBHHII", s % 256, s % 256, 0, 0, 1, 32, len(data), offset)
         offset += len(data)
     (out / "icon.ico").write_bytes(header + entries + b"".join(images))
-    print("wrote", out / "icon.png", "and", out / "icon.ico")
+    # The visuals app's window and taskbar icon, decoded at start-up.
+    window_icon = ROOT / "assets" / "brand" / "onset-icon-64.png"
+    window_icon.write_bytes(images[sizes.index(64)])
+    print("wrote", out / "icon.png", out / "icon.ico", "and", window_icon)
 
 
 if __name__ == "__main__":

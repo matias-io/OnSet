@@ -41,6 +41,18 @@ const MARK_LINE: [(f32, f32); 10] = [
     (54.0, 36.0),
 ];
 
+/// The mark as the window and taskbar icon; `None` if it cannot be decoded.
+pub fn window_icon() -> Option<winit::window::Icon> {
+    let image = image::load_from_memory(include_bytes!("../../../assets/brand/onset-icon-64.png"))
+        .map_err(|e| tracing::warn!("window icon unavailable: {e}"))
+        .ok()?
+        .into_rgba8();
+    let (w, h) = image.dimensions();
+    winit::window::Icon::from_rgba(image.into_raw(), w, h)
+        .map_err(|e| tracing::warn!("window icon unavailable: {e}"))
+        .ok()
+}
+
 /// Inter for every panel, and dark visuals built from the brand tokens.
 pub fn apply(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
@@ -120,6 +132,11 @@ pub fn paint_mark(painter: &egui::Painter, rect: egui::Rect, pulse: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_icon_decodes() {
+        assert!(window_icon().is_some());
+    }
 
     #[test]
     fn visuals_use_the_brand_surfaces() {

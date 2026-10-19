@@ -282,6 +282,7 @@ fn window_attributes(
     if launcher {
         let attrs = WindowAttributes::default()
             .with_title("OnSet")
+            .with_window_icon(crate::brand::window_icon())
             .with_decorations(true);
         return match home {
             Some(m) => {
@@ -293,6 +294,7 @@ fn window_attributes(
     }
     let attrs = WindowAttributes::default()
         .with_title("OnSet")
+        .with_window_icon(crate::brand::window_icon())
         .with_decorations(false);
     if fullscreen {
         attrs
