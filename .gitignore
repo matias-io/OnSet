@@ -39,3 +39,6 @@ Thumbs.db
 
 # Packaged builds (scripts/package.ps1)
 /dist/
+
+# Local desktop test runs (copies of a real workspace)
+/.test-desktop/

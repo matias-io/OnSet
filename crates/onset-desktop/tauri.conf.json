@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OnSet",
+  "version": "0.0.1",
+  "identifier": "io.github.matias-io.onset",
+  "build": {
+    "frontendDist": "../../autocue/dist",
+    "devUrl": "http://127.0.0.1:5173"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["icons/icon.ico", "icons/icon.png"]
+  }
+}
