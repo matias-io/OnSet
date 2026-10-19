@@ -1,10 +1,11 @@
-import {app, BrowserWindow, ipcMain, dialog, shell, safeStorage, protocol, net, Tray, Menu, nativeImage} from 'electron';
+import {app, BrowserWindow, ipcMain, dialog, shell, safeStorage, protocol, Tray, Menu, nativeImage} from 'electron';
 import {existsSync} from 'node:fs';
 import {readFile, writeFile, mkdir} from 'node:fs/promises';
 import path from 'node:path';
-import {fileURLToPath, pathToFileURL} from 'node:url';
+import {fileURLToPath} from 'node:url';
 import {Rpc} from './rpc.js';
 import {ChatGPT} from './auth.js';
+import {serveFile} from './media.js';
 
 protocol.registerSchemesAsPrivileged([{scheme:'autocue-audio',privileges:{standard:true,secure:true,stream:true,supportFetchAPI:true}}]);
 const here=path.dirname(fileURLToPath(import.meta.url));
@@ -45,7 +46,7 @@ async function start() {
   protocol.handle('autocue-audio',request=>{
     const id=new URL(request.url).pathname.slice(1), file=media.get(id);
     if(!file)return new Response('Unknown media',{status:404});
-    return net.fetch(pathToFileURL(file).toString(),{headers:request.headers});
+    return serveFile(file,request.headers.get('range'));
   });
   const icon=nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==');
   tray=new Tray(icon);tray.setToolTip('Autocue — DJ preparation');
