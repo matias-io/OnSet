@@ -7,11 +7,13 @@
 //! only for files the service names, and nothing here writes to rekordbox by itself.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod chatgpt;
 mod live;
 mod sidecar;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -20,6 +22,7 @@ use serde_json::{Value, json};
 use tauri::http::{Response, StatusCode, header};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder};
 
+use crate::chatgpt::ChatGpt;
 use crate::sidecar::{Runtime, Service};
 
 const BRIDGE: &str = include_str!("bridge.js");
@@ -70,12 +73,19 @@ const METHODS: &[&str] = &[
     "benchmark-label",
     "relocate",
     "transition-alternatives",
+    "replan",
+    "review-queue",
+    "plan-job",
+    "transitions-job",
+    "import-workspace",
+    "relocate-cache",
 ];
 
 const STEMS: &[&str] = &["drums", "bass", "vocals", "other"];
 
 struct AppState {
     service: Service,
+    chatgpt: Arc<ChatGpt>,
     /// Audio files the screens may play, by the id in their `autocue-audio` URL.
     media: Mutex<HashMap<String, PathBuf>>,
     next_media: AtomicU64,
@@ -147,6 +157,13 @@ async fn autocue_pick(window: tauri::WebviewWindow, kind: String) -> Result<Vec<
     let dialog = rfd::AsyncFileDialog::new().set_parent(&window);
     let picked = if kind == "folder" {
         dialog.pick_folder().await.map(|f| vec![f])
+    } else if kind == "workspace" {
+        // One exported workspace (JSON or SQLite) from another computer.
+        dialog
+            .add_filter("Autocue workspace export", &["json", "db"])
+            .pick_file()
+            .await
+            .map(|f| vec![f])
     } else {
         let dialog = if kind == "json" {
             dialog.add_filter("JSON", &["json"])
@@ -252,21 +269,129 @@ async fn autocue_export(
     state.service.call("export", params).await
 }
 
-/// ChatGPT sign-in moves from the Electron main process to Rust in a later step; until then
-/// the screens see no accounts and a reason.
+/// Runs blocking account work (network, the sign-in wait) off the async runtime.
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// "Continue with ChatGPT", as the Electron main process handled `autocue:account`.
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)] // Tauri commands take owned arguments
-fn autocue_account(action: String) -> Result<Value, String> {
-    const NOT_YET: &str = "ChatGPT sign-in is not in the OnSet desktop build yet; \
-                           use the Autocue app for AI requests";
+async fn autocue_account(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    action: String,
+    params: Value,
+) -> Result<Value, String> {
+    let chat = state.chatgpt.clone();
+    let id = params.get("id").and_then(Value::as_str).map(str::to_owned);
     match action.as_str() {
-        "status" => Ok(json!({
-            "active": null,
-            "selected_model": null,
-            "accounts": [],
-            "unavailable": NOT_YET,
-        })),
-        _ => Err(NOT_YET.into()),
+        "status" => Ok(chat.status()),
+        "sign-in" => {
+            blocking(move || {
+                chat.sign_in(id.as_deref(), |url| {
+                    open::that_detached(url).map_err(|e| e.to_string())
+                })
+            })
+            .await
+        }
+        "cancel" => {
+            chat.cancel();
+            Ok(Value::Null)
+        }
+        "select" => chat.select(&id.ok_or("Unknown account")?),
+        "disconnect" => chat.disconnect(&id.ok_or("Unknown account")?),
+        "models" => blocking(move || chat.models()).await,
+        "model" => {
+            let id = id.ok_or("Model unavailable")?;
+            blocking(move || chat.choose_model(&id)).await
+        }
+        "manage" => {
+            open::that_detached("https://chatgpt.com/#settings").map_err(|e| e.to_string())?;
+            Ok(Value::Null)
+        }
+        "request" => ai_request(&app, &state, chat, &params).await,
+        _ => Err("Unknown account action".into()),
+    }
+}
+
+/// A set plan or enrichment from ChatGPT, imported through the service. A plan the service
+/// rejects is replaced by the service's own alternatives, with the reason.
+async fn ai_request(
+    app: &AppHandle,
+    state: &AppState,
+    chat: Arc<ChatGpt>,
+    params: &Value,
+) -> Result<Value, String> {
+    let brief = params.get("brief").cloned().unwrap_or(Value::Null);
+    let task = params.get("task").cloned().unwrap_or(Value::Null);
+    let context = state
+        .service
+        .call(
+            "ai-context",
+            json!({"track_ids": params.get("track_ids"), "brief": brief}),
+        )
+        .await?;
+    let mut ask = context.clone();
+    if let Some(obj) = ask.as_object_mut() {
+        obj.insert("task".into(), task.clone());
+    }
+    let model = params
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let research = params
+        .get("research")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let events = app.clone();
+    let mut result = blocking(move || {
+        chat.request(&ask, &model, research, |delta| {
+            let _ = events.emit(
+                "autocue:event",
+                json!({"method": "ai-progress", "params": {"delta": delta}}),
+            );
+        })
+    })
+    .await?;
+    let tracks = context
+        .get("tracks")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if task == "enrichment" {
+        if let Some(obj) = result.as_object_mut() {
+            let ids: Vec<Value> = tracks.iter().map(|t| t["id"].clone()).collect();
+            obj.insert("allowed_ids".into(), ids.into());
+        }
+        return state.service.call("enrichment-import", result).await;
+    }
+    if let Some(obj) = result.as_object_mut() {
+        let revisions: serde_json::Map<String, Value> = tracks
+            .iter()
+            .filter_map(|t| Some((t["id"].as_str()?.to_owned(), t["revision"].clone())))
+            .collect();
+        obj.insert("brief".into(), brief.clone());
+        obj.insert("revisions".into(), revisions.into());
+    }
+    match state
+        .service
+        .call("import-plan", json!({"plan": result}))
+        .await
+    {
+        Ok(v) => Ok(v),
+        Err(rejected) => {
+            let replacement = state.service.call("plan", json!({"brief": brief})).await?;
+            Ok(json!({
+                "rejected_ai": rejected,
+                "alternatives": replacement.get("plans"),
+                "conflicts": replacement.get("conflicts"),
+            }))
+        }
     }
 }
 
@@ -331,10 +456,9 @@ fn serve_media(app: &AppHandle, request: &tauri::http::Request<Vec<u8>>) -> Resp
     let Some(file) = app.state::<AppState>().media.lock().get(id).cloned() else {
         return not_found("Unknown media");
     };
-    let Ok(bytes) = std::fs::read(&file) else {
+    let Ok(len) = std::fs::metadata(&file).map(|m| m.len()) else {
         return not_found("Audio is missing");
     };
-    let len = bytes.len();
     let mime = match file
         .extension()
         .and_then(|e| e.to_str())
@@ -345,36 +469,89 @@ fn serve_media(app: &AppHandle, request: &tauri::http::Request<Vec<u8>>) -> Resp
         Some("flac") => "audio/flac",
         Some("wav") => "audio/wav",
         Some("m4a") => "audio/mp4",
+        Some("aac") => "audio/aac",
         Some("ogg" | "opus") => "audio/ogg",
         Some("aif" | "aiff") => "audio/aiff",
         _ => "application/octet-stream",
     };
-    let range = request
-        .headers()
-        .get(header::RANGE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("bytes="))
-        .and_then(|v| {
-            let (a, b) = v.split_once('-')?;
-            let start: usize = a.parse().ok()?;
-            let end: usize = if b.is_empty() {
-                len.checked_sub(1)?
-            } else {
-                b.parse::<usize>().ok()?.min(len.checked_sub(1)?)
-            };
-            (start <= end).then_some((start, end))
-        });
+    let range = byte_range(
+        request
+            .headers()
+            .get(header::RANGE)
+            .and_then(|v| v.to_str().ok()),
+        len,
+    );
     let builder = Response::builder()
         .header(header::CONTENT_TYPE, mime)
         .header(header::ACCEPT_RANGES, "bytes");
-    match range {
-        Some((start, end)) => builder
-            .status(StatusCode::PARTIAL_CONTENT)
-            .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{len}"))
-            .body(bytes[start..=end].to_vec()),
-        None => builder.status(StatusCode::OK).body(bytes),
-    }
-    .expect("valid media response")
+    let (status, start, end) = match range {
+        ByteRange::Whole => (StatusCode::OK, 0, len.saturating_sub(1)),
+        ByteRange::Part(start, end) => (StatusCode::PARTIAL_CONTENT, start, end),
+        ByteRange::Unsatisfiable => {
+            return builder
+                .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                .header(header::CONTENT_RANGE, format!("bytes */{len}"))
+                .body(Vec::new())
+                .expect("valid media response");
+        }
+    };
+    // Read only the requested bytes: seeking in a long FLAC must not reload the whole file.
+    let body = if len == 0 {
+        Ok(Vec::new())
+    } else {
+        read_span(&file, start, end)
+    };
+    let Ok(body) = body else {
+        return not_found("Audio is missing");
+    };
+    let builder = if status == StatusCode::PARTIAL_CONTENT {
+        builder.header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{len}"))
+    } else {
+        builder
+    };
+    builder
+        .status(status)
+        .body(body)
+        .expect("valid media response")
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ByteRange {
+    Whole,
+    Part(u64, u64),
+    Unsatisfiable,
+}
+
+/// Parses a single `bytes=` range (open, closed or suffix) against a file length.
+fn byte_range(header: Option<&str>, len: u64) -> ByteRange {
+    let Some(header) = header else {
+        return ByteRange::Whole;
+    };
+    let parsed = header.trim().strip_prefix("bytes=").and_then(|v| {
+        let (a, b) = v.split_once('-')?;
+        let last = len.checked_sub(1)?;
+        if a.is_empty() {
+            let suffix: u64 = b.parse().ok().filter(|n| *n > 0)?;
+            return Some((len.saturating_sub(suffix), last));
+        }
+        let start: u64 = a.parse().ok()?;
+        let end = if b.is_empty() {
+            last
+        } else {
+            b.parse::<u64>().ok()?.min(last)
+        };
+        (start <= end).then_some((start, end))
+    });
+    parsed.map_or(ByteRange::Unsatisfiable, |(s, e)| ByteRange::Part(s, e))
+}
+
+fn read_span(file: &std::path::Path, start: u64, end: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut handle = std::fs::File::open(file)?;
+    handle.seek(SeekFrom::Start(start))?;
+    let mut body = vec![0; usize::try_from(end - start + 1).map_err(std::io::Error::other)?];
+    handle.read_exact(&mut body)?;
+    Ok(body)
 }
 
 fn main() {
@@ -430,6 +607,7 @@ fn main() {
             );
             app.manage(AppState {
                 service,
+                chatgpt: Arc::new(ChatGpt::load(&home)),
                 media: Mutex::default(),
                 next_media: AtomicU64::new(1),
             });
@@ -449,4 +627,42 @@ fn main() {
             state.service.stop(Duration::from_secs(30));
         }
     });
+}
+
+#[cfg(test)]
+mod media_tests {
+    use super::{ByteRange, byte_range, read_span};
+
+    #[test]
+    fn parses_open_closed_suffix_and_unsatisfiable_ranges() {
+        assert_eq!(byte_range(None, 100), ByteRange::Whole);
+        assert_eq!(byte_range(Some("bytes=0-"), 100), ByteRange::Part(0, 99));
+        assert_eq!(
+            byte_range(Some("bytes=10-19"), 100),
+            ByteRange::Part(10, 19)
+        );
+        assert_eq!(
+            byte_range(Some("bytes=90-500"), 100),
+            ByteRange::Part(90, 99)
+        );
+        assert_eq!(byte_range(Some("bytes=-10"), 100), ByteRange::Part(90, 99));
+        assert_eq!(
+            byte_range(Some("bytes=100-"), 100),
+            ByteRange::Unsatisfiable
+        );
+        assert_eq!(byte_range(Some("bytes=5-2"), 100), ByteRange::Unsatisfiable);
+        assert_eq!(byte_range(Some("items=0-1"), 100), ByteRange::Unsatisfiable);
+        assert_eq!(byte_range(Some("bytes=0-"), 0), ByteRange::Unsatisfiable);
+    }
+
+    #[test]
+    fn reads_only_the_requested_span() {
+        let file = std::env::temp_dir().join(format!("onset-media-{}.bin", std::process::id()));
+        std::fs::write(&file, (0u8..100).collect::<Vec<_>>()).unwrap();
+        assert_eq!(
+            read_span(&file, 40, 49).unwrap(),
+            (40u8..50).collect::<Vec<_>>()
+        );
+        std::fs::remove_file(file).unwrap();
+    }
 }
