@@ -103,7 +103,7 @@ These changes are in source only and are **not in the verified 0.2.0 installer**
   - Notifications are toasts, and a top progress bar shows activity.
   - Must-play and Exclude use chip pickers instead of tall multi-selects.
   - All write, restore and approval safeguards are unchanged.
-  - Evidence: TypeScript build, 31 desktop tests, and a visual pass over every page in the browser preview with the dev sample bridge at 1440 and 1000 px. It has not yet been checked in the installed Electron app.
+  - Evidence: TypeScript build, 31 desktop tests, and a visual pass over every page in the browser preview with the dev sample bridge at 1440 and 1000 px. It is installed from `release-0.2.0-redesign-2`. Installed files match the build, and the user checked the UI visually and approved it.
 
 Spectrogram frequency ticks from bin coordinates were completed in the interface redesign above. The rest of that audit list is closed in the next section.
 
