@@ -1,0 +1,28 @@
+[package]
+name = "onset-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Onset's live layer: follows rekordbox's master deck and publishes one MusicState"
+
+[dependencies]
+onset-core.workspace = true
+onset-rekordbox.workspace = true
+onset-autocue.workspace = true
+onset-transport.workspace = true
+onset-audio.workspace = true
+onset-lyrics.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+arc-swap.workspace = true
+crossbeam-channel.workspace = true
+parking_lot.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

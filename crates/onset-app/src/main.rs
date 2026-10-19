@@ -2,18 +2,17 @@
 mod app;
 mod bench;
 mod config;
-mod engine;
 mod launcher;
 mod lyrics;
 mod monitors;
 mod overlay;
-mod stream_match;
 mod thumbs;
 
 use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::Parser;
+use onset_engine as engine;
 use winit::event_loop::EventLoop;
 
 use crate::app::{AppOptions, OnsetApp};

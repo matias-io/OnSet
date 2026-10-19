@@ -19,6 +19,7 @@ onset-render = { path = "crates/onset-render" }
 onset-app = { path = "crates/onset-app" }
 onset-lyrics = { path = "crates/onset-lyrics" }
 onset-autocue = { path = "crates/onset-autocue" }
+onset-engine = { path = "crates/onset-engine" }
 
 anyhow = "1.0"
 thiserror = "2.0"
