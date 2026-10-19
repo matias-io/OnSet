@@ -8,3 +8,4 @@ beat-this==1.1.0
 demucs==4.0.1
 essentia==2.1b6.dev1389
 edm98[inference]==0.1.0
+onnxruntime==1.20.1
