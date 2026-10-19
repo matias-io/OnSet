@@ -154,7 +154,28 @@ Source only. These changes are **not in the verified 0.2.0 installer**. Automate
 
 **After installed acceptance (source only).** Three acceptance findings are fixed in source and covered by regressions: replan after a key shift, set-search cancel latency, and the set-search progress label. They are listed in [desktop verification](DESKTOP_VERIFICATION.md). 120 Python tests, 33 desktop tests and the build pass. Waveform seeking (finding 3) is also fixed: local audio is now served with byte ranges, and the fix was checked in a development Electron build with generated audio. These fixes need a rebuilt installer before they count as installed.
 
-Still open: learned local genre/mood/danceability estimators and learned transition acceptability. Both need listening labels or model assets that have not been gathered. Real-library behaviour of every item above also still needs checking.
+## Genre detection (2026-10-19, source only)
+
+Genre now has three sources, shown side by side on Track review → Profile. Only your own tags count as labels.
+
+- **Audio model.** Deep analysis runs Essentia's Discogs-EffNet (`discogs-effnet-bsdynamic-1`, ONNX) in the WSL worker. It stores the top 10 of 400 Discogs styles as unverified `genre_estimates`, plus a 1280-value sound embedding.
+  - The model files are fetched once at runtime, with retries, and must match pinned SHA-256 hashes.
+  - The licence is CC BY-NC-SA 4.0: fine for personal, non-commercial use. The files are not redistributed.
+  - The worker lock adds `onnxruntime==1.20.1` and its dependencies only. Existing pins are unchanged, and `imageio-ffmpeg` is now also in the non-CPU lock.
+  - Deep results cached earlier are reused only if they include every required model, so existing tracks fetch just the genre result.
+- **Suggestions from your tags.** `genre-suggestions` compares each untagged track with the tracks you tagged (`overrides.genres`). It uses the EffNet embedding, or, without deep analysis, a native timbre/rhythm summary; the two are never compared with each other. Each suggestion names the similar tracks behind it. Imported or researched tags are not training labels until you confirm them.
+- **Sourced research.** The existing ChatGPT enrichment with online research and citations.
+
+Evidence:
+- 123 Python tests, including label splitting, nearest-neighbour suggestions in both representations, and the updated required-model set.
+- 35 desktop tests and the build pass.
+- The worker function ran in WSL on generated audio and on four library tracks, about 3–6 s each on CPU. Results: Darude - Sandstorm → Trance 0.61; Daft Punk - One More Time → House 0.38 and Disco 0.16; Chris Lake & Green Velvet - Deceiver → Bassline 0.74 and House 0.32; &ME & Black Coffee - The Rapture Pt.III → Deep Techno 0.43 and Deep House 0.42.
+- A native-to-WSL round trip on isolated generated audio returned a complete result with a mapped embedding path.
+- The Profile card was checked in the browser preview with sample data.
+
+These are not accuracy measurements, and genre still needs labels checked by ear. Mood and danceability estimators remain undelivered.
+
+Still open: learned local mood/danceability estimators and learned transition acceptability. Both need listening labels or model assets that have not been gathered. Real-library behaviour of every item above also still needs checking.
 
 
 ## Evidence map
