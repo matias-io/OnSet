@@ -1,9 +1,30 @@
 import React,{useEffect,useState} from 'react';
 import type {Track} from './types';
-export function LocalSettings({tracks,run}:{tracks:Track[];run:any}){
- const [settings,setSettings]=useState<any>({}),[a,setA]=useState(''),[b,setB]=useState(''),[sources,setSources]=useState<string[]>([]),[audioError,setAudioError]=useState('');
- useEffect(()=>{let active=true;setSources([]);setAudioError('');if(a&&b)Promise.all([window.autocue.media(a),window.autocue.media(b)]).then(values=>{if(active)setSources(values);}).catch(error=>{if(active)setAudioError(error.message);});return()=>{active=false;};},[a,b]);
- useEffect(()=>{let active=true;window.autocue.call('settings').then(s=>{if(active)setSettings(s);}).catch(()=>{});return()=>{active=false;};},[]);
- function field(key:string,label:string,numeric=false){return <label>{label}<input type={numeric?'number':'text'} min="1" max={key==='heavy_jobs'?2:4} value={settings[key]??(key==='light_jobs'?2:key==='heavy_jobs'?1:'')} onChange={e=>setSettings((s:any)=>({...s,[key]:numeric?+e.target.value:e.target.value}))}/></label>;}
- return <section className="panel"><h3>Local resources & caches</h3><div className="form-grid">{field('cache_dir','Feature cache directory')}{field('model_dir','Model asset directory')}{field('light_jobs','Light jobs (default 2)',true)}{field('heavy_jobs','Heavy jobs (default 1)',true)}</div><p className="muted">Blank paths use the application data folder. Restart Autocue after changing job limits. Existing caches stay in their original locations.</p><button onClick={()=>run(async()=>{for(const key of ['cache_dir','model_dir','light_jobs','heavy_jobs'])if(settings[key])await window.autocue.call('settings',{key,value:settings[key]});},'Resource settings saved')}>Save resource settings</button><h3>Compare perceived energy</h3><p className="muted">Audition both tracks, then record your judgment. Recalibrate the collection to incorporate these comparisons.</p><div className="energy-pair-select">{[[a,setA],[b,setB]].map(([value,setter],i)=><select aria-label={`Energy comparison track ${i+1}`} key={i} value={value as string} onChange={e=>(setter as any)(e.target.value)}><option value="">Choose track {i+1}</option>{tracks.map(t=><option key={t.id} value={t.id}>{t.title}</option>)}</select>)}</div>{sources.length===2&&<div className="energy-pair-select">{sources.map((source,i)=><label key={source}>{tracks.find(t=>t.id===(i===0?a:b))?.title}<audio controls preload="metadata" src={source}/></label>)}</div>}{audioError&&<p className="warning">{audioError}</p>}<div className="toolbar">{['a','equal','b'].map(choice=><button key={choice} disabled={!a||!b||a===b} onClick={()=>run(()=>window.autocue.call('energy-judgment',{a,b,winner:choice==='equal'?'equal':choice==='a'?a:b}),'Energy comparison saved')}>{choice==='equal'?'Similar energy':choice==='a'?'First feels stronger':'Second feels stronger'}</button>)}</div></section>;
+import {Button,Card,Field} from './ui';
+
+export function ResourceSettings({run}:{run:any}){
+  const [settings,setSettings]=useState<any>({});
+  useEffect(()=>{let active=true;window.autocue.call('settings').then(s=>{if(active)setSettings(s);}).catch(()=>{});return()=>{active=false;};},[]);
+  const set=(key:string,numeric=false)=>(e:React.ChangeEvent<HTMLInputElement>)=>setSettings((s:any)=>({...s,[key]:numeric?+e.target.value:e.target.value}));
+  return <Card title="Resources & caches" actions={<Button size="sm" onClick={()=>run(async()=>{for(const key of ['cache_dir','model_dir','light_jobs','heavy_jobs'])if(settings[key])await window.autocue.call('settings',{key,value:settings[key]});},'Resource settings saved')}>Save</Button>}>
+    <div className="form-grid">
+      <Field label="Feature cache folder" hint="Blank uses the app data folder"><input placeholder="Default" value={settings.cache_dir??''} onChange={set('cache_dir')}/></Field>
+      <Field label="Model folder" hint="Blank uses the app data folder"><input placeholder="Default" value={settings.model_dir??''} onChange={set('model_dir')}/></Field>
+      <Field label="Light jobs at once" hint="1–4 · applies after restart"><input type="number" min="1" max="4" value={settings.light_jobs??2} onChange={set('light_jobs',true)}/></Field>
+      <Field label="Heavy jobs at once" hint="1–2 · applies after restart"><input type="number" min="1" max="2" value={settings.heavy_jobs??1} onChange={set('heavy_jobs',true)}/></Field>
+    </div>
+  </Card>;
+}
+
+export function EnergyCompare({tracks,run}:{tracks:Track[];run:any}){
+  const [a,setA]=useState(''),[b,setB]=useState(''),[sources,setSources]=useState<string[]>([]),[audioError,setAudioError]=useState('');
+  useEffect(()=>{let active=true;setSources([]);setAudioError('');if(a&&b)Promise.all([window.autocue.media(a),window.autocue.media(b)]).then(values=>{if(active)setSources(values);}).catch(error=>{if(active)setAudioError(error.message);});return()=>{active=false;};},[a,b]);
+  return <div className="stack">
+    <div className="compare">{[[a,setA,'First track',0],[b,setB,'Second track',1]].map(([value,setter,label,i]:any)=><div key={label}>
+      <Field label={label}><select value={value} onChange={e=>setter(e.target.value)}><option value="">Choose a track</option>{tracks.map(t=><option key={t.id} value={t.id}>{t.title}</option>)}</select></Field>
+      {sources.length===2&&<audio controls preload="metadata" src={sources[i]}/>}
+    </div>)}</div>
+    {audioError&&<p className="error-text">{audioError}</p>}
+    <div className="row">{['a','equal','b'].map(choice=><Button key={choice} disabled={!a||!b||a===b} onClick={()=>run(()=>window.autocue.call('energy-judgment',{a,b,winner:choice==='equal'?'equal':choice==='a'?a:b}),'Energy comparison saved')}>{choice==='equal'?'About the same':choice==='a'?'First is stronger':'Second is stronger'}</Button>)}</div>
+  </div>;
 }

@@ -28,6 +28,7 @@ const paths:Record<string,string>={
   folder:'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z',
   headphones:'M4 15v-3a8 8 0 0 1 16 0v3M4 15a2 2 0 0 1 2-2h1v7H6a2 2 0 0 1-2-2v-3ZM20 15a2 2 0 0 0-2-2h-1v7h1a2 2 0 0 0 2-2v-3Z',
   external:'M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5',
+  trash:'M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3',
   refresh:'M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4',
 };
 export function Icon({name,size=16}:{name:string;size?:number}){
@@ -44,7 +45,8 @@ export function Button({children,onClick,disabled=false,kind='',size='',icon,lab
 const tone:Record<string,string>={approved:'good',reviewed:'good',complete:'good',running:'info',reviewing:'info',queued:'info',
   partial:'warn',stale:'warn',paused:'warn',pending:'neutral',failed:'bad',rejected:'bad',cancelled:'neutral','delete-approved':'bad'};
 export function Pill({children,state=''}:{children:React.ReactNode;state?:string}){
-  return <span className={`pill ${tone[state]||'neutral'}`}>{children}</span>;
+  const text=typeof children==='string'?children.charAt(0).toUpperCase()+children.slice(1).replaceAll('_',' '):children;
+  return <span className={`pill ${tone[state]||'neutral'}`}>{text}</span>;
 }
 export function Empty({children,icon}:{children:React.ReactNode;icon?:string}){
   return <div className="empty">{icon&&<span className="empty-icon"><Icon name={icon} size={22}/></span>}{children}</div>;

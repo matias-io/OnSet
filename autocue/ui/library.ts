@@ -28,7 +28,7 @@ export function analysisSelection(tracks:{id:string}[],visible:{id:string}[],mar
  return checked.length?checked:visible.map(t=>t.id);
 }
 
-export const defaultBrief={schema_version:1,target_seconds:3600,tolerance_seconds:120,max_pitch_pct:6,key_lock:true,skill:2,equipment:['eq','filter','loop','echo','reverb'],energy_arc:[4,6,8,7],must_play:[] as string[],excluded:[] as string[],techniques:[] as string[],genres:[] as string[],mood:'',variety:.5,exploration:.5,pinned:[] as any[],start:null as string|null,finish:null as string|null};
+export const defaultBrief={schema_version:1,target_seconds:3600,tolerance_seconds:120,max_pitch_pct:6,key_lock:true,skill:2,equipment:['eq','filter','loop','echo','reverb'],energy_arc:[4,6,8,7],must_play:[] as string[],excluded:[] as string[],techniques:[] as string[],genres:[] as string[],mood:'',variety:.5,exploration:.5,smoothness:.5,contrast:.5,playlists:[] as string[],transpose:{} as Record<string,number>,pinned:[] as any[],start:null as string|null,finish:null as string|null};
 
 // Restore a saved brief field by field: wrong-typed values fall back to defaults and, when the library is known, removed tracks are dropped.
 export function restoreBrief(saved:any,trackIds?:string[]){
@@ -42,10 +42,13 @@ export function restoreBrief(saved:any,trackIds?:string[]){
  if(typeof saved.key_lock==='boolean')brief.key_lock=saved.key_lock;
  if([1,2,3].includes(saved.skill))brief.skill=saved.skill;
  if(Array.isArray(saved.energy_arc)&&saved.energy_arc.length&&saved.energy_arc.every((v:any)=>number(v,1,10)))brief.energy_arc=[...saved.energy_arc];
- for(const key of ['equipment','techniques','genres','must_play','excluded'])if(strings(saved[key]))brief[key]=[...saved[key]];
+ for(const key of ['equipment','techniques','genres','must_play','excluded','playlists'])if(strings(saved[key]))brief[key]=[...saved[key]];
  if(typeof saved.mood==='string')brief.mood=saved.mood;
  if(number(saved.variety,0,1))brief.variety=saved.variety;
  if(number(saved.exploration,0,1))brief.exploration=saved.exploration;
+ if(number(saved.smoothness,0,1))brief.smoothness=saved.smoothness;
+ if(number(saved.contrast,0,1))brief.contrast=saved.contrast;
+ if(saved.transpose&&typeof saved.transpose==='object'&&!Array.isArray(saved.transpose))brief.transpose=Object.fromEntries(Object.entries(saved.transpose).filter(([,v])=>Number.isInteger(v)&&Math.abs(v as number)<=12&&v!==0));
  if(Array.isArray(saved.pinned))brief.pinned=saved.pinned.filter((p:any)=>p&&typeof p==='object'&&(typeof p.transition_id==='string'||typeof p.track_id==='string'&&Number.isInteger(p.position)&&p.position>=0));
  for(const key of ['start','finish'])if(typeof saved[key]==='string')brief[key]=saved[key];
  if(strings(saved.track_ids)&&saved.track_ids.length)brief.track_ids=[...saved.track_ids];
@@ -56,7 +59,8 @@ export function pruneBriefTracks(brief:any,trackIds:string[]){
  const known=new Set(trackIds),keep=(id:string)=>known.has(id);
  const next={...brief,must_play:brief.must_play.filter(keep),excluded:brief.excluded.filter(keep),
   pinned:brief.pinned.filter((p:any)=>!p.track_id||keep(p.track_id)),
-  start:brief.start&&keep(brief.start)?brief.start:null,finish:brief.finish&&keep(brief.finish)?brief.finish:null};
+  start:brief.start&&keep(brief.start)?brief.start:null,finish:brief.finish&&keep(brief.finish)?brief.finish:null,
+  transpose:Object.fromEntries(Object.entries(brief.transpose||{}).filter(([id])=>keep(id)))};
  if(brief.track_ids)next.track_ids=brief.track_ids.filter(keep);
  return JSON.stringify(next)===JSON.stringify(brief)?brief:next;
 }
@@ -73,3 +77,22 @@ export function nearest(values:number[],t:number){
 export function plainKey(event:{ctrlKey?:boolean;metaKey?:boolean;altKey?:boolean}){
  return !event.ctrlKey&&!event.metaKey&&!event.altKey;
 }
+
+// Cue role colours shared by the waveform, cue list and write previews.
+export const roleColor:Record<string,string>={A:'#34d399',B:'#a3e635',C:'#facc15',D:'#fb923c',E:'#60a5fa',F:'#a78bfa',G:'#f472b6',I:'#2dd4bf',L:'#67e8f9'};
+export function clock(seconds:number=0,tenths=true){
+ const s=Math.max(0,seconds||0),m=Math.floor(s/60),rest=s%60;
+ return `${m}:${tenths?rest.toFixed(1).padStart(4,'0'):Math.floor(rest).toString().padStart(2,'0')}`;
+}
+
+// Zero-based bar containing a playback position, for labelling events while listening.
+export function barAt(track:any,seconds:number):number|null{
+ // A corrected grid stores downbeats, matching the planner's beat_times().
+ const db:number[]=track?.overrides?.grid||track?.analysis?.downbeats||[];
+ if(!db.length||seconds<db[0])return db.length?0:null;
+ let lo=0,hi=db.length-1;
+ while(lo<hi){const mid=(lo+hi+1)>>1;if(db[mid]<=seconds)lo=mid;else hi=mid-1;}
+ return lo;
+}
+
+export const benchmarkEvents=[['first_full_groove','First full groove'],['first_breakdown','First breakdown'],['later_drop','Later drop'],['outro','Outro']] as const;

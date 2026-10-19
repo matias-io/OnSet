@@ -35,3 +35,22 @@ describe('review editing helpers',()=>{
  });
  it('treats modifier chords as non-review keys',()=>{expect(plainKey({})).toBe(true);expect(plainKey({ctrlKey:true})).toBe(false);expect(plainKey({metaKey:true})).toBe(false);});
 });
+
+import {clock} from './library';
+it('formats track clocks with and without tenths',()=>{expect(clock(65.25)).toBe('1:05.3');expect(clock(65.25,false)).toBe('1:05');expect(clock(-3,false)).toBe('0:00');});
+
+import {barAt} from './library';
+describe('continuation helpers',()=>{
+ it('finds the zero-based bar at a playback position, preferring a corrected grid',()=>{
+  const track={analysis:{downbeats:[0,2,4,6]}};
+  expect(barAt(track,0)).toBe(0);expect(barAt(track,3.9)).toBe(1);expect(barAt(track,99)).toBe(3);
+  expect(barAt({overrides:{grid:[1,3,5]},analysis:{downbeats:[0,2]}},3.5)).toBe(1);
+  expect(barAt({analysis:{}},3)).toBeNull();
+ });
+ it('restores and prunes smoothness, contrast, playlists and transposes',()=>{
+  const brief=restoreBrief({smoothness:.8,contrast:2,playlists:['Warmup'],transpose:{a:-1,b:.5,c:0,d:13}});
+  expect(brief.smoothness).toBe(.8);expect(brief.contrast).toBe(.5);expect(brief.playlists).toEqual(['Warmup']);
+  expect(brief.transpose).toEqual({a:-1});
+  expect(pruneBriefTracks({...brief,transpose:{a:-1,gone:2}},['a']).transpose).toEqual({a:-1});
+ });
+});

@@ -1,14 +1,37 @@
-import {useEffect,useState} from 'react';
+import React,{useEffect,useState} from 'react';
+import {Button,Card,Disclosure,Icon,Pill} from './ui';
 
 export function WorkspaceRecovery({run}:{run:(action:()=>Promise<any>,message?:string)=>Promise<any>}){
   const [health,setHealth]=useState<any>(null),[backups,setBackups]=useState<any[]>([]),[preview,setPreview]=useState<any>(null),[approved,setApproved]=useState(false);
   async function refresh(){setHealth(await window.autocue.call('workspace-health'));setBackups(await window.autocue.call('workspace-backups'));}
   useEffect(()=>{refresh().catch(()=>{});},[]);
-  return <section className="panel"><h3>Workspace health & recovery</h3><p>Back up profiles, analysis revisions, corrections, undo history, jobs and saved plans. Audio, model caches, credentials and the rekordbox database stay separate.</p>
-    {health&&<><p className={health.healthy?'':'warning'}>{health.healthy?'Workspace checks pass': 'Workspace needs recovery review'} · {health.counts.tracks??'?'} tracks · {health.counts.revisions??'?'} revisions · {health.counts.jobs??'?'} jobs</p>{health.warnings.map((warning:string)=><p className="warning" key={warning}>{warning}</p>)}<details><summary>Workspace diagnostics</summary><pre>{JSON.stringify(health,null,2)}</pre></details></>}
-    <div className="toolbar"><button onClick={()=>run(refresh)}>Refresh workspace health</button><button disabled={health&&!health.healthy} onClick={()=>run(async()=>{await window.autocue.call('workspace-backup');await refresh();},'Workspace backup verified')}>Create verified workspace backup</button><button onClick={()=>run(()=>window.autocue.export({kind:'workspace-backup',name:'autocue-workspace.db'}))}>Export full workspace history</button></div>
-    <p className="muted">Verified snapshots are also created when a nonempty workspace opens and closes. Backups remain local in the application data folder.</p>
-    {backups.length>0&&<details><summary>{backups.length} workspace snapshots</summary>{backups.map(backup=><div className="backup" key={backup.id}><span>{backup.created} · {backup.counts.tracks} tracks · {backup.counts.revisions} revisions · {backup.reason}</span><button onClick={()=>run(async()=>{setApproved(false);setPreview(await window.autocue.call('workspace-restore-preview',{id:backup.id}));})}>Preview workspace restore</button></div>)}</details>}
-    {preview&&<div className="write-changes"><h4>Exact workspace restoration</h4><p>{preview.replaces}. A snapshot of the current state is saved first.</p><table><thead><tr><th>Records</th><th>Current</th><th>After restore</th></tr></thead><tbody>{Object.keys(preview.before).map(table=><tr key={table}><td>{table}</td><td>{preview.before[table]}</td><td>{preview.after[table]}</td></tr>)}</tbody></table><label><input type="checkbox" checked={approved} onChange={e=>setApproved(e.target.checked)}/> I approve replacing this workspace with this snapshot</label><div className="toolbar"><button onClick={()=>{setPreview(null);setApproved(false);}}>Keep current workspace</button><button disabled={!approved} onClick={()=>run(async()=>{await window.autocue.call('workspace-restore',{id:preview.id,token:preview.token,approved:true});setPreview(null);setApproved(false);await refresh();},'Workspace restored; previous state retained in a rollback snapshot')}>Apply reviewed workspace restore</button></div></div>}
-  </section>;
+  return <Card title="Workspace" actions={<>
+    <Button size="sm" kind="ghost" icon="refresh" label="Refresh workspace health" onClick={()=>run(refresh)}/>
+    <Button size="sm" disabled={health&&!health.healthy} onClick={()=>run(async()=>{await window.autocue.call('workspace-backup');await refresh();},'Workspace backup verified')}>Back up now</Button>
+    <Button size="sm" icon="download" onClick={()=>run(()=>window.autocue.export({kind:'workspace-backup',name:'autocue-workspace.db'}))}>Export full history</Button></>}>
+    {health&&<div className="row" style={{marginBottom:6}}>
+      <Pill state={health.healthy?'complete':'failed'}>{health.healthy?'Healthy':'Needs recovery review'}</Pill>
+      <span className="muted">{health.counts.tracks??'?'} tracks · {health.counts.revisions??'?'} revisions · {health.counts.jobs??'?'} jobs</span>
+    </div>}
+    {health?.warnings.map((warning:string)=><p className="warning" key={warning}><Icon name="alert" size={14}/>{warning}</p>)}
+    <p className="hint" style={{margin:'8px 0 4px'}}>Snapshots include profiles, corrections, undo history, jobs and plans — not audio, model caches, credentials or rekordbox. One is saved automatically when Autocue opens and closes.</p>
+    {backups.length>0&&<Disclosure summary={`${backups.length} snapshots`}>
+      {backups.map(backup=><div className="list-row" key={backup.id}>
+        <span className="grow">{backup.created} <span className="dim">· {backup.counts.tracks} tracks · {backup.counts.revisions} revisions · {backup.reason}</span></span>
+        <Button size="sm" onClick={()=>run(async()=>{setApproved(false);setPreview(await window.autocue.call('workspace-restore-preview',{id:backup.id}));})}>Preview restore</Button>
+      </div>)}
+    </Disclosure>}
+    {preview&&<div className="write-preview">
+      <h4>Restore this snapshot</h4>
+      <p className="muted" style={{marginBottom:10}}>{preview.replaces}. The current state is saved first.</p>
+      <div className="table-wrap"><table><thead><tr><th>Records</th><th>Now</th><th>After restore</th></tr></thead><tbody>
+        {Object.keys(preview.before).map(table=><tr key={table}><td>{table}</td><td>{preview.before[table]}</td><td>{preview.after[table]}</td></tr>)}
+      </tbody></table></div>
+      <div className="row" style={{marginTop:12}}>
+        <label className="check grow"><input type="checkbox" checked={approved} onChange={e=>setApproved(e.target.checked)}/>Replace the current workspace with this snapshot</label>
+        <Button size="sm" kind="ghost" onClick={()=>{setPreview(null);setApproved(false);}}>Cancel</Button>
+        <Button size="sm" kind="danger" disabled={!approved} onClick={()=>run(async()=>{await window.autocue.call('workspace-restore',{id:preview.id,token:preview.token,approved:true});setPreview(null);setApproved(false);await refresh();},'Workspace restored; previous state retained in a rollback snapshot')}>Restore</Button>
+      </div>
+    </div>}
+  </Card>;
 }

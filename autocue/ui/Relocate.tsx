@@ -1,2 +1,10 @@
 import React,{useState} from 'react';
-export function Relocate({track,run}:any){const [path,setPath]=useState('');return <details className="panel"><summary>Locate moved audio</summary><p className="muted">Current path: {track.path}. Paste the file's new full path. Autocue checks the complete recorded file hash before linking this location.</p><label>New local audio path<input value={path} onChange={e=>setPath(e.target.value)}/></label><button disabled={!path.trim()} onClick={()=>run(()=>window.autocue.call('relocate',{id:track.id,path:path.trim().replace(/^"|"$/g,'')}),'Verified audio location updated')}>Verify and link moved file</button></details>;}
+import {Button,Field} from './ui';
+
+export function Relocate({track,run}:any){
+  const [path,setPath]=useState('');
+  return <div className="stack">
+    <Field label="New location" hint={`Currently ${track.path}. The file must match the recorded audio exactly.`}><input placeholder="C:\Music\…" value={path} onChange={e=>setPath(e.target.value)}/></Field>
+    <div className="row end"><Button size="sm" disabled={!path.trim()} onClick={()=>run(()=>window.autocue.call('relocate',{id:track.id,path:path.trim().replace(/^"|"$/g,'')}),'Verified audio location updated')}>Verify and link</Button></div>
+  </div>;
+}

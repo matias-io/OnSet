@@ -1,19 +1,86 @@
 import React,{useEffect,useState} from 'react';
 import type {Track} from './types';
+import {Button,Card,Disclosure,Icon,Pill} from './ui';
+import {clock} from './library';
 const api=window.autocue;
-const time=(t:number)=>`${Math.floor(t/60)}:${Math.floor(t%60).toString().padStart(2,'0')}`;
-export function PlanCard({plan,index,tracks,run,onUpdated,onPin,onPinTransition,pinned,onUseBrief}:any){
-  const [links,setLinks]=useState<any[]>([]),[name,setName]=useState('Autocue set'),[preview,setPreview]=useState<any>(null),[fallbacks,setFallbacks]=useState<Record<number,any[]>>({});
+
+function EnergyArc({values}:{values:(number|null)[]}){
+  const known=values.map((v,i)=>({v,i})).filter(p=>p.v!==null) as {v:number;i:number}[];
+  if(!known.length)return <p className="muted" style={{margin:'8px 0'}}>Rate or calibrate tracks to see the energy curve.</p>;
+  const x=(i:number)=>16+i*568/Math.max(1,values.length-1),y=(v:number)=>74-v*6.4;
+  const line=known.map((p,n)=>`${n?'L':'M'}${x(p.i)} ${y(p.v)}`).join(' ');
+  return <svg className="energy-arc" viewBox="0 0 600 84" preserveAspectRatio="none" role="img" aria-label="Set energy curve">
+    <defs><linearGradient id="arc" x1="0" x2="1"><stop offset="0" stopColor="#8b7cf6"/><stop offset="1" stopColor="#f472b6"/></linearGradient></defs>
+    {[2,5,8].map(v=><line key={v} x1="0" x2="600" y1={y(v)} y2={y(v)} stroke="#24262d" strokeWidth="1" vectorEffect="non-scaling-stroke"/>)}
+    <path d={line} fill="none" stroke="url(#arc)" strokeWidth="2.5" vectorEffect="non-scaling-stroke"/>
+    {known.map(p=><circle key={p.i} cx={x(p.i)} cy={y(p.v)} r="3.5" fill="#ececf1"/>)}
+  </svg>;
+}
+
+export function PlanCard({plan,index,tracks,run,onUpdated,onPin,onPinTransition,pinned,onUseBrief,onReplan,transpose={},onTranspose}:any){
+  const [links,setLinks]=useState<any[]>([]),[name,setName]=useState('Autocue set'),[preview,setPreview]=useState<any>(null),[fallbacks,setFallbacks]=useState<Record<number,any[]>>({}),[open,setOpen]=useState<number|null>(null);
   useEffect(()=>{Promise.all(plan.transition_ids.map((id:string)=>api.call('transition',{id}))).then(setLinks).catch(()=>{});},[plan.id]);
   const lookup=new Map<string,Track>(tracks.map((t:Track)=>[t.id,t]));
-  const energy=plan.track_ids.map((id:string)=>{const t=lookup.get(id);return t?.energy||t?.analysis?.energy_profile?.rating||null;});
+  const energy=plan.track_ids.map((id:string)=>{const t=lookup.get(id);return t?.energy??t?.analysis?.energy_profile?.rating??null;});
+  const locked=(i:number,j:number)=>pinned.some((p:any)=>p.track_id&&[plan.track_ids[i],plan.track_ids[j]].includes(p.track_id));
   async function move(i:number,delta:number){const ids=[...plan.track_ids];[ids[i],ids[i+delta]]=[ids[i+delta],ids[i]];const changed=await run(()=>api.call('replan-order',{id:plan.id,track_ids:ids}));if(changed)onUpdated(changed);}
-  return <section className="panel"><div className="panel-heading"><h3>Option {index+1} · {time(plan.duration_seconds)}</h3><span className={`pill ${plan.stale?'stale':''}`}>{plan.stale?'Needs revalidation':'Validated timing'}</span></div><p>{plan.explanation}</p>{plan.stale&&<p className="warning">{plan.validation_error||'Track evidence changed. Replan or validate before using this set.'}</p>}
-    <svg className="energy-arc" viewBox="0 0 600 90" aria-label="Set energy curve"><path d="M0 75 H600" stroke="#344449" fill="none"/>{energy.map((v:number|null,i:number)=>v!==null&&<circle key={i} cx={20+i*560/Math.max(1,energy.length-1)} cy={80-v*6} r="4" fill="#b8e286"/>)}{energy.every((v:any)=>v===null)&&<text x="20" y="45" fill="#8ca49a" fontSize="12">Rate or calibrate tracks to see the energy journey.</text>}</svg>
-    {onUseBrief&&plan.brief&&<div className="toolbar"><button onClick={onUseBrief}>Use this plan's brief</button></div>}<ol className="set-list">{plan.track_ids.map((id:string,i:number)=><li key={id}><strong>{lookup.get(id)?.title}</strong><div className="toolbar"><button disabled={i===0||pinned.some((p:any)=>p.track_id&&[plan.track_ids[i],plan.track_ids[i-1]].includes(p.track_id))} onClick={()=>move(i,-1)}>↑</button><button disabled={i===plan.track_ids.length-1||pinned.some((p:any)=>p.track_id&&[plan.track_ids[i],plan.track_ids[i+1]].includes(p.track_id))} onClick={()=>move(i,1)}>↓</button><label><input type="checkbox" checked={pinned.some((p:any)=>p.track_id===id&&p.position===i)} onChange={e=>onPin(id,i,e.target.checked)}/> Pin position</label></div>{links[i]&&<details><summary>{links[i].name} · incoming {links[i].pitch_pct.toFixed(2)}% · {time(links[i].wall_seconds)} handover</summary><p>Outgoing {time(links[i].out_start)} → {time(links[i].out_end)}. Incoming {time(links[i].in_start)} → {time(links[i].in_end)}.</p>{links[i].actions.map((a:any,n:number)=><p key={n}>+{a.at.toFixed(1)}s: {a.action}</p>)}{links[i].warnings.map((w:string)=><p className="warning" key={w}>{w}</p>)}<label><input type="checkbox" checked={pinned.some((p:any)=>p.transition_id===links[i].id)} onChange={e=>onPinTransition(links[i].id,e.target.checked)}/> Pin this transition</label><button onClick={()=>run(async()=>{const values=await api.call('transition-alternatives',{id:plan.id,index:i});setFallbacks(f=>({...f,[i]:values}));return values;})}>Find validated fallback routes</button>{fallbacks[i]&&<div>{fallbacks[i].length?fallbacks[i].map(f=><p key={f.transition.id}>{f.transition.name} · {f.transition.wall_seconds.toFixed(1)}s handover <button onClick={()=>run(async()=>{const selected=await api.call('import-plan',{plan:f.plan});onUpdated(selected);return selected;})}>Use this fallback</button></p>):<p className="muted">No alternative preserves this set's timing and constraints. Adjust the brief or replan the order.</p>}</div>}<button disabled={!links[i].preview_supported} onClick={()=>run(async()=>{const r=await api.previewMedia(links[i].id,false);setPreview(r);return r;})}>Audition rehearsal</button></details>}</li>)}</ol>
-    <details><summary>Why tracks were omitted</summary>{Object.entries(plan.omission_reasons||{}).map(([id,reason])=><p key={id}>{lookup.get(id)?.title||id}: {String(reason)}</p>)}</details>
-    {preview?.url&&<audio controls src={preview.url}/>}<div className="toolbar">{['json','csv','html','pdf'].map(extension=><button key={extension} onClick={()=>run(()=>api.export({kind:'plan',id:plan.id,name:`autocue-set.${extension}`}))}>Export {extension.toUpperCase()}</button>)}</div>
-    <div className="toolbar"><input aria-label="Playlist name" value={name} onChange={e=>setName(e.target.value)}/><button onClick={()=>run(async()=>{const r=await api.call('rekordbox-preview',{plan_id:plan.id,playlist_name:name});setPreview(r);return r;})}>Preview rekordbox playlist</button></div>
-    {preview?.kind==='playlist'&&<div className="write-changes"><h4>Create “{preview.name}”</h4><p>{preview.entries.length} tracks, in the displayed order. Existing playlists are preserved.</p><button className="primary" onClick={()=>run(async()=>{const r=await api.call('rekordbox-apply',{id:preview.id});setPreview(null);return r;},'Reviewed playlist written; backup saved')}>Apply reviewed playlist</button></div>}
-  </section>;
+  return <Card>
+    <div className="plan-head">
+      <h3>Option {index+1}</h3>
+      <span className="mono dim">{clock(plan.duration_seconds,false)} · {plan.track_ids.length} tracks</span>
+      <Pill state={plan.stale?'stale':'complete'}>{plan.stale?'Needs revalidation':'Timing validated'}</Pill>
+      <div className="row spacer">
+        {onUseBrief&&plan.brief&&<Button size="sm" kind="ghost" onClick={onUseBrief}>Use this brief</Button>}
+      </div>
+    </div>
+    {Object.entries(plan.brief?.transpose||{}).some(([id,v])=>v&&plan.track_ids.includes(id))&&<p className="hint">Includes deliberate key shifts; each transition lists the deck setting.</p>}
+    {plan.stale?<p className="warning"><Icon name="alert" size={14}/>{plan.validation_error||'Track evidence changed. Replan or validate before using this set.'}</p>:<p className="muted">{plan.explanation}</p>}
+    <EnergyArc values={energy}/>
+    <ol className="set-list">{plan.track_ids.map((id:string,i:number)=>{const t=lookup.get(id),link=links[i],isPinned=pinned.some((p:any)=>p.track_id===id&&p.position===i);
+      return <li key={id} className="set-item">
+        <span className="set-index">{i+1}</span>
+        <div style={{minWidth:0}}><strong>{t?.title||id}</strong><small>{[t?.artist,t?.bpm&&`${t.bpm.toFixed(0)} BPM`].filter(Boolean).join(' · ')}</small></div>
+        <div className="row">
+          <Button size="sm" kind="ghost" icon="up" label="Move earlier" disabled={i===0||locked(i,i-1)} onClick={()=>move(i,-1)}/>
+          <Button size="sm" kind="ghost" icon="down" label="Move later" disabled={i===plan.track_ids.length-1||locked(i,i+1)} onClick={()=>move(i,1)}/>
+          <Button size="sm" kind="ghost" icon="pin" className={isPinned?'pinned':''} label={isPinned?'Unpin position':'Pin to this position'} onClick={()=>onPin(id,i,!isPinned)}/>
+          {onTranspose&&<select aria-label={`Key shift for ${t?.title||id}`} title="Deliberate key shift (key lock on); rebuild to apply" value={transpose[id]||0} onChange={e=>onTranspose(id,+e.target.value)}>{[-2,-1,0,1,2].map(v=><option key={v} value={v}>{v>0?`+${v}`:v===0?'±0':v} st</option>)}</select>}
+          {onReplan&&!plan.stale&&<Button size="sm" kind="ghost" icon="refresh" disabled={i===plan.track_ids.length-1} label={`Keep tracks 1–${i+1} and replan the rest`} onClick={()=>onReplan(i+1)}/>}
+        </div>
+        {link&&<div className="link-row">
+          <button className="link-summary" aria-expanded={open===i} onClick={()=>setOpen(open===i?null:i)}><Icon name="transition" size={14}/>{link.name} · {link.wall_seconds.toFixed(0)}s · {link.pitch_pct>=0?'+':''}{link.pitch_pct.toFixed(2)}%{link.warnings.length>0&&<Icon name="alert" size={14}/>}<span className="spacer"><Icon name="chevron" size={14}/></span></button>
+          {open===i&&<div className="link-detail">
+            <div className="meta-line"><span>Out {clock(link.out_start,false)} → {clock(link.out_end,false)}</span><span>In {clock(link.in_start,false)} → {clock(link.in_end,false)}</span></div>
+            <ol className="steps">{link.actions.map((a:any,n:number)=><li key={n}><span>+{a.at.toFixed(0)}s</span>{a.action}</li>)}</ol>
+            {link.warnings.map((w:string)=><p className="warning" key={w}><Icon name="alert" size={14}/>{w}</p>)}
+            <div className="row">
+              <Button size="sm" icon="play" disabled={!link.preview_supported} onClick={()=>run(async()=>{const r=await api.previewMedia(link.id,false);setPreview(r);return r;})}>Audition</Button>
+              <Button size="sm" icon="pin" className={pinned.some((p:any)=>p.transition_id===link.id)?'pinned':''} onClick={()=>onPinTransition(link.id,!pinned.some((p:any)=>p.transition_id===link.id))}>{pinned.some((p:any)=>p.transition_id===link.id)?'Pinned':'Pin transition'}</Button>
+              <Button size="sm" kind="ghost" onClick={()=>run(async()=>{const values=await api.call('transition-alternatives',{id:plan.id,index:i});setFallbacks(f=>({...f,[i]:values}));return values;})}>Find alternatives</Button>
+            </div>
+            {fallbacks[i]&&(fallbacks[i].length?fallbacks[i].map(f=><div className="list-row" key={f.transition.id}><span className="grow">{f.transition.name} · {f.transition.wall_seconds.toFixed(0)}s</span><Button size="sm" onClick={()=>run(async()=>{const selected=await api.call('import-plan',{plan:f.plan});onUpdated(selected);return selected;})}>Use</Button></div>)
+              :<p className="muted">No alternative keeps this set's timing and constraints.</p>)}
+          </div>}
+        </div>}
+      </li>;})}</ol>
+    {preview?.url!==undefined&&preview?.kind!=='playlist'&&<audio controls src={preview.url} style={{width:'100%',marginTop:10}}/>}
+    {Object.keys(plan.omission_reasons||{}).length>0&&<Disclosure summary={`${Object.keys(plan.omission_reasons).length} ${Object.keys(plan.omission_reasons).length===1?'track':'tracks'} left out`}>{Object.entries(plan.omission_reasons).map(([id,reason])=><p className="muted" key={id}><b style={{color:'var(--text)',fontWeight:500}}>{lookup.get(id)?.title||id}</b> — {String(reason)}</p>)}</Disclosure>}
+    <hr className="divider"/>
+    <div className="row">
+      <span className="muted">Export</span>
+      {['json','csv','html','pdf'].map(extension=><Button key={extension} size="sm" kind="ghost" onClick={()=>run(()=>api.export({kind:'plan',id:plan.id,name:`autocue-set.${extension}`}))}>{extension.toUpperCase()}</Button>)}
+      <div className="row spacer" style={{flexWrap:'nowrap'}}>
+        <input aria-label="Playlist name" value={name} onChange={e=>setName(e.target.value)} style={{width:180}}/>
+        <Button size="sm" onClick={()=>run(async()=>{const r=await api.call('rekordbox-preview',{plan_id:plan.id,playlist_name:name});setPreview(r);return r;})}>Preview rekordbox playlist</Button>
+      </div>
+    </div>
+    {preview?.kind==='playlist'&&<div className="write-preview">
+      <h4>Create “{preview.name}”</h4>
+      <p className="muted">{preview.entries.length} tracks in this order. Existing playlists are kept.</p>
+      <div className="row end" style={{marginTop:10}}>
+        <Button size="sm" kind="ghost" onClick={()=>setPreview(null)}>Discard</Button>
+        <Button size="sm" kind="primary" onClick={()=>run(async()=>{const r=await api.call('rekordbox-apply',{id:preview.id});setPreview(null);return r;},'Reviewed playlist written; backup saved')}>Write playlist</Button>
+      </div>
+    </div>}
+  </Card>;
 }

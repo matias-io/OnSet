@@ -1,6 +1,22 @@
 import React from 'react';
 import {emptyFilters} from './library';
-export function LibraryFilters({value,onChange}:any){
- const field=(key:string,label:string)=><label>{label}<input type={key.includes('Min')||key.includes('Max')?'number':'text'} value={value[key]} onChange={e=>onChange({...value,[key]:e.target.value})}/></label>;
- return <details className="panel"><summary>Filter tempo, harmony, energy and vocals</summary><div className="form-grid">{field('bpmMin','Minimum BPM')}{field('bpmMax','Maximum BPM')}{field('key','Key (standard or Camelot)')}{field('genre','Genre contains')}{field('energyMin','Minimum energy')}{field('energyMax','Maximum energy')}<label>Vocal evidence<select value={value.vocals} onChange={e=>onChange({...value,vocals:e.target.value})}>{['any','present','absent','unknown'].map(v=><option key={v}>{v}</option>)}</select></label><label>Analysis state<select value={value.analysis} onChange={e=>onChange({...value,analysis:e.target.value})}>{['any','pending','imported','complete','partial','missing'].map(v=><option key={v}>{v}</option>)}</select></label></div><p className="muted">Unknown keys, ratings and vocals stay unknown; they do not match a specified known-value filter.</p><button onClick={()=>onChange({...emptyFilters})}>Reset detailed filters</button></details>;
+import {Button,Field} from './ui';
+
+export function activeFilterCount(value:typeof emptyFilters){
+  return (Object.keys(emptyFilters) as (keyof typeof emptyFilters)[]).filter(k=>value[k]!==emptyFilters[k]).length;
+}
+export function LibraryFilters({value,onChange}:{value:typeof emptyFilters;onChange:(v:typeof emptyFilters)=>void}){
+  const set=(key:keyof typeof emptyFilters)=>(e:React.ChangeEvent<HTMLInputElement|HTMLSelectElement>)=>onChange({...value,[key]:e.target.value});
+  return <div className="filters-panel">
+    <Field label="BPM"><div className="row" style={{flexWrap:'nowrap'}}><input aria-label="Minimum BPM" type="number" placeholder="Min" value={value.bpmMin} onChange={set('bpmMin')}/><input aria-label="Maximum BPM" type="number" placeholder="Max" value={value.bpmMax} onChange={set('bpmMax')}/></div></Field>
+    <Field label="Energy"><div className="row" style={{flexWrap:'nowrap'}}><input aria-label="Minimum energy" type="number" placeholder="Min" value={value.energyMin} onChange={set('energyMin')}/><input aria-label="Maximum energy" type="number" placeholder="Max" value={value.energyMax} onChange={set('energyMax')}/></div></Field>
+    <Field label="Key"><input placeholder="8A or A minor" value={value.key} onChange={set('key')}/></Field>
+    <Field label="Genre"><input placeholder="Contains…" value={value.genre} onChange={set('genre')}/></Field>
+    <Field label="Vocals"><select value={value.vocals} onChange={set('vocals')}>{['any','present','absent','unknown'].map(v=><option key={v} value={v}>{v[0].toUpperCase()+v.slice(1)}</option>)}</select></Field>
+    <Field label="Analysis"><select value={value.analysis} onChange={set('analysis')}>{['any','pending','imported','complete','partial','missing'].map(v=><option key={v} value={v}>{v[0].toUpperCase()+v.slice(1)}</option>)}</select></Field>
+    <div className="row between">
+      <span className="hint">Tracks with unknown values never match a specific filter.</span>
+      <Button size="sm" kind="ghost" disabled={!activeFilterCount(value)} onClick={()=>onChange({...emptyFilters})}>Reset</Button>
+    </div>
+  </div>;
 }

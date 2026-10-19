@@ -37,7 +37,10 @@ if(import.meta.env.DEV&&typeof window!=='undefined'&&!(window as any).autocue){
   benchmark:()=>({records:[]}),'workspace-health':()=>({healthy:true,warnings:[],counts:{tracks:tracks.length,revisions:5,jobs:2}}),
   'workspace-backups':()=>[{id:'b1',created:'2026-10-19 08:12',counts:{tracks:12,revisions:5},reason:'open'},{id:'b2',created:'2026-10-18 22:40',counts:{tracks:12,revisions:4},reason:'close'}],
   manifests:()=>[{id:'m1',created:'2026-10-18 21:05',written:['track-0']}],doctor:()=>({python:'3.11',ffmpeg:true,wsl:true,gpu:'none (CPU)'}),
-  plan:()=>({plans:[plan],conflicts:[]}),'rekordbox-preview':(p:any)=>({id:'pv',stale:false,changes:[{track_id:p.track_ids?.[0]||'track-0',operations:[{role:'A',target:{InMsec:6000,OutMsec:21000},delete:[]},{role:'B',target:{InMsec:36000,OutMsec:-1},delete:['x']}],comment_before:'',comment_after:''}],conflicts:[]}),
+  plan:()=>({plans:[plan],conflicts:[]}),
+  'plan-job':()=>({id:'job-plan',kind:'plan',state:'complete',result:{plan_ids:['plan-1'],conflicts:[]}}),replan:()=>({plans:[plan],conflicts:[]}),
+  'review-queue':()=>tracks.filter(t=>t.analysis).map((t,i)=>({track_id:t.id,score:9-i,pending_cues:t.cues.length,reviewable:true,reasons:i%2?['Sources disagree whether outro exists','Unapproved hot cue D or mix-in/out cues']:['Unapproved hot cue D or mix-in/out cues']})),
+  'import-workspace':()=>({imported:3,located:2,missing_audio:['x'],history_rows:4,failed:[]}),'relocate-cache':()=>({updated:9,cache_files_rewritten:9,missing:[]}),'rekordbox-preview':(p:any)=>({id:'pv',stale:false,changes:[{track_id:p.track_ids?.[0]||'track-0',operations:[{role:'A',target:{InMsec:6000,OutMsec:21000},delete:[]},{role:'B',target:{InMsec:36000,OutMsec:-1},delete:['x']}],comment_before:'',comment_after:''}],conflicts:[]}),
  };
  (window as any).autocue={
   call:async(method:string,params?:any)=>{await new Promise(r=>setTimeout(r,120));return (responses[method]||(()=>({})))(params);},
