@@ -192,7 +192,9 @@ mod tests {
 
     #[test]
     fn an_installed_layout_beside_the_executable_wins_over_the_repository() {
-        if std::env::var_os("ONSET_SERVICE_ROOT").is_some() || std::env::var_os("ONSET_PYTHON").is_some() {
+        if std::env::var_os("ONSET_SERVICE_ROOT").is_some()
+            || std::env::var_os("ONSET_PYTHON").is_some()
+        {
             return; // explicit overrides take precedence by design
         }
         let dir = tempfile::tempdir().unwrap();
@@ -201,7 +203,10 @@ mod tests {
         std::fs::write(dir.path().join("runtime").join("python.exe"), b"").unwrap();
         let runtime = Runtime::locate_in(Some(dir.path())).unwrap();
         assert_eq!(runtime.root, dir.path().join("service"));
-        assert_eq!(runtime.python, dir.path().join("runtime").join("python.exe"));
+        assert_eq!(
+            runtime.python,
+            dir.path().join("runtime").join("python.exe")
+        );
     }
 
     #[test]
