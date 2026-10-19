@@ -131,3 +131,37 @@ Computer Use opened the exact approved installer through ordinary Windows Explor
 The application retained the signed-in account and successfully discovered GPT-6.1-Sol. Workspace health reported 160 tracks, five revisions and three paused jobs. A new native Save As export created `.test-data/post-installer-workspace-20261019.db`. Independent read-only validation passed SQLite integrity and exact full-row equality against the pre-upgrade export for all seven tables: tracks, aliases, revisions, edits, jobs, artifacts and settings. This includes all 105 artifacts and the stored citation audits and plans.
 
 Visible acceptance also confirmed the saved Option 2, 9:53 Losing It -> Stop It -> La Danza plan, validated timing and filter/cut handovers, pitch/key-lock settings and unverified-musical-evidence warnings. Stop It's expanded evidence panel retained the actual DIRTYBIRD/Bandcamp URL, 77 consulted research sources, the Citation: retained audit and separate exact-edit uncertainty. No new online enrichment, audio upload, cue approval or live rekordbox write was performed. Evidence is `.artifacts/package-verification-continuation-20261019.json` and `.artifacts/post-installer-workspace-verification-20261019.json`.
+
+## Audit-gaps installer acceptance (2026-10-19)
+
+Installer: `release-0.2.0-audit-gaps/Autocue Setup 0.2.0.exe`, 212,965,009 bytes, SHA-256 `70c20400fb5a29d0292eb94a0adc29b9c6cd39530f9cfc00481586b3116f209e`. The hash was rechecked before running it. The user approved the install. Evidence: `.artifacts/package-verification-audit-gaps-20261019.json`.
+
+**Install.** Computer Use ran the installer from ordinary File Explorer and chose "Only for me (water)" with the existing destination `%USERPROFILE%\AppData\Local\Programs\Autocue`. The installer finished and launched Autocue itself; no shell started the app. `scripts/verify-package.py` then matched all 51 installed Python, worker and app-archive files to the tested source; installed app.asar SHA-256 is `69fef91c9c9c16ec0abcda9aa16a5209b1e49b6215beae65a88d579f8a9ec67a`. The app opened the ordinary workspace (160 tracks; Data & backups: Healthy, 5 revisions, 45 snapshots).
+
+**Passed, visibly in the installed app:**
+
+- **Review queue.** The Library view put the five imported tracks first (Stop It, World Hold On, La Danza, Losing It, FISHER - STAY), each with a reason such as "Unapproved hot cue D or mix-in/out cues · +5 more". Pending tracks followed with "Key is weak or unknown".
+- **Brief fields.** Smooth blends, Contrast and rekordbox playlists rendered with their hints. Their values were not changed.
+- **Set search as a job.** "Build 3 options" over all 160 visible tracks created a "Set search · Running" job and the planner showed "Cancel search". Cancelling left the job Cancelled after roughly 20–25 s.
+- **Completed set search.** With the five imported tracks checked and a temporary 12-minute / 8-minute brief, a Set search completed with validated 12:00 four-track options.
+- **Key shift.** Setting Stop It to +1 st showed "Key shift saved; rebuild or replan to apply it". It was reset to ±0 st.
+- **Replan.** With no key shift, "Keep tracks 1–2 and replan the rest" returned options explained as "Keeps the first 2 tracks and replans the rest", all starting Losing It → Stop It. The last row's replan button is disabled.
+- **Benchmark form.** The structured form rendered on Fragments (development split): four events, keys, true BPM, notes and the Advanced JSON section. "Use playhead (bar 0)" set Later drop to Present, bar 0. Nothing was saved.
+- **Data & backups.** The Import from another computer and Move analysis cache cards rendered, with their action buttons disabled until filled in. Neither was run against the real workspace.
+
+**Findings:**
+
+1. **Key shift blocks replan.** A key shift on a track inside the kept part of a set makes "Keep tracks 1–N" fail with "Transition was calculated for a different transpose setting". The kept transition was calculated before the shift. The refusal is safe, but the replan cannot proceed until that transition is recalculated.
+2. **Slow cancel on large searches.** Cancellation is only checked between search depths, so on 160 tracks the first full pairwise pass delays it by about 20 s.
+3. **Seeking (outside these changes).** Clicking the waveform on Fragments and on Stop It left the playhead at 0:00.0, so "Use playhead" was only exercised at bar 0. Not investigated; seeking was never covered by earlier acceptance either.
+4. **Cosmetic.** While a set search runs, the sidebar reads "Analysing · 0%" and the job's progress stays at 0% until it completes.
+
+**Follow-up (source only, not packaged or rechecked in the installed app).** Findings 1, 2 and 4 are fixed in source:
+
+- Replan now recalculates kept transitions that do not match the current key shifts or timing, keeping the same technique where possible, and says so in the plan explanation.
+- The set search checks for cancellation for every candidate pair, not only between depths.
+- The set search reports an estimated progress fraction, saved at most four times a second. The sidebar names the running job, for example "Set search · 40%".
+
+Regressions: `test_replan_recalculates_kept_transitions_after_a_key_shift` and `test_set_search_reports_progress_and_cancels_within_the_first_pass`. 120 Python tests, 33 desktop tests and the build pass. Finding 3 (waveform seeking) is fixed in source too. The `autocue-audio` handler forwarded requests with `net.fetch(file://)`, which did not answer range requests with 206 Partial Content, so Chromium treated audio as unseekable and reset the playhead. `desktop/media.ts` now serves byte ranges itself (`desktop/media.test.ts` covers 200, 206 and 416 responses). A development Electron build was run with Computer Use on an isolated workspace with one generated track. Clicking the waveform held the playhead at 0:44.5, and playback continued to 0:47.7. Not yet checked in a rebuilt installer.
+
+**Side effects:** two Set search jobs (one complete, one cancelled) and their set and transition artifacts were saved to the workspace. The brief's length and tolerance were set to 12 and 8 minutes for one search, then restored to 60 and 2. Stop It's key shift was set and reset. No cues were approved, nothing was written to rekordbox, no audio was uploaded, and the three paused deep-analysis jobs were not touched.

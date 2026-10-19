@@ -67,7 +67,7 @@ Final continuation checks pass: 93 Python tests, 26 desktop tests, desktop build
 
 ## Source continuation after the installer (2026-10-19, later)
 
-These changes are in source only and are **not in the verified 0.2.0 installer**. A new installer build and the action-time install confirmation are needed before installed-app credit. Automated record for this source: 101 Python tests, 30 desktop tests, and a successful TypeScript/Vite/Electron build. The UI changes have unit-test and typecheck evidence only; they have not been exercised through Computer Use.
+These changes are in source only and are **not in the verified 0.2.0 installer**. A new installer build and the action-time install confirmation are needed before installed-app credit. Automated record for this source: 101 Python tests, 31 desktop tests, and a successful TypeScript/Vite/Electron build. The UI changes have unit-test and typecheck evidence only; they have not been exercised through Computer Use.
 
 - **Planner late-entry bug (P10.2, P7.2).** `options()` keeps one best window per technique and then the top three. When a set entered a track after an early exit window, every top option could start before the entry point. The route was then dropped, and the planner reported "no valid set" even when a later exit window worked. `options(min_out_start=...)` now searches only playable windows. The planner, `replan_order` and `transition_alternatives` use it. Regression: `test_late_entry_searches_later_exit_windows`.
 - **Unsatisfiable briefs (P10.2).** Conflicts now name the cause before the generic message:
@@ -93,16 +93,68 @@ These changes are in source only and are **not in the verified 0.2.0 installer**
   - Settings loads now report errors, and a failed experimental-model toggle rolls back.
   - Icon-only and row controls have accessible names.
 
-Still open from the same audit (not done here):
-- portable workspace snapshot import with path remapping;
-- cache and stem relocation;
-- true prefix or partial replanning, and searching pinned transitions during planning;
-- transpose carrying;
-- SetBrief smoothness, contrast and playlist fields;
-- a structured benchmark label form;
-- spectrogram frequency ticks from coordinates;
-- review-priority sorting;
-- treating `transitions`/`plan` as cancellable jobs.
+- **Interface redesign (P5.1–P5.2).** The theme is new: a neutral graphite palette with one violet accent, semantic status colours, Segoe UI Variable, and consistent 34/28 px controls. Icons are inline SVG. Track review now uses sub-tabs instead of a 12-panel scroll.
+  - Removed decorative text: eyebrows, taglines, sidebar slogan and footer.
+  - Removed duplication: the second ChatGPT account block, the repeated raw JSON on Track review, the per-card "Audition required" pills and the static 18-family catalogue list.
+  - Some readouts are now readable tables or key/value lists instead of raw JSON: doctor output, workspace diagnostics, key estimates and grid evidence. Raw analysis remains under Corrections → Raw analysis data.
+  - Fixed squashed character curves and cue chips that had lost their colours.
+  - Spectrogram frequency labels now sit at their actual bin rows.
+  - The waveform redraws when resized.
+  - Notifications are toasts, and a top progress bar shows activity.
+  - Must-play and Exclude use chip pickers instead of tall multi-selects.
+  - All write, restore and approval safeguards are unchanged.
+  - Evidence: TypeScript build, 31 desktop tests, and a visual pass over every page in the browser preview with the dev sample bridge at 1440 and 1000 px. It has not yet been checked in the installed Electron app.
+
+Spectrogram frequency ticks from bin coordinates were completed in the interface redesign above. The rest of that audit list is closed in the next section.
+
+
+## Audit gaps closed in source (2026-10-19, latest)
+
+Source only. These changes are **not in the verified 0.2.0 installer**. Automated record: 118 Python tests (twice in a row), 33 desktop tests, typecheck and production build. The UI was checked in the browser preview with the development sample bridge, not in the installed Electron app or against real music.
+
+- **Vocal clashes (P7.1, P3.1).**
+  - Analysis now stores per-bar vocal activity from the separated vocal stem (`vocal_activity`).
+  - Transitions sample both tracks across the actual overlap. More than 4 s of simultaneous vocals removes the option; 1–4 s adds a warning.
+  - Cuts warn when the outgoing vocal is cut mid-phrase or the incoming track has a vocal pickup before the downbeat.
+  - Without stems, the earlier window-level rule and the "unverified" warning still apply.
+  - Thresholds are heuristics, not listening-verified.
+- **Mix windows (P7.2, P3.3).**
+  - `structure.mix_windows` marks spans of at least 8 bars with steady percussion, little vocal and enough runway before the next strong boundary.
+  - The two best become extra entry/exit candidates. Corrected sections take precedence and suppress them.
+  - Mix windows that end close to the next major change add a "little runway" warning.
+- **Deep results cache and resolution version.**
+  - `structure-resolution-3` invalidates earlier resolved results.
+  - Completed deep model outputs are reused from `deep-results.json`, or from an older `result.json`, so this version change does not rerun Demucs, Beat This! or other models. Models rerun only if their files are missing.
+- **Set brief (P10.1).**
+  - New fields: `smoothness` and `contrast` (0–1). Only their difference shifts scores, so the defaults leave earlier rankings unchanged.
+  - `playlists`: rekordbox playlist names, read during the rekordbox import (normal playlists only).
+  - `transpose`: whole-semitone key shifts per track, from −12 to +12.
+  - Transposes affect key and overlap compatibility, appear as deck actions, and are checked by `validate_plan`.
+- **Planning (P10.2).**
+  - Pinned transitions are now forced during the search, not just checked afterwards. Unknown pins are reported.
+  - `replan` keeps the first N tracks and transitions of a saved set and searches the rest.
+  - `plan-job` and `transitions-job` run the searches as cancellable light jobs; the synchronous `plan` and `transitions` calls remain.
+- **Review queue (P5.2).**
+  - `review-queue` ranks tracks by stale cues, unapproved D/A/E/F cues, source disagreements on events, analysis flags, grid instability, weak keys and use in saved sets. Each rank comes with written reasons.
+  - The Library "Review queue" view sorts by this ranking and shows the main reason.
+- **Portability (I2, P1.2).**
+  - `import-workspace` accepts a workspace JSON or SQLite export from another machine, applies old-to-new folder mappings, and still matches every file by checksum.
+  - From SQLite exports it also restores revision and edit history.
+  - `relocate-cache` rewrites stored feature, stem and model-output paths after you move the cache folder, and reports files that are missing.
+- **Benchmark labels (V2).** A structured form replaces raw JSON: event state and bar, "Use playhead", acceptable keys, true BPM and notes. Grid samples, boundaries and sections stay as advanced JSON.
+- **Atomic writes.** On Windows, `os.replace` is retried briefly when the file is held. One full-suite run hit a transient "Access is denied" on a workspace marker.
+
+**Package build (2026-10-19, latest).**
+- Installer: `release-0.2.0-audit-gaps/Autocue Setup 0.2.0.exe`, 212,965,009 bytes, SHA-256 `70c20400fb5a29d0292eb94a0adc29b9c6cd39530f9cfc00481586b3116f209e`.
+- Size: the unpacked app is 822 MB, with a complete 446 MB runtime. The smaller installer reflects NSIS compression; the earlier 796 MB build was nearly uncompressed.
+- Payload: `scripts/verify-package.py` matched all 51 packaged Python, worker and app-archive files to the tested source. app.asar SHA-256 is `69fef91c9c9c16ec0abcda9aa16a5209b1e49b6215beae65a88d579f8a9ec67a`. Record: `.artifacts/package-verification-audit-gaps-20261019.json`.
+- Smoke test: `scripts/package-smoke.py` used the packaged runtime and packaged sources on generated audio in an isolated workspace. All 13 checks passed: light analysis, mix windows, resolution version, review queue, plan job, transpose carry, vocal-overlap field, prefix replan, pinned-transition search, plan-job cancel, cache relocation, and SQLite/JSON workspace import with remapping. Record: `.artifacts/package-smoke-audit-gaps-20261019.json`.
+- **Installed and visibly checked on 2026-10-19** with user approval. The installed payload matches the source, and every listed feature check passed. Findings: a key shift on a kept track blocks replanning; cancelling a large search takes about 20 s; waveform seeking left the playhead at 0:00 (outside these changes). Details and side effects are in [desktop verification](DESKTOP_VERIFICATION.md#audit-gaps-installer-acceptance-2026-10-19).
+- The redesign build in `release-0.2.0-redesign` predates these changes and has no recorded verification; do not use it.
+
+**After installed acceptance (source only).** Three acceptance findings are fixed in source and covered by regressions: replan after a key shift, set-search cancel latency, and the set-search progress label. They are listed in [desktop verification](DESKTOP_VERIFICATION.md). 120 Python tests, 33 desktop tests and the build pass. Waveform seeking (finding 3) is also fixed: local audio is now served with byte ranges, and the fix was checked in a development Electron build with generated audio. These fixes need a rebuilt installer before they count as installed.
+
+Still open: learned local genre/mood/danceability estimators and learned transition acceptability. Both need listening labels or model assets that have not been gathered. Real-library behaviour of every item above also still needs checking.
 
 
 ## Evidence map

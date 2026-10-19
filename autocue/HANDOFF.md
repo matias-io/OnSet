@@ -17,13 +17,13 @@ The user wants implementation and verification continued until the intended scop
 | Item | State as of 2026-10-19 |
 |---|---|
 | Version | 0.2.0 engineering candidate, not full production acceptance |
-| Verified installer | `release-0.2.0-complete-verification/Autocue Setup 0.2.0.exe` |
-| Installer identity | 796,752,056 bytes; SHA-256 `e558bb847222c46b6fee9adadf171d97c5fd807ec92e0a3bc5b508743d880b6e` |
+| Verified installer | `release-0.2.0-audit-gaps/Autocue Setup 0.2.0.exe` (installed 2026-10-19). Its acceptance covered the audit-gap features listed in DESKTOP_VERIFICATION, with recorded findings. The earlier `release-0.2.0-complete-verification` build holds the broader citation, multi-track and upgrade evidence; those workflows were not rechecked on the new build. |
+| Installer identity | 212,965,009 bytes; SHA-256 `70c20400fb5a29d0292eb94a0adc29b9c6cd39530f9cfc00481586b3116f209e`. Previous: 796,752,056 bytes; SHA-256 `e558bb847222c46b6fee9adadf171d97c5fd807ec92e0a3bc5b508743d880b6e` |
 | Installed executable | `%USERPROFILE%\AppData\Local\Programs\Autocue\Autocue.exe` |
-| Automated record | Installer source: 93 Python, 26 desktop, build. Current source (later 2026-10-19, not yet packaged): 101 Python, 30 desktop, build. See IMPLEMENTATION_STATUS "Source continuation after the installer" |
-| Installed payload | All 25 Python source files and app.asar match the tested manifest |
-| UI archive hash | `1d09af8e1b9acee5f93bfd966d8b0f86a92ba5e35fa3a8c73b3a2964fa826250` |
-| Native analysis versions | `native-analysis-3`; resolved result requires `structure-resolution-2` |
+| Automated record | Audit-gaps installer source: 118 Python, 33 desktop, build. Current source adds fixes for three acceptance findings (key-shift replan, set-search cancel latency, progress label) and is **not yet packaged**: 120 Python, 33 desktop, build. See IMPLEMENTATION_STATUS "Source continuation after the installer" |
+| Installed payload | All 51 packaged Python, worker and app-archive files matched the source tested at build time (`scripts/verify-package.py`, 2026-10-19). Later fixes to `planning.py`, `service.py` and `ui/main.tsx` mean the current source no longer matches the installed build. |
+| UI archive hash | `69fef91c9c9c16ec0abcda9aa16a5209b1e49b6215beae65a88d579f8a9ec67a` (previous build: `1d09af8e1b9acee5f93bfd966d8b0f86a92ba5e35fa3a8c73b3a2964fa826250`) |
+| Native analysis versions | `native-analysis-3`; resolved result requires `structure-resolution-3` (completed deep-model outputs are reused) |
 | Active workspace acceptance | 160 tracks, 160 aliases, five historical imported revisions, zero edits, three paused jobs, 105 artifacts, zero approved cues |
 | ChatGPT acceptance | Retained signed-in account; model discovery returned GPT-6.1-Sol; no token plaintext exposed |
 | Multi-track acceptance | Losing It → Stop It → La Danza, filter/cut, 593.4328450249433 seconds (9:53), key lock and ±6% constraints, uncertainty visible |

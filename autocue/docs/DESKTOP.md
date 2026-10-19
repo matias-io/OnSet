@@ -64,6 +64,18 @@ powershell -ExecutionPolicy Bypass -File scripts/package-runtime.ps1
 
 The default installer command writes to `release/`; it does not recreate or overwrite the named verified package directory automatically. A new build needs fresh payload/hash and installed acceptance checks before inheriting the verified package status.
 
+**Interface preview without Electron.** Run `npm run dev` (or the `ui-preview` entry in `.claude/launch.json`) and open `http://127.0.0.1:5173`. Without the Electron bridge, `ui/devMock.ts` supplies a sample library so you can review layout and styling. It never touches real data, and Vite removes it from production builds. The dev server strips the page Content-Security-Policy only while serving, because React refresh needs an inline script. `dist/index.html` keeps the strict policy.
+
+**Interface layout.** The interface has five pages in the sidebar:
+
+- **Library:** search, a view switch, a filter panel and an analysis selection bar.
+- **Track review:** waveform and transport, plus Cues / Profile / Evidence / Stems / Corrections tabs. Writing to rekordbox lives under Cues.
+- **Transitions.**
+- **Set planner:** brief, ChatGPT adviser and plan options.
+- **Settings:** Jobs, ChatGPT, Analysis engine, Energy calibration, and Data & backups (workspace snapshots, rekordbox write history and exports).
+
+Colours, spacing and radii come from tokens at the top of `ui/style.css`. Shared controls live in `ui/ui.tsx`.
+
 To regenerate the local Python engineering report, run `& .venv/Scripts/python.exe scripts/quality-report.py`. That script runs Python tests and retains existing acceptance records; it reads a saved desktop test JSON report rather than running Vitest or Computer Use. Run desktop tests/build separately and keep their report provenance current.
 
 Native dependencies are pinned in `uv.lock`; desktop dependencies in `package-lock.json`; WSL CPU dependencies in `worker/requirements-cpu.lock`. Experimental EDMFormer and all-in-one have separate locked WSL environments and setup controls. Both passed generated-audio CPU inference; they remain opt-in evidence pending listening benchmarks. The model manifest records versions and attribution; worker asset manifests record downloaded model hashes.
@@ -85,7 +97,7 @@ Other verbs: `transitions`, `validate-plan`, `preview`, `rekordbox-preview`, `re
 
 In **Jobs & settings → Workspace health & recovery**, choose **Create verified workspace backup** for a consistent local snapshot. Nonempty workspaces also receive startup, quit-checkpoint and shutdown snapshots. Expand **Workspace snapshots**, choose **Preview workspace restore**, and inspect current and replacement counts. **Keep current workspace** dismisses the preview. Restoring requires explicit approval, a still-current preview and no active workers; a rollback snapshot is created first. These operations affect Autocue data. Unexpected database replacement or record loss pauses ordinary operations for review.
 
-**Export full workspace history** saves a verified SQLite copy containing profiles, revisions, human corrections, undo history, jobs, settings and saved artifacts. Music, large feature/stem caches, model assets, credentials and the rekordbox database are separate. Keep those resources and the previous working installer/model configuration backed up as appropriate. Importing a portable SQLite snapshot from another machine does not yet have a dedicated interface. Local snapshots are not automatically pruned.
+**Export full workspace history** saves a verified SQLite copy containing profiles, revisions, human corrections, undo history, jobs, settings and saved artifacts. Music, large feature/stem caches, model assets, credentials and the rekordbox database are separate. Keep those resources and the previous working installer/model configuration backed up as appropriate. To import a JSON or SQLite workspace export from another machine, use **Import from another computer**; files are remapped by folder and matched by checksum. After moving the feature/stem cache folder, use **Move analysis cache**. Local snapshots are not automatically pruned.
 
 **Write history & recovery** separately restores a recorded rekordbox database backup with rekordbox closed. It checks the backup checksum and retains the current database before replacement. No automatic full-library write is part of setup.
 
