@@ -74,7 +74,6 @@ pub struct OverlayView<'a> {
     pub fx: onset_core::show::Fx,
     pub audio: onset_core::audio_features::AudioFeatures,
     pub vibe: onset_core::show::Vibe,
-    pub palette: [[f32; 3]; 5],
     pub track: Option<&'a onset_core::track::TrackMeta>,
     /// Graphics adapters that could render, and the one in use.
     pub adapters: &'a [String],
@@ -176,7 +175,7 @@ fn status_text(status: &EngineStatus) -> String {
 impl Overlay {
     pub fn new(window: &Arc<Window>, gpu: &Gpu, format: wgpu::TextureFormat) -> Self {
         let ctx = egui::Context::default();
-        ctx.set_visuals(egui::Visuals::dark());
+        crate::brand::apply(&ctx);
         // The panel is read from a DJ booth, not a desk: a third larger than egui's default.
         ctx.set_zoom_factor(PANEL_ZOOM);
         let state = egui_winit::State::new(
@@ -329,7 +328,7 @@ impl Overlay {
 
     fn panel(&mut self, config: &mut Config, view: &OverlayView<'_>, edits: &mut Edits) {
         let ctx = self.ctx.clone();
-        egui::Window::new("Onset")
+        egui::Window::new("OnSet")
             .default_width(380.0)
             .collapsible(false)
             .resizable(false)

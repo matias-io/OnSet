@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="OnSet">
+  <title>OnSet</title>
+  <rect width="64" height="64" rx="15" fill="#0c0d10"/>
+  <path d="M10 36 H24 L28.5 13 L33 48 L36.5 29 L40 40 L43.5 34 L47 37.5 L50 36 H54"
+        fill="none" stroke="#a194ff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="28.5" cy="13" r="3.4" fill="#f472b6"/>
+</svg>

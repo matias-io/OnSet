@@ -154,7 +154,7 @@ impl Hud {
             on(
                 o.scene,
                 format!(
-                    "Onset  ·  {}  ·  {}x{}",
+                    "OnSet  ·  {}  ·  {}x{}",
                     info.scene, info.size.0, info.size.1
                 ),
             ),

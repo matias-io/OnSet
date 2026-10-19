@@ -1,6 +1,7 @@
 //! Onset: real-time, structure-aware visuals for rekordbox DJs.
 mod app;
 mod bench;
+mod brand;
 mod config;
 mod launcher;
 mod lyrics;

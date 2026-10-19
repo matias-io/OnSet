@@ -8,6 +8,7 @@ use onset_render::overlay_options::{Corner, LyricPlace, LyricStyle};
 use onset_render::renderer::Quality;
 use onset_render::scenes::scene_info;
 
+use crate::brand;
 use crate::config::{Config, MonitorChoice, PresentModeChoice, Preset};
 use crate::engine::{EngineCommand, EngineStatus};
 use crate::overlay::{Edits, OverlayAction, OverlayView, monitor_detail, monitor_label};
@@ -31,17 +32,17 @@ pub fn readiness(status: &EngineStatus) -> (Light, String, String) {
         EngineStatus::Waiting(why) if why.contains("no offsets") => (
             Light::Amber,
             "rekordbox is running, but this version is not calibrated yet".into(),
-            "Run the calibration below once. Onset then connects by itself.".into(),
+            "Run the calibration below once. OnSet then connects by itself.".into(),
         ),
         EngineStatus::Waiting(why) if why.contains("finding its decks") => (
             Light::Amber,
             "rekordbox found, finding its decks".into(),
-            "This takes up to 20 seconds after Onset or rekordbox starts.".into(),
+            "This takes up to 20 seconds after OnSet or rekordbox starts.".into(),
         ),
         EngineStatus::Waiting(why) if why.contains("waiting for rekordbox") => (
             Light::Red,
             "rekordbox is not running".into(),
-            "Start rekordbox in Performance mode. Onset connects by itself, before or during the show.".into(),
+            "Start rekordbox in Performance mode. OnSet connects by itself, before or during the show.".into(),
         ),
         EngineStatus::Waiting(why) | EngineStatus::Error(why) => {
             (Light::Red, why.clone(), String::new())
@@ -132,9 +133,9 @@ fn steps() -> &'static [&'static str] {
 
 fn light_colour(light: Light) -> egui::Color32 {
     match light {
-        Light::Red => egui::Color32::from_rgb(230, 70, 70),
-        Light::Amber => egui::Color32::from_rgb(240, 180, 40),
-        Light::Green => egui::Color32::from_rgb(70, 200, 110),
+        Light::Red => brand::BAD,
+        Light::Amber => brand::WARN,
+        Light::Green => brand::GOOD,
     }
 }
 
@@ -183,29 +184,6 @@ impl Tab {
 /// Width of the launcher's panel, in logical pixels; the rest of the window is the preview.
 pub const PANEL_WIDTH: f32 = 540.0;
 
-fn rgb(c: [f32; 3]) -> egui::Color32 {
-    let to8 = |v: f32| (v.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0).round() as u8;
-    egui::Color32::from_rgb(to8(c[0]), to8(c[1]), to8(c[2]))
-}
-
-/// The accent the launcher uses: the track's own colour, lifted towards white until it is
-/// light enough to read on the dark panel and to carry black text on a button.
-fn accent(view: &OverlayView<'_>) -> egui::Color32 {
-    let c = view.palette[2];
-    let m = c[0].max(c[1]).max(c[2]).max(0.05);
-    let mut c = [c[0] / m, c[1] / m, c[2] / m];
-    let luma = |c: &[f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-    for _ in 0..8 {
-        if luma(&c) >= 0.45 {
-            break;
-        }
-        for v in &mut c {
-            *v += (1.0 - *v) * 0.2;
-        }
-    }
-    rgb(c)
-}
-
 /// An on/off switch that makes its state obvious (the egui demo's toggle).
 fn toggle(ui: &mut egui::Ui, on: &mut bool, colour: egui::Color32) -> egui::Response {
     let size = ui.spacing().interact_size.y * egui::vec2(2.0, 1.0);
@@ -216,18 +194,11 @@ fn toggle(ui: &mut egui::Ui, on: &mut bool, colour: egui::Color32) -> egui::Resp
     }
     let t = ui.ctx().animate_bool_responsive(response.id, *on);
     let radius = 0.5 * rect.height();
-    let bg = if *on {
-        colour
-    } else {
-        egui::Color32::from_gray(70)
-    };
+    let bg = if *on { colour } else { brand::BORDER_STRONG };
     ui.painter().rect_filled(rect, radius, bg);
     let x = egui::lerp((rect.left() + radius)..=(rect.right() - radius), t);
-    ui.painter().circle_filled(
-        egui::pos2(x, rect.center().y),
-        radius * 0.8,
-        egui::Color32::WHITE,
-    );
+    ui.painter()
+        .circle_filled(egui::pos2(x, rect.center().y), radius * 0.8, brand::TEXT);
     response
 }
 
@@ -244,7 +215,7 @@ fn switch_row(
         changed = toggle(ui, on, colour).changed();
         ui.label(egui::RichText::new(title).strong());
         let word = if *on { "ON" } else { "OFF" };
-        let tint = if *on { colour } else { egui::Color32::GRAY };
+        let tint = if *on { colour } else { brand::MUTED };
         ui.label(egui::RichText::new(word).color(tint).small().strong());
     });
     ui.label(egui::RichText::new(detail).small().weak());
@@ -255,8 +226,7 @@ fn switch_row(
 fn meter(ui: &mut egui::Ui, level: f32, colour: egui::Color32) {
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 4.0), egui::Sense::hover());
-    ui.painter()
-        .rect_filled(rect, 2.0, egui::Color32::from_gray(35));
+    ui.painter().rect_filled(rect, 2.0, brand::SURFACE_3);
     let mut fill = rect;
     fill.set_width(rect.width() * level.clamp(0.0, 1.0));
     ui.painter().rect_filled(fill, 2.0, colour);
@@ -287,7 +257,7 @@ fn section_help(ui: &mut egui::Ui, title: &str, help: &str) {
             egui::RichText::new(" ? ")
                 .small()
                 .strong()
-                .background_color(egui::Color32::from_gray(50)),
+                .background_color(brand::HOVER),
         )
         .on_hover_text(help);
     });
@@ -312,10 +282,10 @@ pub fn launcher_page(
     let screen = ctx.content_rect();
     let width = PANEL_WIDTH.min(screen.width() * 0.6);
     let frame = egui::Frame::default()
-        .fill(egui::Color32::from_rgba_unmultiplied(10, 10, 14, 238))
+        .fill(brand::SURFACE.gamma_multiply(0.96))
         .inner_margin(egui::Margin::symmetric(18, 14))
-        .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(40)));
-    let colour = accent(view);
+        .stroke(egui::Stroke::new(1.0, brand::BORDER));
+    let colour = brand::VIOLET;
     egui::Window::new("launcher")
         .title_bar(false)
         .frame(frame)
@@ -327,9 +297,9 @@ pub fn launcher_page(
             let mut tab_button = |ui: &mut egui::Ui, t: Tab| {
                 let selected = *tab == t;
                 let text = egui::RichText::new(t.label()).color(if selected {
-                    egui::Color32::WHITE
+                    brand::TEXT
                 } else {
-                    egui::Color32::from_gray(190)
+                    brand::TEXT_2
                 });
                 if ui.selectable_label(selected, text).clicked() {
                     *tab = t;
@@ -369,9 +339,9 @@ pub fn launcher_page(
                     egui::RichText::new("Start show")
                         .size(20.0)
                         .strong()
-                        .color(egui::Color32::BLACK),
+                        .color(brand::ON_MAGENTA),
                 )
-                .fill(colour)
+                .fill(brand::MAGENTA)
                 .min_size(egui::vec2(200.0, 40.0));
                 if ui.add(start).clicked() {
                     edits.actions.push(OverlayAction::StartShow);
@@ -389,30 +359,34 @@ pub fn launcher_page(
 }
 
 fn header(ui: &mut egui::Ui, view: &OverlayView<'_>, colour: egui::Color32) {
-    // The title breathes with the kick, so the launcher shows the audio is live.
+    // The mark's dot breathes with the kick, so the launcher shows the audio is live.
     // The row keeps a fixed height so the panel below does not jump on every kick.
     let pulse = view.audio.kick.clamp(0.0, 1.0);
     let (row, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), egui::Sense::hover());
     let painter = ui.painter_at(row);
-    // Measured at rest, so the subtitle stays still while the title pulses.
+    let mark = egui::Rect::from_min_size(
+        row.left_top() + egui::vec2(0.0, 2.0),
+        egui::vec2(40.0, 40.0),
+    );
+    brand::paint_mark(&painter, mark, pulse);
     let title_w = painter
-        .layout_no_wrap("ONSET".into(), egui::FontId::proportional(30.0), colour)
+        .layout_no_wrap("OnSet".into(), egui::FontId::proportional(28.0), colour)
         .size()
         .x;
     painter.text(
-        row.left_center(),
+        egui::pos2(mark.right() + 12.0, row.center().y),
         egui::Align2::LEFT_CENTER,
-        "ONSET",
-        egui::FontId::proportional(30.0 + 4.0 * pulse),
-        colour,
+        "OnSet",
+        egui::FontId::proportional(28.0),
+        brand::TEXT,
     );
     painter.text(
-        egui::pos2(row.left() + title_w + 14.0, row.center().y + 3.0),
+        egui::pos2(mark.right() + 12.0 + title_w + 12.0, row.center().y + 3.0),
         egui::Align2::LEFT_CENTER,
-        "visuals for rekordbox",
+        "live visuals for rekordbox",
         egui::FontId::proportional(14.0),
-        ui.visuals().weak_text_color(),
+        brand::TEXT_2,
     );
     let (light, verdict, hint) = readiness(view.status);
     ui.horizontal(|ui| {
@@ -495,16 +469,16 @@ fn mode_cards(ui: &mut egui::Ui, config: &mut Config, colour: egui::Color32, edi
             let fx = p.fx().unwrap_or_default();
             let frame = egui::Frame::default()
                 .fill(if selected {
-                    egui::Color32::from_gray(38)
+                    brand::SURFACE_3
                 } else {
-                    egui::Color32::from_gray(24)
+                    brand::SURFACE_2
                 })
                 .stroke(egui::Stroke::new(
                     if selected { 2.0 } else { 1.0 },
                     if selected {
                         colour
                     } else {
-                        egui::Color32::from_gray(55)
+                        brand::BORDER_STRONG
                     },
                 ))
                 .corner_radius(6.0)
@@ -515,15 +489,7 @@ fn mode_cards(ui: &mut egui::Ui, config: &mut Config, colour: egui::Color32, edi
                     ui.label(if selected { title.color(colour) } else { title });
                     for (name, level) in style_levels(&fx) {
                         ui.label(egui::RichText::new(name).small().weak());
-                        meter(
-                            ui,
-                            level,
-                            if selected {
-                                colour
-                            } else {
-                                egui::Color32::from_gray(120)
-                            },
-                        );
+                        meter(ui, level, if selected { colour } else { brand::MUTED });
                     }
                 })
                 .response
@@ -553,15 +519,11 @@ fn preset_buttons(
             let selected = config.preset == p;
             let text = egui::RichText::new(p.label()).strong();
             let b = egui::Button::new(if selected {
-                text.color(egui::Color32::BLACK)
+                text.color(brand::ON_VIOLET)
             } else {
                 text
             })
-            .fill(if selected {
-                colour
-            } else {
-                egui::Color32::from_gray(45)
-            })
+            .fill(if selected { colour } else { brand::SURFACE_3 })
             .min_size(egui::vec2(96.0, 30.0));
             if ui.add(b).clicked() {
                 config.preset = p;
@@ -824,7 +786,7 @@ fn scenes_tab(
                             };
                             let t = egui::RichText::new(tag).small();
                             ui.label(if i.cost > max_cost {
-                                t.color(egui::Color32::from_rgb(230, 140, 60))
+                                t.color(brand::WARN)
                             } else {
                                 t.weak()
                             })
@@ -1081,7 +1043,7 @@ fn effects_tab(
     section(ui, "Strobe");
     let before = fx.strobe;
     ui.checkbox(&mut fx.strobe, "Strobe after drops");
-    ui.label(egui::RichText::new("Can trigger seizures in people with photosensitive epilepsy. Onset never flashes faster than three times a second, but check with the venue before turning it on.").small().color(egui::Color32::from_rgb(230, 140, 60)));
+    ui.label(egui::RichText::new("Can trigger seizures in people with photosensitive epilepsy. Onset never flashes faster than three times a second, but check with the venue before turning it on.").small().color(brand::WARN));
     changed |= before != fx.strobe;
     if changed {
         config.fx = fx;
@@ -1443,7 +1405,7 @@ fn audio_tab(
     colour: egui::Color32,
     edits: &mut Edits,
 ) {
-    ui.label("Onset listens to the mix to follow the drums and the spectrum.");
+    ui.label("OnSet listens to the mix to follow the drums and the spectrum.");
     section_help(
         ui,
         "Listening to",
@@ -1495,12 +1457,11 @@ fn audio_tab(
             .weak(),
     );
 
-    section(ui, "What Onset hears");
+    section(ui, "What OnSet hears");
     let audio = view.audio;
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 70.0), egui::Sense::hover());
-    ui.painter()
-        .rect_filled(rect, 4.0, egui::Color32::from_gray(20));
+    ui.painter().rect_filled(rect, 4.0, brand::BASE);
     let bands = audio.levels.len() as f32;
     let bar_w = rect.width() / bands;
     for (i, level) in audio.levels.iter().enumerate() {
@@ -1519,7 +1480,7 @@ fn audio_tab(
             ("hats", audio.hat),
         ] {
             let (r, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
-            let c = egui::Color32::from_gray(50).lerp_to_gamma(colour, v.clamp(0.0, 1.0));
+            let c = brand::SURFACE_3.lerp_to_gamma(colour, v.clamp(0.0, 1.0));
             ui.painter().circle_filled(r.center(), 5.0, c);
             ui.label(name);
         }
@@ -1529,7 +1490,7 @@ fn audio_tab(
             egui::RichText::new(
                 "Silence. If music is playing, choose the device that carries it above.",
             )
-            .color(egui::Color32::from_rgb(230, 140, 60)),
+            .color(brand::WARN),
         );
     } else {
         ui.label(
@@ -1564,7 +1525,7 @@ fn audio_tab(
 }
 
 fn help_tab(ui: &mut egui::Ui, simulator: bool) {
-    section(ui, "How Onset works");
+    section(ui, "How OnSet works");
     ui.label("Onset reads rekordbox as it plays: which tracks are loaded, which deck is MASTER, where each playhead is, and the analysis rekordbox already has (beat grid, phrases like intro, chorus and breakdown, hot cues, key, genre, the 3-band waveform and where the vocals are). It listens to the mix for the drums and the spectrum. Scenes use both: bass, mids, treble and vocals move different parts, build-ups sweep light across the screen, drops land with a flash and a new scene, cues tint the light.");
     section(ui, "Getting started");
     for (i, step) in [

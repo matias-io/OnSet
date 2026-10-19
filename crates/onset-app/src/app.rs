@@ -281,7 +281,7 @@ fn window_attributes(
 ) -> WindowAttributes {
     if launcher {
         let attrs = WindowAttributes::default()
-            .with_title("Onset")
+            .with_title("OnSet")
             .with_decorations(true);
         return match home {
             Some(m) => {
@@ -292,7 +292,7 @@ fn window_attributes(
         };
     }
     let attrs = WindowAttributes::default()
-        .with_title("Onset")
+        .with_title("OnSet")
         .with_decorations(false);
     if fullscreen {
         attrs
@@ -354,7 +354,6 @@ fn draw_overlay(
         fx: s.renderer.fx(),
         audio: ms.audio,
         vibe: s.renderer.vibe(),
-        palette: s.renderer.palette(),
         track: ms.track.as_ref(),
         adapters,
         adapter: &adapter,
@@ -792,7 +791,7 @@ impl OnsetApp {
             Some(p) => match Config::adopt_logo(p) {
                 Ok(dest) => Some(dest),
                 Err(e) => {
-                    tracing::warn!(path = %p.display(), "not an image Onset can show: {e:#}");
+                    tracing::warn!(path = %p.display(), "not an image OnSet can show: {e:#}");
                     return;
                 }
             },
