@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from .store import Store
 from . import workspace
@@ -84,6 +85,12 @@ class Service:
             "job-control": lambda: self.job_control(p["id"], p["action"]),
             "catalogue": lambda: CATALOGUE,
             "transitions": lambda: self.transitions(p), "plan": lambda: self.plan(p),
+            "plan-job": lambda: self.enqueue("plan", {**p, "deep": False}),
+            "transitions-job": lambda: self.enqueue("transitions", {**p, "deep": False}),
+            "replan": lambda: self.replan(p),
+            "review-queue": lambda: self.review_queue(p),
+            "import-workspace": lambda: self.import_workspace(p),
+            "relocate-cache": lambda: self.relocate_cache(p),
             "sets": lambda: self.saved_sets(),
             "transition": lambda: self.store.artifact("transition",p["id"]),
             "validate-plan": lambda: self.validate_plan(p["plan"]),
@@ -218,7 +225,7 @@ class Service:
         control["pause"].set()
         self.controls[record["id"]] = control
         self.store.job(record)
-        pool = self.heavy_pool if kind == "worker-setup" or params.get("deep", True) else self.pool
+        pool = self.heavy_pool if kind == "worker-setup" or kind == "analyze" and params.get("deep", True) else self.pool
         pool.submit(self.run_job, record, control)
         return record
 
@@ -269,6 +276,27 @@ class Service:
                     record["state"] = "partial" if record["completed"] else "failed"
                 else:
                     record["state"] = "complete"
+            elif record["kind"] in {"plan", "transitions"}:
+                stage = "searching sets" if record["kind"] == "plan" else "scoring transitions"
+                last = [0.]
+                def stop(progress=None):
+                    # Called many times per second: check cancellation cheaply, persist progress at most 4x/s.
+                    if control["cancel"].is_set():
+                        raise Cancelled()
+                    if progress is not None:
+                        record["progress"] = max(record.get("progress", 0), progress)
+                    if time.monotonic() - last[0] >= .25 or not control["pause"].is_set():
+                        last[0] = time.monotonic()
+                        checkpoint(stage, record.get("progress", 0))
+                params = {k: v for k, v in record["params"].items() if k != "deep"}
+                if record["kind"] == "plan":
+                    result = self.plan(params, cancelled=stop)
+                    record["result"] = {"plan_ids": [plan["id"] for plan in result["plans"]], "conflicts": result["conflicts"],
+                                        "transitions": len(result["transitions"])}
+                else:
+                    result = self.transitions(params, cancelled=stop)
+                    record["result"] = {"transition_ids": [o["id"] for o in result[:50]], "count": len(result)}
+                record["state"] = "complete"
             elif record["kind"] == "worker-setup":
                 from .deep import wsl_path, worker_file
                 from .processes import run_process
@@ -326,17 +354,25 @@ class Service:
             raise ValueError("Invalid job action")
         return self.store.job(record)
 
-    def transitions(self, p):
+    def transitions(self, p, cancelled=lambda progress=None: None):
         from .transitions import options
         a = self.store.get(p["from"])
         targets = [self.store.get(p["to"])] if p.get("to") else [t for t in self.store.tracks() if t["id"] != a["id"]]
-        result = [o for b in targets for o in options(a, b, p.get("brief", {}))]
+        result = []
+        for index, b in enumerate(targets):
+            cancelled(index / max(1, len(targets)))
+            result.extend(options(a, b, p.get("brief", {})))
         self.store.artifact_batch("transition", [(o['id'],o) for o in result])
         return sorted(result, key=lambda x: (-x["score"], x["id"]))
 
-    def plan(self, p):
+    def known_transitions(self, brief, extra=()):
+        ids = {pin.get("transition_id") for pin in (brief or {}).get("pinned", []) if pin.get("transition_id")} | set(extra)
+        return {i: o for i in ids if (o := self.store.artifact("transition", i))}
+
+    def plan(self, p, cancelled=lambda progress=None: None):
         from .planning import build_plans
-        result = build_plans(self.store.tracks(), p.get("brief", p))
+        brief = p.get("brief", p)
+        result = build_plans(self.store.tracks(), brief, self.known_transitions(brief), cancelled=cancelled)
         self.store.artifact_batch("transition", [(o['id'],o) for o in result['transitions']])
         self.store.artifact_batch("set", [(plan['id'],plan) for plan in result['plans']])
         return result
@@ -456,6 +492,78 @@ class Service:
     def reliability(self,p):
         from .evidence import learn_reliability
         result=learn_reliability(p.get("examples",[]));self.store.setting("source_reliability",value=result)
+        return result
+
+    def replan(self, p):
+        """Keep the first `keep` tracks of a saved set and search the rest again."""
+        from .planning import build_plans
+        original = self.store.artifact("set", p["id"])
+        if not original or original.get("stale"):
+            raise ValueError("Set is missing or stale")
+        self.validate_plan(original)
+        keep = p.get("keep")
+        if not isinstance(keep, int) or isinstance(keep, bool) or not 1 <= keep <= len(original["track_ids"]):
+            raise ValueError("Keep between one track and the whole set")
+        brief = p.get("brief") or original["brief"]
+        prefix = {"track_ids": original["track_ids"][:keep], "transition_ids": original["transition_ids"][:keep - 1]}
+        result = build_plans(self.store.tracks(), brief, self.known_transitions(brief, prefix["transition_ids"]), prefix)
+        self.store.artifact_batch("transition", [(o['id'], o) for o in result['transitions']])
+        self.store.artifact_batch("set", [(plan['id'], plan) for plan in result['plans']])
+        return result
+
+    def review_queue(self, p):
+        from .review import queue
+        return queue(self.store.tracks(), self.store.setting("source_reliability", {}), self.store.artifacts("set"),
+                     bool(p.get("include_done")))
+
+    def import_workspace(self, p):
+        """Import a workspace JSON or SQLite export from another machine with folder remapping."""
+        from . import portable
+        rules = portable.parse_rules(p.get("remap", []))
+        source = Path(p["path"])
+        if not source.is_file():
+            raise ValueError("Workspace export file does not exist")
+        if source.resolve() == self.store.db_path.resolve():
+            raise ValueError("Choose an exported workspace, not the active database")
+        history = {"revisions": [], "edits": []}
+        if source.suffix.lower() == ".db":
+            value, history = portable.read_sqlite_export(source)
+        else:
+            value = json.loads(source.read_text(encoding="utf-8-sig"))
+            check_version(value)
+            if value.get("kind") != "workspace" or not isinstance(value.get("tracks"), list):
+                raise ValueError("Expected an Autocue workspace export")
+        value = {**value, "tracks": [portable.remap_profile(t, rules) for t in value["tracks"]]}
+        staging = self.store.home / "imports" / (uuid.uuid4().hex + ".json")
+        atomic_json(staging, value)
+        try:
+            report = self.import_files([str(staging)])
+        finally:
+            staging.unlink(missing_ok=True)
+        local = {t["id"]: t for t in self.store.tracks()}
+        found = [t["id"] for t in value["tracks"] if t["id"] in local and local[t["id"]].get("analysis_state") != "missing"]
+        missing = [t["id"] for t in value["tracks"] if t["id"] in local and local[t["id"]].get("analysis_state") == "missing"]
+        restored = 0
+        with self.store.lock:
+            for revision, track_id, profile in history["revisions"]:
+                if track_id in local:
+                    restored += self.store.db.execute("INSERT OR IGNORE INTO revisions VALUES(?,?,?)", (revision, track_id, profile)).rowcount
+            known_edits = {tuple(r) for r in self.store.db.execute("SELECT track_id, before_value, after_value, created FROM edits")}
+            for track_id, before, after, undone, created in history["edits"]:
+                if track_id in local and (track_id, before, after, created) not in known_edits:
+                    self.store.db.execute("INSERT INTO edits(track_id,before_value,after_value,undone,created) VALUES(?,?,?,?,?)",
+                                          (track_id, before, after, undone, created))
+                    restored += 1
+            if restored:
+                self.store._commit()
+        return {**report, "located": len(found), "missing_audio": missing, "history_rows": restored,
+                "note": "Audio was matched by checksum after remapping; missing tracks can be relocated individually."}
+
+    def relocate_cache(self, p):
+        from .portable import relocate_cache
+        result = relocate_cache(self.store, p["from"], p["to"], p.get("remap"))
+        if p.get("set_default"):
+            self.store.setting("cache_dir", value=str(Path(p["to"])))
         return result
 
     def replan_order(self,p):
@@ -672,10 +780,27 @@ class Service:
                         finally:
                             if (index+1)%5==0 or index+1==len(contents):
                                 self.notify({'method':'import-progress','params':{'stage':'Reading rekordbox','completed':index+1,'total':len(contents),'imported':len(result),'skipped':len(skipped),'failed':len(failed)}})
+                    memberships, playlist_error = {}, None
+                    try:
+                        for playlist in snapshot.get_playlist():
+                            if getattr(playlist, "Attribute", 0) not in (0, None):
+                                continue  # folders and smart playlists
+                            for song in snapshot.get_playlist_songs(PlaylistID=playlist.ID):
+                                memberships.setdefault(str(song.ContentID), set()).add(playlist.Name)
+                    except Exception as exc:
+                        playlist_error = 'Playlist membership could not be read: ' + str(exc)
                 finally:
                     snapshot.close()
                     snapshot.engine.dispose()
-                report = {"imported":len(result),"track_ids":list(dict.fromkeys(result)),"skipped":skipped,"failed":failed}
+                if playlist_error is None:
+                    for track_id in dict.fromkeys(result):
+                        track = self.store.get(track_id)
+                        names = sorted(memberships.get(str(track.get("rekordbox_id")), ()))
+                        if track.get("rekordbox_playlists") != names:
+                            track["rekordbox_playlists"] = names
+                            self.store.save(track)
+                report = {"imported":len(result),"track_ids":list(dict.fromkeys(result)),"skipped":skipped,"failed":failed,
+                          "playlists":len({n for names in memberships.values() for n in names}),"playlist_error":playlist_error}
                 self.store.artifact('import-report',uuid.uuid4().hex,report)
                 return report
         finally:

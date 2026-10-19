@@ -22,7 +22,7 @@ def main():
     analysis.add_argument("--light", action="store_true", help="Explicitly skip local deep models")
     analysis.add_argument("--wait", action="store_true")
     analysis.add_argument("--experimental", nargs="*", choices=["edmformer", "allin1"], default=[])
-    for name in ("transitions", "plan", "validate-plan", "preview", "rekordbox-preview", "rekordbox-apply", "restore", "benchmark", "review-export", "import-plan", "rekordbox-import", "workspace-restore-preview", "workspace-restore"):
+    for name in ("transitions", "plan", "validate-plan", "preview", "rekordbox-preview", "rekordbox-apply", "restore", "benchmark", "review-export", "import-plan", "rekordbox-import", "workspace-restore-preview", "workspace-restore", "replan", "review-queue", "import-workspace", "relocate-cache"):
         cmd = sub.add_parser(name)
         cmd.add_argument("--params", help="JSON argument file")
     args = ap.parse_args()

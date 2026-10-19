@@ -55,7 +55,7 @@ async function start() {
     requireSender(event);
     if(method==='quit'){setImmediate(()=>app.quit());return {quitting:true};}
     if(method==='open-source'){const source=new URL(params.url);if(source.protocol!=='https:'||source.username||source.password)throw new Error('Source links must use HTTPS without credentials');await shell.openExternal(source.href);return {opened:true};}
-    if(!calls.has(method)&&!['sets','reliability','replan-order','transition','benchmark-label','relocate','transition-alternatives'].includes(method))throw new Error('Unknown service command');
+    if(!calls.has(method)&&!['sets','reliability','replan-order','transition','benchmark-label','relocate','transition-alternatives','replan','review-queue','plan-job','transitions-job','import-workspace','relocate-cache'].includes(method))throw new Error('Unknown service command');
     if(method==='import'){
       // Import paths originate from a native file/folder picker, or a saved known path.
       if(!Array.isArray(params.paths))throw new Error('Expected import paths');
@@ -64,8 +64,8 @@ async function start() {
   });
   ipcMain.handle('autocue:pick',async(event,kind:string)=>{
     requireSender(event);
-    const result=await dialog.showOpenDialog(window!,{properties:kind==='folder'?['openDirectory']:['openFile','multiSelections'],
-      filters:kind==='json'?[{name:'JSON',extensions:['json']}]:[{name:'Music and analysis',extensions:['wav','flac','mp3','m4a','aiff','aif','ogg','opus','json']}]});
+    const result=await dialog.showOpenDialog(window!,{properties:kind==='folder'?['openDirectory']:kind==='workspace'?['openFile']:['openFile','multiSelections'],
+      filters:kind==='json'?[{name:'JSON',extensions:['json']}]:kind==='workspace'?[{name:'Autocue workspace export',extensions:['json','db']}]:[{name:'Music and analysis',extensions:['wav','flac','mp3','m4a','aiff','aif','ogg','opus','json']}]});
     return result.canceled?[]:result.filePaths;
   });
   ipcMain.handle('autocue:media',async(event,trackId:string,stem?:string)=>{
