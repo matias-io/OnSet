@@ -269,6 +269,38 @@ async fn autocue_export(
     state.service.call("export", params).await
 }
 
+/// Why a ChatGPT set plan's tracks fail validation, in terms of the context it was given:
+/// how many IDs came back, which are unknown or repeated, and a sample of the unknown values.
+fn plan_diagnosis(plan: &Value, context_tracks: &[Value]) -> String {
+    let known: std::collections::HashSet<&str> = context_tracks
+        .iter()
+        .filter_map(|t| t["id"].as_str())
+        .collect();
+    let ids: Vec<&str> = plan
+        .get("track_ids")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|v| v.as_str().unwrap_or("<not a string>"))
+        .collect();
+    let mut seen = std::collections::HashSet::new();
+    let repeated: Vec<&str> = ids.iter().copied().filter(|i| !seen.insert(*i)).collect();
+    let unknown: Vec<&str> = ids.iter().copied().filter(|i| !known.contains(i)).collect();
+    let transitions = plan
+        .get("transition_ids")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    format!(
+        "{} track ids for {} context tracks, {transitions} transition ids; {} unknown (first: {:?}), {} repeated (first: {:?})",
+        ids.len(),
+        known.len(),
+        unknown.len(),
+        unknown.iter().take(3).collect::<Vec<_>>(),
+        repeated.len(),
+        repeated.iter().take(3).collect::<Vec<_>>(),
+    )
+}
+
 /// Runs blocking account work (network, the sign-in wait) off the async runtime.
 async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, String> + Send + 'static,
@@ -283,6 +315,22 @@ async fn blocking<T: Send + 'static>(
 async fn autocue_account(
     app: AppHandle,
     state: State<'_, AppState>,
+    action: String,
+    params: Value,
+) -> Result<Value, String> {
+    if action != "status" {
+        tracing::info!(action, "ChatGPT account action");
+    }
+    let outcome = account_action(app, &state, action.clone(), params).await;
+    if let Err(e) = &outcome {
+        tracing::warn!(action, "ChatGPT account action failed: {e}");
+    }
+    outcome
+}
+
+async fn account_action(
+    app: AppHandle,
+    state: &AppState,
     action: String,
     params: Value,
 ) -> Result<Value, String> {
@@ -313,7 +361,7 @@ async fn autocue_account(
             open::that_detached("https://chatgpt.com/#settings").map_err(|e| e.to_string())?;
             Ok(Value::Null)
         }
-        "request" => ai_request(&app, &state, chat, &params).await,
+        "request" => ai_request(&app, state, chat, &params).await,
         _ => Err("Unknown account action".into()),
     }
 }
@@ -380,11 +428,15 @@ async fn ai_request(
     }
     match state
         .service
-        .call("import-plan", json!({"plan": result}))
+        .call("import-plan", json!({"plan": result.clone()}))
         .await
     {
         Ok(v) => Ok(v),
         Err(rejected) => {
+            tracing::warn!(
+                "ChatGPT plan rejected ({rejected}): {}",
+                plan_diagnosis(&result, &tracks)
+            );
             let replacement = state.service.call("plan", json!({"brief": brief})).await?;
             Ok(json!({
                 "rejected_ai": rejected,
@@ -631,7 +683,20 @@ fn main() {
 
 #[cfg(test)]
 mod media_tests {
-    use super::{ByteRange, byte_range, read_span};
+    use super::{ByteRange, byte_range, plan_diagnosis, read_span};
+
+    #[test]
+    fn plan_diagnosis_names_unknown_and_repeated_tracks() {
+        let tracks = vec![
+            serde_json::json!({"id": "a"}),
+            serde_json::json!({"id": "b"}),
+        ];
+        let plan = serde_json::json!({"track_ids": ["a", "Stop It", "a"], "transition_ids": ["t"]});
+        assert_eq!(
+            plan_diagnosis(&plan, &tracks),
+            "3 track ids for 2 context tracks, 1 transition ids; 1 unknown (first: [\"Stop It\"]), 1 repeated (first: [\"a\"])"
+        );
+    }
 
     #[test]
     fn parses_open_closed_suffix_and_unsatisfiable_ranges() {
