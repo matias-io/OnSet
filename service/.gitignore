@@ -52,3 +52,6 @@ review*.csv
 mixplan.csv
 mixset.csv
 *.egg-info/
+
+# Private analysis exports and opinion records from one personal library
+private/

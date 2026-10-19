@@ -41,3 +41,6 @@ Thumbs.db
 
 # Local desktop test runs (copies of a real workspace)
 /.test-desktop/
+
+# The local desktop build the OnSet shortcuts run
+/bin/
