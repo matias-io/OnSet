@@ -277,7 +277,7 @@ def test_resolution_change_reuses_completed_deep_models(tmp_path, song, monkeypa
         calls.append(1)
         import soundfile as sf
         sf.write(stem, np.zeros((22050 * 24, 1)), 22050)
-        return {'models': {name: {'state': 'complete', 'data': {}} for name in ('beat_this', 'demucs', 'essentia')},
+        return {'models': {name: {'state': 'complete', 'data': {}} for name in ('beat_this', 'demucs', 'essentia', 'genre')},
                 'stems': {'vocals': str(stem)}}
     monkeypatch.setattr(deep, 'run_deep', completed)
     first = analyse(p, store.home, deep=True)
@@ -330,3 +330,52 @@ def test_set_search_reports_progress_and_cancels_within_the_first_pass():
     with pytest.raises(Stop):
         build_plans(profiles, {'target_seconds': 360, 'tolerance_seconds': 300}, cancelled=cancel_soon)
     assert max(p or 0 for p in calls) < 1 / 8  # stopped inside the first depth
+
+
+def test_genre_estimates_split_discogs_labels():
+    from autocue_app.analysis import genre_estimates
+    deep = {'models': {'genre': {'state': 'complete', 'data': {'model': 'discogs-effnet-bsdynamic-1', 'styles': [
+        {'label': 'Electronic---Tech House', 'score': .61}, {'label': 'Pop', 'score': .1}]}}}}
+    assert genre_estimates(deep) == [
+        {'genre': 'Tech House', 'parent': 'Electronic', 'score': .61, 'source': 'discogs-effnet-bsdynamic-1', 'confidence': 'unverified'},
+        {'genre': 'Pop', 'parent': None, 'score': .1, 'source': 'discogs-effnet-bsdynamic-1', 'confidence': 'unverified'}]
+    assert genre_estimates({}) == []
+
+
+def test_genre_suggestions_learn_from_your_tags_only(tmp_path):
+    from autocue_app.genre import suggest
+    rng = np.random.default_rng(0)
+    centres = {'House': rng.normal(size=1280), 'Techno': rng.normal(size=1280)}
+    tracks = []
+    def add(i, centre, tags=None, imported=None):
+        path = tmp_path / f'{i}.npy'
+        np.save(path, centres[centre] + rng.normal(scale=.3, size=1280))
+        tracks.append({'id': i, 'genres': imported or tags or [], 'overrides': {'genres': tags} if tags else {},
+                       'analysis': {'deep': {'models': {'genre': {'data': {'embedding': str(path)}}}}}})
+    for n in range(3):
+        add(f'h{n}', 'House', ['House'])
+        add(f't{n}', 'Techno', ['Techno'])
+    add('new-house', 'House')
+    add('new-techno', 'Techno', imported=['Imported Tag'])
+    result = suggest(tracks)
+    assert result['tagged_tracks'] == 6 and result['spaces'] == {'discogs-effnet': 8}
+    best = {r['track_id']: r['suggestions'][0] for r in result['suggestions'] if r['suggestions']}
+    assert best['new-house']['genre'] == 'House' and set(best['new-house']['examples']) <= {'h0', 'h1', 'h2'}
+    assert best['new-techno']['genre'] == 'Techno'
+    assert {r['track_id'] for r in result['suggestions']} == {'new-house', 'new-techno'}
+    assert suggest(tracks, {'new-house'})['suggestions'][0]['track_id'] == 'new-house'
+
+
+def test_genre_suggestions_fall_back_to_native_features_without_mixing_spaces(tmp_path):
+    from autocue_app.genre import suggest, vector
+    rng = np.random.default_rng(1)
+    tracks = []
+    for n, (label, shift) in enumerate([('House', 0.), ('House', 0.), ('Techno', 3.), ('Techno', 3.), (None, 3.)]):
+        path = tmp_path / f'f{n}.npz'
+        np.savez(path, mfcc=rng.normal(shift, 1, (40, 13)), rhythm_pattern=rng.normal(shift, 1, (40, 16)),
+                 **{k: rng.normal(shift, 1, 40) for k in ('brightness', 'flatness', 'flux', 'percussive', 'low_transient', 'sustained_bass')})
+        tracks.append({'id': f'n{n}', 'overrides': {'genres': [label]} if label else {}, 'analysis': {'features': {'path': str(path)}}})
+    assert vector(tracks[0])[0] == 'native-timbre' and vector({'id': 'x'}) is None
+    result = suggest(tracks)
+    assert result['spaces'] == {'native-timbre': 5}
+    assert result['suggestions'][0]['suggestions'][0]['genre'] == 'Techno'

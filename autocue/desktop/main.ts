@@ -56,7 +56,7 @@ async function start() {
     requireSender(event);
     if(method==='quit'){setImmediate(()=>app.quit());return {quitting:true};}
     if(method==='open-source'){const source=new URL(params.url);if(source.protocol!=='https:'||source.username||source.password)throw new Error('Source links must use HTTPS without credentials');await shell.openExternal(source.href);return {opened:true};}
-    if(!calls.has(method)&&!['sets','reliability','replan-order','transition','benchmark-label','relocate','transition-alternatives','replan','review-queue','plan-job','transitions-job','import-workspace','relocate-cache'].includes(method))throw new Error('Unknown service command');
+    if(!calls.has(method)&&!['sets','reliability','replan-order','transition','benchmark-label','relocate','transition-alternatives','replan','review-queue','plan-job','transitions-job','import-workspace','relocate-cache','genre-suggestions'].includes(method))throw new Error('Unknown service command');
     if(method==='import'){
       // Import paths originate from a native file/folder picker, or a saved known path.
       if(!Array.isArray(params.paths))throw new Error('Expected import paths');

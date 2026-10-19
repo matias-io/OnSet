@@ -18,6 +18,7 @@ import {Relocate} from './Relocate';
 import {LibraryFilters,activeFilterCount} from './LibraryFilters';
 import {WorkspaceRecovery} from './WorkspaceRecovery';
 import {PortableImport,CacheRelocation} from './Portable';
+import {GenreEvidence} from './GenreEvidence';
 import {Button,Card,Disclosure,Empty,Field,Icon,KeyValues,Pill,Segmented,Stat,Tabs,TrackPicker} from './ui';
 import {emptyFilters,matchesFilters,canonicalKey,analysisSelection,restoreBrief,pruneBriefTracks,snapGrid,nearest,roleColor,clock} from './library';
 
@@ -284,6 +285,7 @@ function App(){
             </div>}
           </Card>
         </>}
+        {trackTab==='profile'&&<GenreEvidence track={track} tracks={tracks} run={run}/>}
         {trackTab==='profile'&&<Card title="Profile"><Metadata key={track.id+track.revision+JSON.stringify(track.overrides)} track={track} onSave={changes=>run(()=>api.call('edit',{id:track.id,changes}),'Profile updated')}/></Card>}
         {trackTab==='evidence'&&<><EvidencePanel track={track}/><Card title="Spectrogram"><Spectrogram track={track}/></Card></>}
         {trackTab==='stems'&&<StemPlayer track={track} position={position} playOriginal={()=>audio.current?.play().catch(e=>setError(e.message))} pauseOriginal={()=>audio.current?.pause()}/>}

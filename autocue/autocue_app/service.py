@@ -89,6 +89,7 @@ class Service:
             "transitions-job": lambda: self.enqueue("transitions", {**p, "deep": False}),
             "replan": lambda: self.replan(p),
             "review-queue": lambda: self.review_queue(p),
+            "genre-suggestions": lambda: self.genre_suggestions(p),
             "import-workspace": lambda: self.import_workspace(p),
             "relocate-cache": lambda: self.relocate_cache(p),
             "sets": lambda: self.saved_sets(),
@@ -510,6 +511,13 @@ class Service:
         self.store.artifact_batch("transition", [(o['id'], o) for o in result['transitions']])
         self.store.artifact_batch("set", [(plan['id'], plan) for plan in result['plans']])
         return result
+
+    def genre_suggestions(self, p):
+        from .genre import suggest
+        ids = p.get("track_ids")
+        if ids is not None and (not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)):
+            raise ValueError("track_ids must be a list of track IDs")
+        return suggest(self.store.tracks(), set(ids) if ids else None, int(p.get("neighbours", 3)))
 
     def review_queue(self, p):
         from .review import queue
