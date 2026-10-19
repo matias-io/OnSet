@@ -38,6 +38,7 @@ sha2.workspace = true
 base64 = "0.22"
 getrandom = "0.2"
 jsonwebtoken = "9"
+ring = "0.17"
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
 
 [dev-dependencies]

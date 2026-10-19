@@ -4145,6 +4145,7 @@ dependencies = [
  "open",
  "parking_lot",
  "rfd",
+ "ring",
  "serde",
  "serde_json",
  "sha2",

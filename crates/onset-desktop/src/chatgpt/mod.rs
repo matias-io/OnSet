@@ -101,6 +101,19 @@ pub fn validate_callback(
     Ok((client, code))
 }
 
+/// Where the earlier Electron desktop app kept its profile key (`Local State`).
+fn electron_local_states() -> Vec<std::path::PathBuf> {
+    std::env::var_os("APPDATA")
+        .map(std::path::PathBuf::from)
+        .map(|roaming| {
+            ["autocue-desktop", "Autocue"]
+                .iter()
+                .map(|name| roaming.join(name).join("Local State"))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub struct ChatGpt {
     store: Store,
     vault: Mutex<Vault>,
@@ -116,11 +129,28 @@ pub struct ChatGpt {
 impl ChatGpt {
     pub fn load(home: &Path) -> Self {
         let store = Store::new(home);
-        let (vault, broken) = match store.load() {
+        let (mut vault, broken) = match store.load() {
             Ok(Some(v)) => (v, None),
             Ok(None) => (Vault::new(format!("urn:uuid:{}", random_uuid())), None),
             Err(e) => (Vault::new(format!("urn:uuid:{}", random_uuid())), Some(e)),
         };
+        // Accounts connected in the earlier Electron desktop app. Its issued clients are tied to
+        // that vault's host id, so the imported vault replaces the empty one whole.
+        if broken.is_none() && vault.profiles.is_empty() {
+            match store.import_electron(&electron_local_states()) {
+                Ok(Some(imported)) => {
+                    tracing::info!(
+                        "imported {} account(s) from the earlier desktop app",
+                        imported.profiles.len()
+                    );
+                    vault = imported;
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!("cannot import accounts from the earlier desktop app: {e}");
+                }
+            }
+        }
         if broken.is_none()
             && let Err(e) = store.save(&vault)
         {
