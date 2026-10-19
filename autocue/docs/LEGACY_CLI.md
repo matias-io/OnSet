@@ -3,15 +3,11 @@
 # autocue — automatic A–F memory cues for rekordbox
 
 **Historical documentation map**
-- `HANDOFF_2026-09.md` — historical requirements, decisions and results.
-- `SESSION_TIMELINE.md` — chronological log of the session.
-- `WINDOWS_RUNBOOK.md` — step-by-step on the rekordbox machine.
-- `DOWNLOAD.md` — yt-dlp procedure and quality findings.
+- `LEGACY_WINDOWS_RUNBOOK.md` — step-by-step on the rekordbox machine.
 - `METHOD.md` — how detection, merging, review status and tuning work.
-- `TRACKS.md` — the delivered cues for every track.
-- `SPECTROGRAM_READS.md` — the second-opinion reads vs the energy analysis, with notes.
-- `GEMINI_ATTEMPTS.md` — raw records of every Gemini pass.
 - this file — usage of the scripts.
+
+The historical handoff, session log, download notes, per-track cue tables, spectrogram reads and Gemini records describe one personal library and stay in the private Autocue repository.
 
 Proposes the following legacy cue roles for 4/4 tracks when the required evidence and audio range are available:
 

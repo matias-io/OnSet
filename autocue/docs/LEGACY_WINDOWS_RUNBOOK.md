@@ -107,7 +107,7 @@ fix cues in rekordbox by hand. The `flags` column says why each was flagged;
 
 ## 8. New tracks later
 
-1. Download with the command in `DOWNLOAD.md`.
+1. Add the new audio files to the library folder.
 2. (Optional) second opinion: `spectro.py` works in this venv now (librosa installed):
    `autocue_rb.py --folder … --dry-run --json a.json` then
    `spectro.py a.json spectrograms_new`, read the PNGs, record with `spec_record.py`.

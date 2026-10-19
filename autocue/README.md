@@ -41,6 +41,5 @@ The latest recorded checks pass 93 Python tests, 26 desktop tests and the produc
 | [Agent handoff](HANDOFF.md) | Current workspace, verified build, source map, commands and ordered remaining work |
 | [Complete project plan](docs/PROJECT_PLAN.md) | User-requested requirements, phases, milestones and acceptance criteria |
 | [Plan progress map](docs/PLAN_PROGRESS.md) | Implementation/evidence coverage and open work by requirement ID |
-| [Historical handoff](docs/HANDOFF_2026-09.md) | Preserved September decisions and experiments |
 
-Historical cue tables, spectrogram opinions, Gemini attempts and download notes remain in `docs/`. Their labels and results are historical inputs, not verified ground truth. Automatic music acquisition is outside this release.
+The September handoff, session log, cue tables, spectrogram opinions, Gemini attempts and download notes describe one personal music library and stay in the private Autocue repository; they are not part of this repository. Automatic music acquisition is outside this release.
