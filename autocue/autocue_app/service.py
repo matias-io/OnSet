@@ -105,6 +105,8 @@ class Service:
             "reliability": lambda: self.reliability(p), "replan-order": lambda: self.replan_order(p),
             "transition-alternatives":lambda:self.transition_alternatives(p),
             "ai-context": lambda: self.ai_context(p), "enrichment-import": lambda: self.enrichment(p),
+            "spectrogram-image": lambda: self.spectrogram_image(p),
+            "observations-import": lambda: self.observations_import(p),
             "rekordbox-preview": lambda: self.rb_preview(p), "rekordbox-apply": lambda: self.rb_apply(p),
             "restore": lambda: self.restore(p), "rekordbox-import": lambda: self.rb_import(p),
             "manifests": lambda: self.store.artifacts("write-manifest"),
@@ -465,6 +467,30 @@ class Service:
         return {"schema_version": 1, "tracks": profiles, "transitions": compact, "brief": p.get("brief"),
                 "validated_routes":routes,
                 "instructions": "Use only supplied track IDs and validated transition IDs. Unknown evidence remains unknown. Return a schema_version=1 plan with track_ids, transition_ids, brief and explanation. No cue approvals or writes."}
+
+    def spectrogram_image(self, p):
+        """A bar-gridded spectrogram PNG of a track's current analysis, for AI structure reads."""
+        from .aireads import render
+        track = self.store.get(p["id"])
+        name = f"{track['id']}-{track.get('revision') or 'none'}.png"
+        result = render(track.get("analysis") or {}, Path(self.store.home) / "ai-reads" / name)
+        return {**result, "track_id": track["id"], "revision": track.get("revision"),
+                "title": track.get("title"), "artist": track.get("artist")}
+
+    def observations_import(self, p):
+        """Stores an AI provider's structure read as observations from its own source, beside
+        rekordbox, the analysis and earlier opinions. A read of an older analysis is refused."""
+        from .aireads import observations
+        track = self.store.get(p["track_id"])
+        if p.get("revision") is not None and p["revision"] != track.get("revision"):
+            raise ValueError("The analysis changed since this read; read the track again")
+        source, family = str(p.get("source") or ""), str(p.get("family") or "")
+        if not source or not family:
+            raise ValueError("Name the source and family of the read")
+        track["observations"] = observations(track, source, family, p.get("events"),
+                                             p.get("confidence", "unverified"), p.get("notes", ""))
+        self.store.save(track)
+        return {"track_id": track["id"], "observations": [o for o in track["observations"] if o["source"] == source]}
 
     def evidence(self, p):
         track = self.store.get(p["id"])
