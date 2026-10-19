@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 
@@ -33,6 +34,17 @@ def file_hash(path):
     return h.hexdigest()
 
 
+def replace(source, target, attempts=6):
+    """os.replace, retried briefly: Windows scanners and indexers can hold a just-written file."""
+    for attempt in range(attempts):
+        try:
+            return os.replace(source, target)
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(.05 * (attempt + 1))
+
+
 def atomic_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -42,7 +54,7 @@ def atomic_json(path, value):
             f.write(json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False))
             f.flush()
             os.fsync(f.fileno())
-        os.replace(temporary, path)
+        replace(temporary, path)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
