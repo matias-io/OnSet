@@ -1,4 +1,5 @@
-//! `schema`, `library` and `anlz`: read-only views of the rekordbox data layer.
+//! `schema`, `library`, `anlz` and `autocue`: read-only views of the rekordbox data layer
+//! and of what Onset takes from Autocue.
 use std::path::PathBuf;
 
 use crate::common::{cache_dir, open_library, resolve_paths};
@@ -150,5 +151,74 @@ pub fn lyrics(app_dir: Option<PathBuf>, grep: Option<String>, offline: bool) -> 
         "\n{synced} synced, {plain} unsynced only, {instrumental} instrumental, {none} without lyrics. Cache: {}",
         dir.display()
     );
+    Ok(())
+}
+
+pub fn autocue(
+    app_dir: Option<PathBuf>,
+    workspace: Option<PathBuf>,
+    title: &str,
+) -> anyhow::Result<()> {
+    let (paths, lib) = open_library(app_dir)?;
+    let track = lib
+        .find_by_title_artist(title, "")
+        .ok_or_else(|| anyhow::anyhow!("no track titled {title:?}"))?;
+    let rel = track
+        .analysis_path
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("{title:?} has no analysis file"))?;
+    let a = onset_rekordbox::anlz::load_analysis(&paths, rel)?;
+    let path = workspace
+        .or_else(onset_autocue::Workspace::default_path)
+        .ok_or_else(|| anyhow::anyhow!("no Autocue workspace location"))?;
+    let ws = onset_autocue::Workspace::open(&path)?;
+
+    println!(
+        "{} - {}   (rekordbox id {})",
+        track.artist, track.title, track.id.0
+    );
+    println!("Autocue workspace: {}", path.display());
+    let Some(prepared) = ws.prepared(Some(track.id.0), track.file_path.as_deref())? else {
+        println!("Autocue has no structure for this track; Onset keeps rekordbox's phrases.");
+        return Ok(());
+    };
+    println!(
+        "Autocue track {}: {} sections ({:?}), {} approved cues, {} bars of energy",
+        prepared.track_id,
+        prepared.sections.len(),
+        prepared.section_source,
+        prepared.approved_cues.len(),
+        prepared.energy_per_bar.len()
+    );
+    let print = |name: &str, map: Option<&onset_core::phrase::PhraseMap>| {
+        println!("{name}:");
+        let Some(map) = map else {
+            println!("  none");
+            return;
+        };
+        for p in &map.phrases {
+            let start_ms = a
+                .grid
+                .time_of(usize::try_from(p.start_beat.saturating_sub(1)).unwrap_or(0))
+                .unwrap_or(0.0);
+            println!(
+                "  {:>5}-{:<5} {:>7.1}s  {:<12} {:?}",
+                p.start_beat,
+                p.end_beat,
+                start_ms / 1000.0,
+                p.label,
+                p.kind
+            );
+        }
+    };
+    print("rekordbox phrases", a.phrases.as_ref());
+    let ours = onset_autocue::phrase_map(&prepared, &a.grid);
+    print("Autocue phrases (what the show follows)", ours.as_ref());
+    for c in &prepared.approved_cues {
+        println!(
+            "  approved cue {:<3} {:>7.1}s  {}",
+            c.role, c.time_s, c.name
+        );
+    }
     Ok(())
 }

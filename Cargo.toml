@@ -18,6 +18,7 @@ onset-audio = { path = "crates/onset-audio" }
 onset-render = { path = "crates/onset-render" }
 onset-app = { path = "crates/onset-app" }
 onset-lyrics = { path = "crates/onset-lyrics" }
+onset-autocue = { path = "crates/onset-autocue" }
 
 anyhow = "1.0"
 thiserror = "2.0"

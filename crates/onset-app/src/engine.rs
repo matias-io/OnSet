@@ -14,7 +14,7 @@ use onset_core::audio_features::AudioFeatures;
 use onset_core::clock::Clock;
 use onset_core::director::Director;
 use onset_core::music_state::MusicState;
-use onset_core::structure::Structure;
+use onset_core::structure::{Structure, StructureSource};
 use onset_core::track::{HotCue, TrackMeta};
 use onset_core::transport::{TrackRef, TransportSnapshot};
 use onset_rekordbox::anlz::Analysis;
@@ -150,6 +150,8 @@ struct Current {
     meta: TrackMeta,
     analysis: Option<Analysis>,
     cues: Vec<HotCue>,
+    /// Whose phrases `analysis` carries: Autocue's when the DJ prepared the track there.
+    structure_source: StructureSource,
     /// How the source referred to it, so a repeat read is not a reload.
     track_ref: TrackRef,
     /// The deck it plays on (live only), so a switch to an unknown track clears it.
@@ -254,19 +256,44 @@ pub fn resolve_track(library: &Library, r: &TrackRef) -> Option<TrackMeta> {
 fn load_current(
     library: &Library,
     paths: &RekordboxPaths,
+    autocue: Option<&onset_autocue::Workspace>,
     meta: TrackMeta,
     track_ref: TrackRef,
 ) -> Current {
-    let analysis = meta.analysis_path.as_deref().and_then(|rel| {
+    let mut analysis = meta.analysis_path.as_deref().and_then(|rel| {
         onset_rekordbox::anlz::load_analysis(paths, rel)
             .map_err(|e| tracing::warn!(title = %meta.title, "analysis unavailable: {e}"))
             .ok()
     });
-    let cues = library.cues(meta.id);
+    let mut cues = library.cues(meta.id);
+    let mut structure_source = StructureSource::Rekordbox;
+
+    // The structure the DJ prepared in Autocue replaces rekordbox's phrases, placed on
+    // rekordbox's own beat grid; approved cues join rekordbox's.
+    let prepared = autocue.and_then(|ws| {
+        ws.prepared(Some(meta.id.0), meta.file_path.as_deref())
+            .map_err(|e| tracing::warn!(title = %meta.title, "Autocue workspace: {e}"))
+            .ok()
+            .flatten()
+    });
+    if let (Some(p), Some(a)) = (&prepared, analysis.as_mut())
+        && let Some(map) = onset_autocue::phrase_map(p, &a.grid)
+    {
+        tracing::info!(
+            title = %meta.title,
+            sections = map.phrases.len(),
+            approved_cues = p.approved_cues.len(),
+            "structure from Autocue"
+        );
+        a.phrases = Some(map);
+        cues = onset_autocue::merged_cues(&cues, &p.approved_cues);
+        structure_source = StructureSource::Autocue;
+    }
     Current {
         meta,
         analysis,
         cues,
+        structure_source,
         track_ref,
         deck: None,
     }
@@ -303,6 +330,7 @@ fn streaming_candidates(
 fn start_sim(
     library: &Library,
     paths: &RekordboxPaths,
+    autocue: Option<&onset_autocue::Workspace>,
     title: &str,
     cfg: &EngineConfig,
 ) -> anyhow::Result<(SimSource, Current)> {
@@ -321,7 +349,7 @@ fn start_sim(
     let tap = player.tap_audio();
     let analyzer = Analyzer::new(player.tap_sample_rate());
     let track_ref = TrackRef::Id(meta.id);
-    let current = load_current(library, paths, meta, track_ref);
+    let current = load_current(library, paths, autocue, meta, track_ref);
     Ok((
         SimSource {
             player,
@@ -355,8 +383,14 @@ impl Engine {
             .collect();
         tracks.sort_by_key(|t| t.label.to_lowercase());
 
+        // Autocue's workspace, when the DJ prepares tracks there; read-only.
+        let autocue = onset_autocue::Workspace::open_default();
+        if let Some(ws) = &autocue {
+            tracing::info!(path = %ws.path().display(), "Autocue workspace found");
+        }
+
         let (source, current) = if let Some(title) = &cfg.sim_track {
-            let (sim, current) = start_sim(&library, &paths, title, &cfg)?;
+            let (sim, current) = start_sim(&library, &paths, autocue.as_ref(), title, &cfg)?;
             (Source::Sim(Box::new(sim)), Some(current))
         } else {
             let mut live = live_source(&cfg);
@@ -393,6 +427,7 @@ impl Engine {
                     cfg,
                     paths,
                     library,
+                    autocue,
                     source,
                     current,
                     capture,
@@ -489,6 +524,8 @@ struct Running {
     cfg: EngineConfig,
     paths: RekordboxPaths,
     library: Library,
+    /// Autocue's workspace, opened read-only, when one exists.
+    autocue: Option<onset_autocue::Workspace>,
     source: Source,
     current: Option<Current>,
     capture: Option<Capture>,
@@ -557,7 +594,13 @@ impl Running {
             (EngineCommand::Seek(t), Source::Sim(s)) => s.player.seek(*t),
             (EngineCommand::SetRate(r), Source::Sim(s)) => s.player.set_rate(*r),
             (EngineCommand::LoadTrack(title), Source::Sim(_)) => {
-                match start_sim(&self.library, &self.paths, title, &self.cfg) {
+                match start_sim(
+                    &self.library,
+                    &self.paths,
+                    self.autocue.as_ref(),
+                    title,
+                    &self.cfg,
+                ) {
                     Ok((sim, current)) => {
                         self.source = Source::Sim(Box::new(sim));
                         self.current = Some(current);
@@ -642,8 +685,13 @@ impl Running {
                 s.set_track_sample_rate(meta.sample_rate);
                 s.set_track_bpm(meta.bpm);
             }
-            let mut current =
-                load_current(&self.library, &self.paths, meta, snapshot.track.clone());
+            let mut current = load_current(
+                &self.library,
+                &self.paths,
+                self.autocue.as_ref(),
+                meta,
+                snapshot.track.clone(),
+            );
             current.deck = Some(snapshot.deck);
             self.current = Some(current);
             self.clock = Clock::new();
@@ -703,7 +751,13 @@ impl Running {
                 s.set_track_sample_rate(meta.sample_rate);
                 s.set_track_bpm(meta.bpm);
             }
-            let mut current = load_current(&self.library, &self.paths, meta, TrackRef::Unknown);
+            let mut current = load_current(
+                &self.library,
+                &self.paths,
+                self.autocue.as_ref(),
+                meta,
+                TrackRef::Unknown,
+            );
             current.deck = self.deck;
             self.current = Some(current);
             if let Some(m) = self.matcher.as_mut() {
@@ -817,6 +871,7 @@ impl Running {
             .as_ref()
             .and_then(|a| a.bands.as_ref())
             .map(|b| b.at(playhead));
+        let structure_source = current.analysis.as_ref().map(|_| current.structure_source);
         let intensity = self.director.update(&st, dt);
         let audio = self.audio(now);
         let mut ms = MusicState::assemble(
@@ -832,6 +887,7 @@ impl Running {
         if let Some(at) = analysis_now {
             ms.analysis = at;
         }
+        ms.structure_source = structure_source;
         ms
     }
 

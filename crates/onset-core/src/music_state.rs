@@ -52,6 +52,8 @@ pub struct MusicState {
     pub theme: [[f32; 3]; 5],
     /// rekordbox's own analysis at the playhead: 3-band waveform and vocal level.
     pub analysis: crate::bands::BandsAt,
+    /// Whose structure the phrases and drop countdown follow; `None` without a beat grid.
+    pub structure_source: Option<crate::structure::StructureSource>,
 }
 
 impl Default for MusicState {
@@ -77,6 +79,7 @@ impl Default for MusicState {
             next_cue: None,
             theme: DEFAULT_THEME,
             analysis: crate::bands::BandsAt::default(),
+            structure_source: None,
         }
     }
 }
@@ -132,6 +135,7 @@ impl MusicState {
             }),
             theme: DEFAULT_THEME,
             analysis: crate::bands::BandsAt::default(),
+            structure_source: None,
         }
     }
 }

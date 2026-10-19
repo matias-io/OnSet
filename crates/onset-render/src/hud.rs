@@ -188,6 +188,10 @@ impl Hud {
             ]),
             join(vec![
                 on(o.phrase, format!("phrase {}", phrase_name(ms.phrase))),
+                on(
+                    o.phrase && ms.structure_source.is_some(),
+                    format!("from {}", ms.structure_source.map_or("", |s| s.name())),
+                ),
                 on(o.phrase, format!("next {next}")),
                 on(o.drop, format!("drop {drop}")),
                 on(o.phrase, format!("intensity {:.2}", ms.intensity)),

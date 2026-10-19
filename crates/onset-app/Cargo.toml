@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 onset-core.workspace = true
 onset-rekordbox.workspace = true
+onset-autocue.workspace = true
 onset-transport.workspace = true
 onset-audio.workspace = true
 onset-lyrics.workspace = true

@@ -44,6 +44,17 @@ enum Command {
         /// Track title (case-insensitive exact match)
         title: String,
     },
+    /// Show the structure and approved cues Onset takes from Autocue for a track, beside
+    /// rekordbox's phrases
+    Autocue {
+        #[arg(long)]
+        app_dir: Option<PathBuf>,
+        /// Autocue workspace database (defaults to %LOCALAPPDATA%\Autocue\autocue.db)
+        #[arg(long)]
+        workspace: Option<PathBuf>,
+        /// Track title (case-insensitive exact match)
+        title: String,
+    },
     /// Play a track through the simulator and print live beat, phrase and drop state
     Sim {
         #[arg(long)]
@@ -218,6 +229,11 @@ fn main() -> anyhow::Result<()> {
         Command::Schema { app_dir } => library_cmds::schema(app_dir)?,
         Command::Library { app_dir, grep } => library_cmds::library(app_dir, grep)?,
         Command::Anlz { app_dir, title } => library_cmds::anlz(app_dir, &title)?,
+        Command::Autocue {
+            app_dir,
+            workspace,
+            title,
+        } => library_cmds::autocue(app_dir, workspace, &title)?,
         Command::Sim {
             app_dir,
             title,

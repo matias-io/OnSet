@@ -2570,6 +2570,7 @@ dependencies = [
  "egui-winit",
  "image",
  "onset-audio",
+ "onset-autocue",
  "onset-core",
  "onset-lyrics",
  "onset-rekordbox",
@@ -2601,6 +2602,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "onset-autocue"
+version = "0.0.1"
+dependencies = [
+ "onset-core",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
 name = "onset-cli"
 version = "0.0.1"
 dependencies = [
@@ -2609,6 +2623,7 @@ dependencies = [
  "crossbeam-channel",
  "directories",
  "onset-audio",
+ "onset-autocue",
  "onset-core",
  "onset-lyrics",
  "onset-rekordbox",
