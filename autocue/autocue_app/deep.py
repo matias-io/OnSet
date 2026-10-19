@@ -36,10 +36,14 @@ def worker_file(name):
     raise FileNotFoundError(f"Worker asset missing: {name}")
 
 
+# Models every deep analysis requests; experimental ones are opt-in.
+REQUIRED = ("beat_this", "demucs", "essentia", "genre")
+
+
 def run_deep(audio, home, checkpoint, experimental=(), model_dir=None):
     script = worker_file("deep_worker.py")
     request = {"schema_version": 1, "audio": wsl_path(audio), "cache": wsl_path(model_dir or Path(home) / "models"),
-               "output": wsl_path(Path(audio).parent / "deep"), "models": ["beat_this", "demucs", "essentia"] + [m for m in experimental if m in {"edmformer", "allin1"}]}
+               "output": wsl_path(Path(audio).parent / "deep"), "models": list(REQUIRED) + [m for m in experimental if m in {"edmformer", "allin1"}]}
     result = {"models": {}}
     try:
         from .processes import run_process

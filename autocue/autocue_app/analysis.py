@@ -15,6 +15,17 @@ ALGORITHM = "native-analysis-3"
 RESOLUTION_VERSION = "structure-resolution-3"
 
 
+def genre_estimates(deep_results):
+    """Discogs styles from the audio model as unverified estimates ("Electronic---Tech House" -> Tech House)."""
+    data = deep_results.get("models", {}).get("genre", {}).get("data") or {}
+    estimates = []
+    for style in data.get("styles", []):
+        parent, _, name = style["label"].partition("---")
+        estimates.append({"genre": name or parent, "parent": parent if name else None, "score": style["score"],
+                          "source": data.get("model", "audio-model"), "confidence": "unverified"})
+    return estimates
+
+
 def cached_outputs_exist(result):
     return bool(result.get("features",{}).get("path")) and Path(result["features"]["path"]).is_file() and deep_outputs_exist(result.get("deep",{}))
 
@@ -25,6 +36,7 @@ def deep_outputs_exist(deep):
         data=model.get("data",{})
         if isinstance(data,dict):
             if isinstance(data.get("embeddings"),str):paths.append(data["embeddings"])
+            if isinstance(data.get("embedding"),str):paths.append(data["embedding"])
             if isinstance(data.get("activations"),dict):paths.append(data["activations"].get("path"))
     return all(path and Path(path).is_file() for path in paths)
 
@@ -179,11 +191,14 @@ def analyse(profile, home, deep=False, checkpoint=lambda *a: None, experimental=
         checkpoint("stems/models", .5)
         # Completed deep outputs are reused when only the resolution stage changes,
         # so a structure/version update does not rerun hours of model inference.
+        from .deep import REQUIRED
+        requested_models = {*REQUIRED, *experimental}
         deep_cache = cache / "deep-results.json"
         if deep_cache.exists():
             try:
                 saved_deep = json.loads(deep_cache.read_text(encoding="utf-8"))
-                if saved_deep.get("pcm_sha256") == file_hash(model_pcm) and deep_outputs_exist(saved_deep["result"]):
+                if (saved_deep.get("pcm_sha256") == file_hash(model_pcm) and deep_outputs_exist(saved_deep["result"])
+                        and requested_models <= saved_deep["result"].get("models", {}).keys()):
                     deep_results = saved_deep["result"]
             except (OSError, ValueError, KeyError):
                 deep_results = {}
@@ -191,7 +206,8 @@ def analyse(profile, home, deep=False, checkpoint=lambda *a: None, experimental=
             # Results written before deep-results.json existed still carry complete model outputs.
             try:
                 older = json.loads(cached.read_text(encoding="utf-8")).get("deep") or {}
-                if older.get("models") and all(v.get("state") == "complete" for v in older["models"].values()) and deep_outputs_exist(older):
+                if (older.get("models") and all(v.get("state") == "complete" for v in older["models"].values())
+                        and requested_models <= older["models"].keys() and deep_outputs_exist(older)):
                     deep_results = older
             except (OSError, ValueError):
                 deep_results = {}
@@ -283,6 +299,7 @@ def analyse(profile, home, deep=False, checkpoint=lambda *a: None, experimental=
               "sections": {k: baseline[k] for k in event_names}, "flags": baseline["flags"],
               "energy": combined.tolist(), "energy_hi": f["high"], "energy_profile": energy,
               "vocal_activity": f.get("vocal"),
+              "genre_estimates": genre_estimates(deep_results),
               "key": key, "key_observations": key_observations, "local_keys": local, "deep": deep_results,
               "features": {"path": str(feature_path), "version": ALGORITHM}, "waveform": waveform,
               "spectrogram": spectrogram,
@@ -290,7 +307,8 @@ def analyse(profile, home, deep=False, checkpoint=lambda *a: None, experimental=
     result["cues"] = derive_cues(result["sections"], downbeats, second_drop=True, end_loop_bars=8,
                                  intro_loop_bars=8, duration=duration)
     if silent_track:result['cues']=[]
-    required_models = {"beat_this", "demucs", "essentia", *experimental}
+    from .deep import REQUIRED
+    required_models = {*REQUIRED, *experimental}
     if deep and (any(deep_results.get("models",{}).get(name,{}).get("state")!="complete" for name in required_models)
                  or any(v.get("state")!="complete" for v in deep_results.get("models",{}).values())):
         result["state"] = "partial"

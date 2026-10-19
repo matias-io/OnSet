@@ -6,6 +6,83 @@ import os
 from pathlib import Path
 import sys
 
+# Essentia's Discogs-EffNet (CC BY-NC-SA 4.0, personal use): 400 Discogs styles plus a
+# 1280-value embedding. Files are fetched once and must match these hashes.
+EFFNET = {
+    "model": ("https://essentia.upf.edu/models/feature-extractors/discogs-effnet/discogs-effnet-bsdynamic-1.onnx",
+              "a280825b334797cf677939db8cd5762c0392aedd0ca6415dbc1cd083f045e43c"),
+    "metadata": ("https://essentia.upf.edu/models/feature-extractors/discogs-effnet/discogs-effnet-bsdynamic-1.json",
+                 "a2e85b2e7372d5f8e0f35bdd6aeae1139f101087d183d0b2fb60b0ea0f01a0ff"),
+}
+
+
+def fetch_verified(url, sha256, target):
+    import hashlib
+    import urllib.request
+    target = Path(target)
+    if target.is_file() and hashlib.sha256(target.read_bytes()).hexdigest() == sha256:
+        return target
+    target.parent.mkdir(parents=True, exist_ok=True)
+    import time
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(url, timeout=120) as response:
+                content = response.read()
+            break
+        except OSError:
+            if attempt == 2:
+                raise
+            time.sleep(5 * (attempt + 1))
+    if hashlib.sha256(content).hexdigest() != sha256:
+        raise RuntimeError(f"Checksum mismatch for {url}")
+    temporary = target.with_suffix(".tmp")
+    temporary.write_bytes(content)
+    temporary.replace(target)
+    return target
+
+
+def effnet_patches(audio):
+    """Mel patches matching TensorflowPredictEffnetDiscogs: 16 kHz, 512/256 frames, 128-frame patches, hop 62."""
+    import numpy as np
+    import essentia.standard as es
+    mel = es.TensorflowInputMusiCNN()
+    frames = [mel(frame) for frame in es.FrameGenerator(audio, frameSize=512, hopSize=256, startFromZero=True)]
+    bands = np.asarray(frames, dtype=np.float32)
+    if len(bands) < 128:
+        bands = np.pad(bands, ((0, 128 - len(bands)), (0, 0)))
+    starts = range(0, len(bands) - 128 + 1, 62)
+    return np.stack([bands[s:s + 128] for s in starts])
+
+
+def discogs_styles(audio_path, cache, output, top=10):
+    import numpy as np
+    import onnxruntime
+    import essentia.standard as es
+    folder = Path(cache) / "essentia-models"
+    model = fetch_verified(*EFFNET["model"], folder / "discogs-effnet-bsdynamic-1.onnx")
+    metadata = json.loads(fetch_verified(*EFFNET["metadata"], folder / "discogs-effnet-bsdynamic-1.json").read_text())
+    labels = metadata["classes"]
+    audio = es.MonoLoader(filename=audio_path, sampleRate=16000, resampleQuality=4)()
+    patches = effnet_patches(audio)
+    session = onnxruntime.InferenceSession(str(model), providers=["CPUExecutionProvider"])
+    feed = session.get_inputs()[0].name
+    predictions, embeddings = [], []
+    for start in range(0, len(patches), 64):
+        outputs = session.run(None, {feed: patches[start:start + 64]})
+        by_width = {o.shape[-1]: o for o in outputs}
+        predictions.append(by_width[len(labels)])
+        embeddings.append(by_width[1280])
+    activations = np.concatenate(predictions).mean(axis=0)
+    embedding = np.concatenate(embeddings).mean(axis=0)
+    if not np.all(np.isfinite(activations)) or not np.all(np.isfinite(embedding)):
+        raise ValueError("Genre model returned non-finite values")
+    path = Path(output) / "discogs-effnet-embedding.npy"
+    np.save(path, embedding.astype(np.float32))
+    order = np.argsort(-activations)[:top]
+    return {"styles": [{"label": labels[i], "score": round(float(activations[i]), 4)} for i in order],
+            "embedding": str(path), "patches": int(len(patches)), "model": "discogs-effnet-bsdynamic-1",
+            "taxonomy": "Discogs styles", "license": "CC BY-NC-SA 4.0"}
+
 
 def main():
     if not os.environ.get("AUTOCUE_WORKER_CHILD"):
@@ -76,6 +153,8 @@ def main():
                     audio = es.MonoLoader(filename=request["audio"], sampleRate=44100)()
                     data = {profile: dict(zip(("key", "scale", "strength"), es.KeyExtractor(profileType=profile)(audio)))
                             for profile in ("krumhansl", "edma", "bgate")}
+                elif name == "genre":
+                    data = discogs_styles(request["audio"], cache, output)
                 elif name == "edmformer":
                     import warnings,math,soundfile as sf
                     from edm98.inference import create_pipeline
@@ -108,7 +187,7 @@ def main():
                 else:
                     raise ValueError("Unknown model")
             result["models"][name] = {"state": "complete", "worker_format":2,"experimental": name in {"edmformer", "allin1"},
-                                      "data": data, "version": importlib.metadata.version({"beat_this": "beat-this", "edmformer": "edm98"}.get(name, name))}
+                                      "data": data, "version": importlib.metadata.version({"beat_this": "beat-this", "edmformer": "edm98", "genre": "onnxruntime"}.get(name, name))}
             temporary = checkpoint.with_suffix(".tmp")
             temporary.write_text(json.dumps(result["models"][name],allow_nan=False, default=lambda x: x.tolist() if hasattr(x, "tolist") else str(x)))
             temporary.replace(checkpoint)

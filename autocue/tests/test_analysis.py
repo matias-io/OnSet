@@ -34,7 +34,7 @@ def test_interrupted_deep_analysis_reuses_native_stage_and_repairs_missing_stems
     stem=tmp_path/'bass.wav';calls=[]
     def completed(*args,**kwargs):
         calls.append(1);stem.write_bytes(b'fixture stem')
-        return {'models':{name:{'state':'complete','data':{}} for name in ('beat_this','demucs','essentia')},'stems':{'bass':str(stem)}}
+        return {'models':{name:{'state':'complete','data':{}} for name in ('beat_this','demucs','essentia','genre')},'stems':{'bass':str(stem)}}
     monkeypatch.setattr(deep,'run_deep',completed)
     resumed=analyse(p,store.home,deep=True)
     assert resumed['cache_hit'] and resumed['state']=='complete' and resumed['analysis_mode']=='deep'

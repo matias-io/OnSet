@@ -32,5 +32,5 @@ def test_wsl_startup_timeout_is_explicit_unavailable_evidence(tmp_path,monkeypat
     def timeout(*args,**kwargs):raise subprocess.TimeoutExpired('wsl',60)
     monkeypatch.setattr(processes,'run_process',timeout)
     result=run_deep(tmp_path/'audio.wav',tmp_path,lambda *args:None)
-    assert set(result['models'])=={'beat_this','demucs','essentia'}
+    assert set(result['models'])=={'beat_this','demucs','essentia','genre'}
     assert all(v['state']=='unavailable' and 'timed out' in v['error'] for v in result['models'].values())
