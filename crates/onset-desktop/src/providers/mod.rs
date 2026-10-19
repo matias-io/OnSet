@@ -78,11 +78,22 @@ pub fn prompt(ask: &Ask, image_names: &[String]) -> String {
         ask.instructions.trim(),
         ask.evidence
     );
-    if !image_names.is_empty() {
+    let (audio, images): (Vec<&str>, Vec<&str>) = image_names
+        .iter()
+        .map(String::as_str)
+        .partition(|n| is_audio(n));
+    if !images.is_empty() {
         let _ = write!(
             p,
             "\nLook at these image files in your working folder: {}.\n",
-            image_names.join(", ")
+            images.join(", ")
+        );
+    }
+    if !audio.is_empty() {
+        let _ = write!(
+            p,
+            "\nListen to these audio files in your working folder: {}. There are no other files.\n",
+            audio.join(", ")
         );
     }
     if !ask.web {
@@ -90,6 +101,20 @@ pub fn prompt(ask: &Ask, image_names: &[String]) -> String {
     }
     p.push_str("\nReturn only the JSON object the schema describes.\n");
     p
+}
+
+/// Audio attachments are named and described as audio, so a reader doesn't go looking
+/// for an image.
+fn is_audio(name: &str) -> bool {
+    std::path::Path::new(name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| {
+            [
+                "mp3", "wav", "flac", "aiff", "aif", "m4a", "aac", "ogg", "opus",
+            ]
+            .contains(&e.to_ascii_lowercase().as_str())
+        })
 }
 
 /// A fresh, empty folder for one run, removed when dropped.
@@ -107,14 +132,19 @@ impl Workspace {
         Ok(Self(dir))
     }
 
-    /// Copies the images in, returning their names inside the workspace.
+    /// Copies the attachments in, returning their names inside the workspace.
     fn add_images(&self, images: &[PathBuf]) -> Result<Vec<String>, String> {
         images
             .iter()
             .enumerate()
             .map(|(i, src)| {
                 let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("png");
-                let name = format!("image-{}.{ext}", i + 1);
+                let kind = if is_audio(&format!("x.{ext}")) {
+                    "audio"
+                } else {
+                    "image"
+                };
+                let name = format!("{kind}-{}.{ext}", i + 1);
                 std::fs::copy(src, self.0.join(&name))
                     .map_err(|e| format!("{}: {e}", src.display()))?;
                 Ok(name)
@@ -322,6 +352,29 @@ mod tests {
         assert!(p.contains("Do not search the web."));
         assert!(!prompt(&ask(true), &[]).contains("Do not search"));
         assert!(prompt(&ask(true), &["image-1.png".into()]).contains("image-1.png"));
+    }
+
+    #[test]
+    fn audio_attachments_are_named_and_described_as_audio() {
+        let ws = Workspace::new().unwrap();
+        let src = ws.0.join("source.MP3");
+        std::fs::write(&src, b"x").unwrap();
+        let png = ws.0.join("source.png");
+        std::fs::write(&png, b"x").unwrap();
+        let names = ws.add_images(&[src, png]).unwrap();
+        assert_eq!(names, ["audio-1.MP3", "image-2.png"]);
+        let ask = Ask {
+            instructions: "Read it.".into(),
+            evidence: json!({}),
+            schema: json!({}),
+            web: false,
+            images: Vec::new(),
+            model: None,
+            timeout: Duration::from_secs(1),
+        };
+        let p = prompt(&ask, &names);
+        assert!(p.contains("Listen to these audio files in your working folder: audio-1.MP3."));
+        assert!(p.contains("Look at these image files in your working folder: image-2.png."));
     }
 
     #[test]

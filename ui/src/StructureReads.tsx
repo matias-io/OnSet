@@ -19,11 +19,11 @@ export function cell(o:any){
 export function StructureReads({track,observations,onRead}:{track:Track;observations:any[];onRead:()=>void}){
   const onset=(window as any).onset;
   const [installed,setInstalled]=useState<Reader[]>([]),[chosen,setChosen]=useState<Reader[]>([]);
-  const [busy,setBusy]=useState(false),[result,setResult]=useState<any>(null),[error,setError]=useState('');
+  const [busy,setBusy]=useState<false|"image"|"audio">(false),[result,setResult]=useState<any>(null),[error,setError]=useState('');
   useEffect(()=>{onset?.providers?.().then((s:any)=>{const have=s.clis.filter((c:any)=>c.path).map((c:any)=>c.provider);setInstalled(have);setChosen(have.filter((p:Reader)=>p!=='gemini'));}).catch(()=>{});},[]);
   const sources=[...new Set(observations.map(o=>o.source))];
   async function read(providers:Reader[],audio:boolean){
-    setBusy(true);setError('');
+    setBusy(audio?'audio':'image');setError('');
     try{const r=await onset.readStructure(providers,track.id,audio);setResult(r);onRead();}
     catch(e:any){setError(e.message);}finally{setBusy(false);}
   }
@@ -37,12 +37,12 @@ export function StructureReads({track,observations,onRead}:{track:Track;observat
           onChange={()=>setChosen(c=>c.includes(p)?c.filter(x=>x!==p):[...c,p])}/>{NAMES[p]}{!installed.includes(p)&&' (not installed)'}</label>)}
       </div>
       <div className="row">
-        <Button disabled={busy||!chosen.length} onClick={()=>read(chosen,false)}>Read the spectrogram</Button>
-        <Button kind="ghost" disabled={busy||!installed.includes('gemini')} title="Sends this track's audio file to Gemini"
+        <Button disabled={!!busy||!chosen.length} onClick={()=>read(chosen,false)}>Read the spectrogram</Button>
+        <Button kind="ghost" disabled={!!busy||!installed.includes('gemini')} title="Sends this track's audio file to Gemini"
           onClick={()=>{if(window.confirm(`Send the audio of "${track.title}" to Gemini so it can listen for the structure?`))read(['gemini'],true);}}>Let Gemini listen…</Button>
       </div>
       <p className="hint">Spectrogram reads send an image of this track's analysis, never audio. Reads stay unverified until you check them by ear.</p>
-      {busy&&<p className="dim">Reading… this can take a minute or two.</p>}
+      {busy&&<p className="dim">{busy==="audio"?"Gemini is listening… this can take five minutes or more.":"Reading… this can take a minute or two."}</p>}
       {error&&<p className="bad">{error}</p>}
       {result&&<div className="row">{result.reads.map((r:any)=><Pill key={r.provider} state={r.ok?'good':'bad'}>{r.provider}: {r.ok?'read saved':r.error}</Pill>)}</div>}
     </>:<p className="hint">AI structure reads need the OnSet desktop app.</p>}
