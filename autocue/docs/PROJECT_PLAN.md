@@ -12,6 +12,20 @@ Read [the current agent handoff](../HANDOFF.md) for where to continue and [imple
 
 **A3. Data/security:** default app data `%LOCALAPPDATA%\Autocue`; leave music where it is. Separate configurable model/temp-render caches. Continue with ChatGPT uses eligible plan usage. Main process stores credentials using Windows-backed protection; renderer and workers never receive tokens. Selected profiles and derived features may be sent for user-initiated online requests; no automatic background enrichment. Audio requires a deliberate provider/file-specific upload action. Only approved cues enter the normal write set after an exact change preview.
 
+## Merge with OnSet and live mode — O
+
+Later request (2026-10-19). Autocue merges into OnSet (`matias-io/OnSet`, real-time rekordbox visuals in Rust/wgpu) as one Windows program with one installer. A1–A3 and every phase below still apply except where this section changes them. Merge proposal and decisions: the shared "OnSet + Autocue merge proposal" doc.
+
+**O1. Product:** preparation stays as specified. Add a read-only **live mode** during a show: progress through the planned set, upcoming mix windows, a check that the loaded track matches the plan, key/tempo checks on the loaded track and fallback tracks when the DJ goes off plan. The DJ still chooses and performs; no deck control, no autonomous performance, nothing plays on its own.
+
+**O2. Architecture direction (supersedes A2 step by step, not at once):** Rust core built on OnSet's crates; Tauri replaces Electron and carries Autocue's React screens; OnSet's launcher moves to React; the show visuals run in their own process; Python remains as a sidecar until native analysis and the workspace move to Rust, then only for deep models (ONNX Runtime/DirectML where models convert). SQLite remains the single local database, with sections, cues, beats and set plans in real tables and large arrays as files.
+
+**O3. Live data:** OnSet's rekordbox memory reader supplies master deck, playhead and loaded tracks; Autocue's resolved structure, approved cues, energy and set plan feed OnSet's show director. Untracked tracks fall back to rekordbox grid/phrases. Per-version memory calibration is normal upkeep.
+
+**O4. Show mode:** no analysis, deep models, Python worker or rekordbox writes while a show runs; queued jobs pause at their last checkpoint and resume afterwards. Live advice reads data prepared before the show.
+
+**O5. Order:** (1) combine repositories keeping both histories, private library data and personal identifiers removed from the public copy; (2) one app with live mode using the existing Python service as sidecar; (3) Tauri replaces Electron; (4) workspace and native analysis to Rust, verified against existing Python tests and recorded outputs; (5) deep models on Windows GPUs. Each step keeps explicit approvals, exact write previews, backups/restore and human corrections.
+
 ## Phase 0: reliable baseline — P0
 
 **P0.1 Foundation:** reproducible dependency definitions/lockfiles for desktop, native service and WSL worker; replace broken-environment reliance. Doctor covers runtimes, FFmpeg, rekordbox discovery/schema support, WSL2, GPU, RAM, disk and assets. Establish local version control while excluding music, credentials, DBs, caches and private reports. Preserve historical analysis/opinion/log/report inputs and known provenance/versions. Replace synthetic DB demo with generated-audio/grid assertions, removing madmom dependency, Linux paths and invalid result unpacking. Gate: reproducible CLI, automated baseline report and passing regressions before adding detectors.
@@ -152,7 +166,7 @@ Read [the current agent handoff](../HANDOFF.md) for where to continue and [imple
 
 Build benchmark/review early. Local deep analysis on selected tracks; user-initiated online enrichment/recommendations; deliberate audio uploads; approval-based writes. Maintain model manifest with versions/hashes/locations/attribution, isolated experimental dependencies, local quality/performance report per analysis release and previous working runtime/model configuration for rollback.
 
-Excluded from this release: public hosting, commercial distribution, macOS packaging, automatic music acquisition, live deck control and autonomous performance. Preserve future extensibility without making those prerequisites.
+Excluded from this release: public hosting, commercial distribution, macOS packaging, automatic music acquisition, live deck control and autonomous performance. Read-only live advice (O1) is no longer excluded; licensing and distribution of the merged program are decided later. Preserve future extensibility without making those prerequisites.
 
 ## User-supplied reference URLs
 
