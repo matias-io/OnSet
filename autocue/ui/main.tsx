@@ -18,6 +18,7 @@ import {Relocate} from './Relocate';
 import {LibraryFilters,activeFilterCount} from './LibraryFilters';
 import {WorkspaceRecovery} from './WorkspaceRecovery';
 import {PortableImport,CacheRelocation} from './Portable';
+import {AiAdviser} from './AiAdviser';
 import {GenreEvidence} from './GenreEvidence';
 import {Logo} from './Logo';
 import {Button,Card,Disclosure,Empty,Field,Icon,KeyValues,Pill,Segmented,Stat,Tabs,TrackPicker} from './ui';
@@ -366,10 +367,12 @@ function App(){
                 :<Button kind="primary" disabled={busy||!ids.length} onClick={buildPlans}>Build 3 options</Button>}
             </div>
           </Card>
-          <Card title="ChatGPT adviser">
+          <AiAdviser ids={ids} brief={brief} plans={plans} setPlans={setPlans} run={run} busy={busy}
+            titles={(id:string)=>tracks.find(t=>t.id===id)?.title||id}
+            chatgptPanel={<>
             {account.active?<div className="stack">
               <Field label="Model"><div className="row" style={{flexWrap:'nowrap'}}><select className="grow" value={model} onChange={e=>accountProps.setModel(e.target.value)}><option value="">Select a model</option>{models.map((m:any)=><option key={m.id} value={m.id}>{m.name}</option>)}{model&&!models.some((m:any)=>m.id===model)&&<option value={model}>{model}</option>}</select><Button icon="refresh" label="Load models" onClick={loadModels}/></div></Field>
-              <label className="check"><input type="checkbox" checked={research} onChange={e=>setResearch(e.target.checked)}/>Research exact releases online</label>
+              <label className="check"><input type="checkbox" checked={research} onChange={e=>setResearch(e.target.checked)}/>Look up track details online</label>
               <div className="row">
                 <Button kind="primary" disabled={!model||busy} onClick={()=>run(async()=>{setStream('');const r=await api.account('request',{task:'set',track_ids:ids,brief:{...brief,track_ids:ids},model,research});if(r.alternatives){setPlans(r.alternatives);setError(`ChatGPT proposal rejected: ${r.rejected_ai}. Showing validated local replacements. ${r.conflicts.join(' ')}`);}else{setPlans([r]);setMessage('ChatGPT proposal validated');}return r;})}>Suggest a set</Button>
                 <Button disabled={!model||busy} onClick={()=>run(async()=>{setStream('');return api.account('request',{task:'enrichment',track_ids:ids,model,research});},'Track descriptions saved with provenance')}>Enrich profiles</Button>
@@ -380,7 +383,7 @@ function App(){
               <p className="muted">Connect a ChatGPT account to get set suggestions and sourced track descriptions.</p>
               <div className="row"><Button kind="primary" onClick={()=>connect('sign-in')}>Continue with ChatGPT</Button>{account.pending&&<Button kind="ghost" onClick={()=>connect('cancel')}>Cancel</Button>}</div>
             </div>}
-          </Card>
+            </>}/>
         </div>
         {plans.length>0&&<div className="plans">{plans.map((plan,index)=><PlanCard key={plan.id} plan={plan} index={index} tracks={tracks} run={run} pinned={brief.pinned}
           onPin={(id:string,position:number,enabled:boolean)=>setField('pinned',enabled?[...brief.pinned.filter((p:any)=>p.position!==position),{track_id:id,position}]:brief.pinned.filter((p:any)=>p.track_id!==id||p.position!==position))}

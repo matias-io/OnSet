@@ -29,6 +29,7 @@ def test_render_gives_every_bar_the_same_width(tmp_path):
     data = out.read_bytes()
     assert png_size(data) == (40 * 8, 9 + 64 * 3)
     assert info["bars"] == 40 and info["width"] == 320
+    assert info["bar_times"][:3] == [0.0, 2.0, 4.0] and len(info["bar_times"]) == 40
     assert "Each bar is 8 pixels wide" in info["how_to_read"]
     # The image decodes: the IDAT stream inflates to height rows of 1 + 3*width bytes.
     idat = data[data.index(b"IDAT") + 4:data.index(b"IEND") - 8]

@@ -88,6 +88,7 @@ def render(analysis, out: Path, px_per_bar=8, band_px=3, header=9):
     out.write_bytes(_png(img))
     return {"path": str(out), "bars": bars, "px_per_bar": px_per_bar, "header_px": header,
             "width": int(img.shape[1]), "height": int(img.shape[0]), "duration": duration,
+            "bar_times": [round(float(t), 2) for t in downbeats],
             "how_to_read": f"Each bar is {px_per_bar} pixels wide, starting at bar 0 on the left. "
                            f"Thin grey lines every 4 bars, white lines every 16 bars, numbered on the "
                            f"top strip. Low frequencies are at the bottom."}

@@ -1,13 +1,14 @@
 import React,{useEffect,useState} from 'react';
 import type {Track} from './types';
 import {Button,Card,Disclosure,KeyValues} from './ui';
+import {StructureReads} from './StructureReads';
 
 const curveColor=['#8b7cf6','#f472b6','#fb923c','#facc15','#34d399'];
 const fmt=(v:any):string=>typeof v==='number'?(Number.isInteger(v)?String(v):v.toFixed(3)):Array.isArray(v)?v.map(fmt).join(', '):typeof v==='object'&&v!==null?JSON.stringify(v):String(v);
 
 export function EvidencePanel({track}:{track:Track}){
-  const [evidence,setEvidence]=useState<any>(null);
-  useEffect(()=>{let active=true;window.autocue.call('evidence',{id:track.id}).then(v=>{if(active)setEvidence(v);}).catch(()=>{if(active)setEvidence(null);});return()=>{active=false;};},[track.id,track.revision]);
+  const [evidence,setEvidence]=useState<any>(null),[reloads,setReloads]=useState(0);
+  useEffect(()=>{let active=true;window.autocue.call('evidence',{id:track.id}).then(v=>{if(active)setEvidence(v);}).catch(()=>{if(active)setEvidence(null);});return()=>{active=false;};},[track.id,track.revision,reloads]);
   const a=track.analysis||{},ep=a.energy_profile||{},dimensions=['drive','density','intensity','tension','contrast'];
   const research=evidence?.enrichment?.research,claims=evidence?.enrichment?.claims||[];
   const keys=(a.key_observations||[a.key]).filter(Boolean);
@@ -29,7 +30,10 @@ export function EvidencePanel({track}:{track:Track}){
       <Disclosure summary="Rhythm and grid">
         {a.grid_observation?<KeyValues rows={Object.entries(a.grid_observation).filter(([,v])=>!Array.isArray(v)||(v as any[]).length<8).map(([k,v])=>[k.replaceAll('_',' '),fmt(v)])}/>:<p className="muted">No grid evidence yet.</p>}
       </Disclosure>
-      <Disclosure summary="Independent event opinions">
+      <Disclosure summary="Where the parts are, by source" defaultOpen>
+        <StructureReads track={track} observations={evidence?.track?.observations||[]} onRead={()=>setReloads(n=>n+1)}/>
+      </Disclosure>
+      <Disclosure summary="Raw event opinions">
         <pre>{JSON.stringify({observations:evidence?.track?.observations,resolution:evidence?.resolved_opinions},null,2)}</pre>
       </Disclosure>
     </Card>
@@ -40,7 +44,7 @@ export function EvidencePanel({track}:{track:Track}){
         <small>{c.source_type} · {c.confidence} confidence · {c.retrieved}{c.citation_check&&` · citation ${c.citation_check.status}`}</small>
         {c.citation_check?.status==='unverified'&&c.citation_check.requested_url&&<small>Unverified proposed URL: {c.citation_check.requested_url}</small>}
         {c.url&&<div className="row" style={{marginTop:6}}><span className="mono dim" style={{overflowWrap:'anywhere'}}>{c.url}</span><Button size="sm" kind="ghost" icon="external" onClick={()=>window.autocue.call('open-source',{url:c.url})}>Open</Button></div>}
-      </div>):<p className="muted">No descriptions yet. Use “Enrich profiles” in the set planner.</p>}
+      </div>):<p className="muted">No descriptions yet. Use “Look up track details” in the set planner.</p>}
     </Card>
   </>;
 }

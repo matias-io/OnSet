@@ -339,3 +339,8 @@ kbd{display:inline-block;min-width:18px;padding:0 5px;border-radius:4px;border:1
   .card{break-inside:avoid;border-color:#ccc;background:#fff}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* AI adviser and structure reads */
+.bad{color:var(--bad)}
+.comparison p{margin:2px 0}
+.reads td,.reads th{text-align:left;padding:3px 8px 3px 0}
