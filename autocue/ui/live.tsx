@@ -1,7 +1,8 @@
 import {StrictMode, useEffect, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import './live.css';
-import {barsAndBeats, clock, cueName} from './liveFormat';
+import {Logo} from './Logo';
+import {barsAndBeats, clock, cueName, structureLabel} from './liveFormat';
 
 /** One `onset:live` event from OnSet's engine (crates/onset-desktop/src/live.rs). */
 export type LiveState = {
@@ -40,6 +41,7 @@ function Live() {
   return (
     <main className="live">
       <header className="live-head">
+        <Logo size={20} />
         <span className={`live-dot ${live.state}`} aria-hidden="true" />
         <span className="live-status">{live.status}</span>
         <label className="live-ontop">
@@ -57,8 +59,8 @@ function Live() {
             <span>{live.bpm ? `${live.bpm.toFixed(1)} BPM` : '— BPM'}</span>
             <span>{t.key ?? '— key'}</span>
             <span>{clock(live.playhead_s)}{live.playing ? '' : ' · paused'}</span>
-            {live.structure_source && <span className={`live-source ${live.structure_source.toLowerCase()}`}>
-              Structure: {live.structure_source}</span>}
+            {live.structure_source && <span className={`live-source ${structureLabel(live.structure_source).toLowerCase()}`}>
+              Structure: {structureLabel(live.structure_source)}</span>}
           </p>
         </section>
       ) : <section className="live-track"><h1>No track on the master deck</h1></section>}

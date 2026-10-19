@@ -16,3 +16,8 @@ export function clock(seconds: number): string {
 export function cueName(slot: number): string {
   return slot === 0 ? 'Memory cue' : `Hot cue ${String.fromCharCode(64 + slot)}`;
 }
+
+/** Whose structure the show follows, in OnSet's words: Autocue's area is called Prep. */
+export function structureLabel(source: string): string {
+  return source === 'Autocue' ? 'Prep' : source;
+}

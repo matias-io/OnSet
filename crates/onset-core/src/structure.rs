@@ -21,6 +21,14 @@ impl StructureSource {
             Self::Autocue => "Autocue",
         }
     }
+
+    /// What the DJ sees: OnSet calls Autocue's preparation area Prep.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Rekordbox => "rekordbox",
+            Self::Autocue => "Prep",
+        }
+    }
 }
 
 /// Everything derivable from the playhead alone, sampled at one instant.

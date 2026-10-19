@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {barsAndBeats, clock, cueName} from './liveFormat';
+import {barsAndBeats, clock, cueName, structureLabel} from './liveFormat';
 
 describe('live view formatting', () => {
   it('counts down in bars and beats', () => {
@@ -13,6 +13,10 @@ describe('live view formatting', () => {
     expect(clock(54.2)).toBe('0:54');
     expect(clock(612)).toBe('10:12');
     expect(clock(-1)).toBe('0:00');
+  });
+  it('calls Autocue structure Prep', () => {
+    expect(structureLabel('Autocue')).toBe('Prep');
+    expect(structureLabel('rekordbox')).toBe('rekordbox');
   });
   it('names cues as rekordbox does', () => {
     expect(cueName(0)).toBe('Memory cue');

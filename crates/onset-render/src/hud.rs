@@ -190,7 +190,7 @@ impl Hud {
                 on(o.phrase, format!("phrase {}", phrase_name(ms.phrase))),
                 on(
                     o.phrase && ms.structure_source.is_some(),
-                    format!("from {}", ms.structure_source.map_or("", |s| s.name())),
+                    format!("from {}", ms.structure_source.map_or("", |s| s.label())),
                 ),
                 on(o.phrase, format!("next {next}")),
                 on(o.drop, format!("drop {drop}")),
