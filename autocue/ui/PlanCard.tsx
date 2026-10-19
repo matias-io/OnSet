@@ -18,7 +18,7 @@ function EnergyArc({values}:{values:(number|null)[]}){
 }
 
 export function PlanCard({plan,index,tracks,run,onUpdated,onPin,onPinTransition,pinned,onUseBrief,onReplan,transpose={},onTranspose}:any){
-  const [links,setLinks]=useState<any[]>([]),[name,setName]=useState('Autocue set'),[preview,setPreview]=useState<any>(null),[fallbacks,setFallbacks]=useState<Record<number,any[]>>({}),[open,setOpen]=useState<number|null>(null);
+  const [links,setLinks]=useState<any[]>([]),[name,setName]=useState('OnSet set'),[preview,setPreview]=useState<any>(null),[fallbacks,setFallbacks]=useState<Record<number,any[]>>({}),[open,setOpen]=useState<number|null>(null);
   useEffect(()=>{Promise.all(plan.transition_ids.map((id:string)=>api.call('transition',{id}))).then(setLinks).catch(()=>{});},[plan.id]);
   const lookup=new Map<string,Track>(tracks.map((t:Track)=>[t.id,t]));
   const energy=plan.track_ids.map((id:string)=>{const t=lookup.get(id);return t?.energy??t?.analysis?.energy_profile?.rating??null;});

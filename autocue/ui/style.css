@@ -1,14 +1,6 @@
-/* Autocue design tokens: one neutral scale, one accent, semantic status colours. */
+@import './brand.css';
+/* OnSet Prep: colour, type and radius tokens come from brand.css. */
 :root{
-  --bg:#0c0d10;--surface:#131418;--surface-2:#1a1b21;--surface-3:#22242b;--hover:#272a32;
-  --border:#24262d;--border-strong:#33363f;
-  --text:#ececf1;--text-2:#a9abb6;--muted:#71737f;
-  --accent:#8b7cf6;--accent-strong:#a194ff;--accent-soft:rgba(139,124,246,.14);--on-accent:#0d0b1a;
-  --good:#4ade80;--good-soft:rgba(74,222,128,.12);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.12);
-  --bad:#f87171;--bad-soft:rgba(248,113,113,.12);--info:#60a5fa;--info-soft:rgba(96,165,250,.12);
-  --radius:10px;--radius-sm:7px;--radius-lg:14px;
-  --font:"Segoe UI Variable Text","Segoe UI",Inter,system-ui,sans-serif;
-  --mono:"Cascadia Mono",Consolas,ui-monospace,monospace;
   font-family:var(--font);font-size:14px;line-height:1.5;color:var(--text);background:var(--bg);
   color-scheme:dark;font-synthesis:none;-webkit-font-smoothing:antialiased;
 }
@@ -91,7 +83,6 @@ input[type=number]{font-variant-numeric:tabular-nums}
 .shell{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100vh}
 .sidebar{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:22px;padding:18px 12px;border-right:1px solid var(--border);background:var(--surface)}
 .brand{display:flex;align-items:center;gap:10px;padding:4px 8px;font-size:16px;font-weight:650;letter-spacing:-.02em}
-.brand-mark{display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--accent),#5b8cff);color:var(--on-accent)}
 .nav{display:flex;flex-direction:column;gap:2px}
 .nav button{display:flex;align-items:center;gap:11px;height:36px;padding:0 10px;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--text-2);font-size:13.5px;font-weight:500;cursor:pointer;text-align:left}
 .nav button:hover{background:var(--surface-2);color:var(--text)}

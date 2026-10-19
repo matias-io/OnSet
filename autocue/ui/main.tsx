@@ -19,6 +19,7 @@ import {LibraryFilters,activeFilterCount} from './LibraryFilters';
 import {WorkspaceRecovery} from './WorkspaceRecovery';
 import {PortableImport,CacheRelocation} from './Portable';
 import {GenreEvidence} from './GenreEvidence';
+import {Logo} from './Logo';
 import {Button,Card,Disclosure,Empty,Field,Icon,KeyValues,Pill,Segmented,Stat,Tabs,TrackPicker} from './ui';
 import {emptyFilters,matchesFilters,canonicalKey,analysisSelection,restoreBrief,pruneBriefTracks,snapGrid,nearest,roleColor,clock} from './library';
 
@@ -181,14 +182,14 @@ function App(){
   const hiddenSelected=ids.filter(id=>!filtered.some(t=>t.id===id)).length;
   const activeJobs=jobs.filter(j=>['running','queued'].includes(j.state));
   const accountProps={account,connect,models,model,setModel:(id:string)=>{setModel(id);connect('model',{id});},loadModels};
-  if(!api)return <main className="standalone"><h1>Autocue</h1><p>Open the desktop application to connect your local library.</p></main>;
+  if(!api)return <main className="standalone"><h1>OnSet Prep</h1><p>Open the desktop application to connect your local library.</p></main>;
 
   const head=(title:React.ReactNode,actions?:React.ReactNode)=><div className="page-head"><h1>{title}</h1>{actions&&<div className="row">{actions}</div>}</div>;
 
   return <div className="shell">
     {busy&&<div className="busy-bar" role="progressbar" aria-label="Working"/>}
     <aside className="sidebar">
-      <div className="brand"><span className="brand-mark"><Icon name="headphones" size={16}/></span><span>Autocue</span></div>
+      <div className="brand"><Logo size={28}/><span>OnSet</span></div>
       <nav className="nav" aria-label="Main">{pages.map(p=><button key={p.id} className={page===p.id?'active':''} aria-current={page===p.id?'page':undefined} onClick={()=>setPage(p.id)} title={p.label}>
         <Icon name={p.icon} size={18}/><span className="label">{p.label}</span>{p.id==='settings'&&activeJobs.length>0&&<span className="badge" aria-label={`${activeJobs.length} active jobs`}>{activeJobs.length}</span>}</button>)}</nav>
       <div className="sidebar-foot">
@@ -500,6 +501,6 @@ function WriteChanges({value,tracks}:{value:any;tracks:Track[]}){
 class ReviewBoundary extends React.Component<{children:React.ReactNode},{error:string}>{
   state={error:''};
   static getDerivedStateFromError(error:Error){return {error:error.message||'Unexpected interface error'};}
-  render(){return this.state.error?<main className="standalone"><h1>Autocue needs to reload</h1><p>Your library and decisions are saved in the local workspace.</p><Button kind="primary" onClick={()=>location.reload()}>Reload</Button><Disclosure summary="Details"><pre>{this.state.error}</pre></Disclosure></main>:this.props.children;}
+  render(){return this.state.error?<main className="standalone"><h1>OnSet Prep needs to reload</h1><p>Your library and decisions are saved in the local workspace.</p><Button kind="primary" onClick={()=>location.reload()}>Reload</Button><Disclosure summary="Details"><pre>{this.state.error}</pre></Disclosure></main>:this.props.children;}
 }
 createRoot(document.getElementById('root')!).render(<ReviewBoundary><App/></ReviewBoundary>);
