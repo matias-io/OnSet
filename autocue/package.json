@@ -1,0 +1,98 @@
+{
+  "name": "autocue-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "desktop-dist/main.js",
+  "description": "DJ preparation, evidence review and set planning",
+  "author": "Autocue",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build && tsc -p desktop/tsconfig.json",
+    "start": "electron .",
+    "test": "vitest run",
+    "package": "npm run build && electron-builder --win dir",
+    "installer": "npm run build && electron-builder --win nsis",
+    "prepare-runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-runtime.ps1"
+  },
+  "dependencies": {
+    "jose": "6.1.0",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.6",
+    "@types/react": "19.1.16",
+    "@types/react-dom": "19.1.9",
+    "@vitejs/plugin-react": "5.0.4",
+    "electron": "44.7.2",
+    "electron-builder": "26.15.3",
+    "typescript": "5.9.2",
+    "vite": "7.3.7",
+    "vitest": "5.0.4"
+  },
+  "build": {
+    "appId": "local.autocue.desktop",
+    "productName": "Autocue",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "desktop-dist/**/*",
+      "package.json",
+      "!**/*.test.*"
+    ],
+    "extraResources": [
+      {
+        "from": "autocue_app",
+        "to": "python-src/autocue_app",
+        "filter": [
+          "**/*.py"
+        ]
+      },
+      {
+        "from": "autocue_core.py",
+        "to": "python-src/autocue_core.py"
+      },
+      {
+        "from": "autocue_rb.py",
+        "to": "python-src/autocue_rb.py"
+      },
+      {
+        "from": "mixplan.py",
+        "to": "python-src/mixplan.py"
+      },
+      {
+        "from": "worker",
+        "to": "worker"
+      },
+      {
+        "from": ".artifacts/runtime",
+        "to": "runtime",
+        "filter": [
+          "**/*",
+          "!**/tests/**",
+          "!**/test/**",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
+      },
+      {
+        "from": "models/manifest.json",
+        "to": "models/manifest.json"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

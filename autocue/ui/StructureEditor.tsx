@@ -1,0 +1,10 @@
+import React,{useState} from 'react';
+import type {Track} from './types';
+export function StructureEditor({track,onSave}:{track:Track;onSave:(changes:any)=>void}){
+ const original=track.overrides?.sections||track.analysis?.structure?.sections||[];
+ const [sections,setSections]=useState<any[]>(original),[grid,setGrid]=useState(JSON.stringify(track.overrides?.grid||track.analysis?.downbeats||[])),[error,setError]=useState('');
+ const labels=['intro','groove','verse','vocal','breakdown','build','drop','stripped_groove','outro','silence','unknown'];
+ function change(index:number,key:string,value:any){setSections(current=>current.map((s,i)=>i===index?{...s,[key]:value}:s));}
+ function save(){try{const times=JSON.parse(grid),prior=track.overrides?.grid||track.analysis?.downbeats||[];onSave({sections,...(JSON.stringify(times)!==JSON.stringify(prior)?{grid:times}:{})});setError('');}catch(e:any){setError(e.message);}}
+ return <details className="panel"><summary>Correct sections and analysis grid</summary><p className="muted">Times are original audio seconds. Drag a section edge along the top of the waveform, or edit it here. Grid edits affect analysis and recommendations; rekordbox grid writes are separate.</p><div className="table-wrap"><table><thead><tr><th>Section</th><th>Start</th><th>End</th></tr></thead><tbody>{sections.map((s,i)=><tr key={i}><td><select value={s.label} onChange={e=>change(i,'label',e.target.value)}>{Array.from(new Set([...labels,s.label])).map(l=><option key={l}>{l}</option>)}</select></td><td><input type="number" min="0" max={track.duration} step=".01" value={s.start} onChange={e=>change(i,'start',+e.target.value)}/></td><td><input type="number" min="0" max={track.duration} step=".01" value={s.end} onChange={e=>change(i,'end',+e.target.value)}/></td></tr>)}</tbody></table></div><label>Analysis downbeats, JSON seconds<textarea value={grid} onChange={e=>setGrid(e.target.value)}/></label><p><button onClick={save}>Save corrections</button></p>{error&&<p className="warning">{error}</p>}</details>;
+}

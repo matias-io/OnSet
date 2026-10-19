@@ -1,5 +1,2 @@
-# autocue_rb.py on Windows/macOS - all pure wheels, no compiler needed
-pyrekordbox>=0.4.4
-numpy<2
-scipy
-soundfile
+# Compatibility install. For reproducible development use scripts/bootstrap.ps1 and uv.lock.
+-e .[rekordbox]

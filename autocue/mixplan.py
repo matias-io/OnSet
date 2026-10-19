@@ -37,6 +37,8 @@ MAX_PITCH_PCT = 6.0    # most DJs will not pitch a track further than this to ma
 # --- musical compatibility -------------------------------------------------
 def parse_camelot(key):
     """'8A' -> (8, 'A'). rekordbox stores the Camelot code when the key display is set to it."""
+    from autocue_app.tonal import camelot
+    key = camelot(key)
     m = re.match(r"^\s*(\d{1,2})\s*([ABab])\s*$", str(key or ""))
     return (int(m.group(1)), m.group(2).upper()) if m else None
 
@@ -70,7 +72,7 @@ def bpm_move(a, b):
         return 0, "", 0.0
     best = None
     for factor, tag, cap in ((1.0, "", 3), (2.0, " (double-time)", 1), (0.5, " (half-time)", 1)):
-        pct = (b * factor - a) / a * 100.0
+        pct = (a / (b * factor) - 1) * 100.0
         if abs(pct) > MAX_PITCH_PCT:
             continue
         score = min(cap, 3 if abs(pct) <= 1.0 else (2 if abs(pct) <= 3.0 else 1))
@@ -86,8 +88,10 @@ def score_pair(a, b):
     """Total score for playing b after a, plus the reason. 0 means incompatible."""
     ks, klabel = key_move(a.get("key"), b.get("key"))
     bs, blabel, pct = bpm_move(a.get("bpm"), b.get("bpm"))
-    if not ks or not bs:
+    if not bs or (not ks and a.get("key") and b.get("key")):
         return 0, "", pct
+    if not ks:
+        return bs, f"key unknown; {blabel}", pct
     return ks + bs, f"{klabel}, {blabel}", pct
 
 

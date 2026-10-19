@@ -114,6 +114,11 @@ def find_sections(E, E_hi=None, drop_min_jump=None, drop_rel=None, break_min=Non
     E = np.asarray(E)
     n = len(E)
     flags = []
+    if n == 0 or not np.all(np.isfinite(E)):
+        raise ValueError("Energy curve must contain finite values")
+    if drop is None and np.max(E) < -90:
+        return {'drop':None,'breakdown':None,'outro':None,'second_drop':None,
+                'flags':['No audible signal; no musical events found']}
     hi = np.percentile(E, high_pctl)
 
     def med(a, b):
@@ -225,6 +230,11 @@ def derive_cues(sections, downbeats, second_drop=False, end_loop_bars=0, duratio
     """Map detected sections to cues: [(letter, name, start_s, end_s_or_None), ...]."""
     downbeats = np.asarray(downbeats, dtype=float)
     n = len(downbeats)
+    if n == 0 or not np.all(np.isfinite(downbeats)) or np.any(np.diff(downbeats) <= 0):
+        raise ValueError("Downbeat grid must be finite and strictly increasing")
+    for value in (end_loop_bars, intro_loop_bars):
+        if not isinstance(value, (int, np.integer)) or value < 0:
+            raise ValueError("Loop length must be a nonnegative integer number of bars")
 
     def t(i):
         return float(downbeats[i]) if i is not None and 0 <= i < n else None
@@ -236,12 +246,12 @@ def derive_cues(sections, downbeats, second_drop=False, end_loop_bars=0, duratio
     d = sections.get("drop")
     if intro_loop_bars and n > intro_loop_bars and (d is None or d >= intro_loop_bars):
         # loop over the first N bars, for mixing in over a short intro (skipped if the drop is inside it)
-        bar_len = float(np.median(np.diff(downbeats)))
-        cues.append(("I", CUE_SCHEME["I"][0], t(0), t(0) + intro_loop_bars * bar_len))
+        if duration is None or t(intro_loop_bars) <= duration:
+            cues.append(("I", CUE_SCHEME["I"][0], t(0), t(intro_loop_bars)))
     if d is not None:
-        if d - 32 > 0:
+        if d - 32 >= 0:
             cues.append(cue("B", d - 32))
-        if d - 16 > 0:
+        if d - 16 >= 0:
             cues.append(cue("C", d - 16))
         cues.append(cue("D", d))
     if sections.get("breakdown") is not None:
@@ -255,13 +265,12 @@ def derive_cues(sections, downbeats, second_drop=False, end_loop_bars=0, duratio
         # exactly N bars (rekordbox stores it as a beat count); if the audio ends before
         # the last gridded phrase completes, step back a phrase so the loop is complete.
         anchor = d if d is not None else 0
-        bar_len = float(np.median(np.diff(downbeats)))
-        k = n - end_loop_bars
+        k = n - 1 - end_loop_bars
         k -= (k - anchor) % 4
-        while k > anchor and duration is not None and t(k) + end_loop_bars * bar_len > duration + 0.05:
+        while k > anchor and duration is not None and t(k + end_loop_bars) > duration + 0.05:
             k -= 4
         if k > anchor:
-            cues.append(("L", CUE_SCHEME["L"][0], t(k), t(k) + end_loop_bars * bar_len))
+            cues.append(("L", CUE_SCHEME["L"][0], t(k), t(k + end_loop_bars)))
     return [c for c in cues if c[2] is not None]
 
 
@@ -302,6 +311,8 @@ CHECK_WORDS = ("LLM puts drop", "drop: no agreement", "drop: 2/3", "no drop", "n
 
 
 def review_status(r):
+    if r.get("error") or any("NOT WRITTEN" in f for f in r.get("flags", [])):
+        return "FAILED"
     return "CHECK" if any(w in f for f in r.get("flags", []) for w in CHECK_WORDS) else "OK"
 
 
@@ -310,7 +321,7 @@ def write_review(results, path):
     import csv
     rows = []
     for r in results:
-        c = {x[0]: x[2] for x in norm_cues(r["cues"])}
+        c = {x[0]: x[2] for x in norm_cues(r.get("cues", []))}
         x = r.get("extra") or {}
         rows.append({
             "status": review_status(r),
@@ -319,7 +330,7 @@ def write_review(results, path):
             **{k: (fmt_time(c[k]) if c.get(k) is not None else "") for k in "ABCDEFGLI"},
             "energy": x.get("energy", ""), "genre": x.get("genre", ""),
             "vocals_intro": x.get("vocals_intro", ""), "vocals_outro": x.get("vocals_outro", ""),
-            "flags": "; ".join(r.get("flags", [])),
+            "flags": "; ".join(r.get("flags", [])) + ("; " + r["error"] if r.get("error") else ""),
             "llm_notes": x.get("notes", ""),
         })
     rows.sort(key=lambda z: (z["status"] != "CHECK", z["track"].lower()))
@@ -359,7 +370,7 @@ def print_report(results):
     print()
     print(f"{'track':50} {'bpm':>6} {'A':>5} {'B':>5} {'C':>5} {'D':>5} {'E':>5} {'F':>5} {'G':>5}  flags")
     for r in results:
-        c = {x[0]: x[2] for x in norm_cues(r["cues"])}
+        c = {x[0]: x[2] for x in norm_cues(r.get("cues", []))}
         cols = [fmt_time(c[k]) if c.get(k) is not None else "-" for k in "ABCDEFG"]
         name = Path(r["path"]).stem[:50]
         print(f"{name:50} {r.get('bpm', 0):6.1f} " + " ".join(f"{x:>5}" for x in cols) + "  " + "; ".join(r["flags"]))
@@ -384,6 +395,7 @@ def merge_llm(r, llm, downbeats, prefer=False, tol_bars=2, **derive_opts):
     """
     if not llm or "error" in llm:
         r["flags"].append("no LLM check" + (f" ({llm['error']})" if llm else ""))
+        r["cues"] = derive_cues(r["sections"], downbeats, duration=r.get("duration"), **derive_opts)
         return
     downbeats = np.asarray(downbeats, dtype=float)
     E = np.asarray(r.get("energy", []), dtype=float)
@@ -405,7 +417,9 @@ def merge_llm(r, llm, downbeats, prefer=False, tol_bars=2, **derive_opts):
         t = parse_mmss(llm.get(key))
         if t is None:
             continue
-        theirs = refine(int(np.argmin(np.abs(downbeats - t))), rising=(key in ("drop", "second_drop")))
+        theirs = int(np.argmin(np.abs(downbeats - t)))
+        r.setdefault("opinions", []).append({"event": key, "original_time": t, "aligned_bar": theirs,
+                                              "proposed_refinement": refine(theirs, key in ("drop", "second_drop"))})
         mine = r["sections"].get(key)
         if mine is None:
             r["sections"][key] = theirs
@@ -489,7 +503,7 @@ def vote_sections(r, llms, downbeats, tol_bars=2, tie_pref=("energy",)):
                 continue
             t = parse_mmss(v)
             if t is not None:
-                votes.append((src, refine(int(np.argmin(np.abs(downbeats - t))), key in ("drop", "second_drop"))))
+                votes.append((src, int(np.argmin(np.abs(downbeats - t)))))
         if not votes:
             continue
         def rank(v):

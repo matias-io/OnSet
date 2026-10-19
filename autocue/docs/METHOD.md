@@ -1,3 +1,5 @@
+> Historical energy-detector and opinion-merging method. This describes the retained legacy scripts, not the full desktop analysis/resolution pipeline. See [current analysis status](IMPLEMENTATION_STATUS.md) and [desktop operation](DESKTOP.md). Old agreement/confidence labels are provisional; no held-out listening accuracy is established.
+
 # Method: how the cues are detected and merged
 
 All detection lives in `autocue_core.py`; both front-ends call it.

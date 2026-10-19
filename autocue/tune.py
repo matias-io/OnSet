@@ -33,7 +33,7 @@ def score(params):
     agree = {"drop": 0, "breakdown": 0, "outro": 0}
     both = {"drop": 0, "breakdown": 0, "outro": 0}
     for r, truth in tracks:
-        sec = core.find_sections(r["energy"], r["energy_hi"], **params)
+        sec = core.find_sections(r["energy"], r["energy_hi"], phrase_anchor=r.get("phrase_anchor", 0), **params)
         for k in agree:
             if truth[k] is not None and sec[k] is not None:
                 both[k] += 1

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autocue-dj"
+version = "0.2.0"
+description = "Evidence-backed DJ preparation, cue review and transition planning"
+requires-python = ">=3.11,<3.13"
+dependencies = ["numpy==1.26.4", "scipy==1.14.1", "soundfile==0.13.1", "librosa==0.11.0", "psutil==7.0.0", "mutagen==1.47.0"]
+
+[project.optional-dependencies]
+rekordbox = ["pyrekordbox==0.4.4"]
+test = ["pytest==8.3.5"]
+
+[project.scripts]
+autocue = "autocue_app.cli:main"
+
+[tool.setuptools]
+packages = ["autocue_app"]
+py-modules = ["autocue_core", "autocue_rb", "mixplan", "gemini_check"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

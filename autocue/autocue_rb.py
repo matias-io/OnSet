@@ -12,7 +12,7 @@ Requirements:
   - rekordbox 6/7 must be CLOSED while this runs
   - tracks must already be imported and analysed in rekordbox (grid + phrases)
   - pip install pyrekordbox numpy scipy soundfile     (ffmpeg on PATH for m4a)
-  - first time only:  python -m pyrekordbox download-key
+  - use the desktop app or `autocue rekordbox-preview` for approved-cue writes
 
 Usage:
   autocue_rb.py --playlist "2025 Top DJ Lineup"          # tracks in a rekordbox playlist
@@ -142,10 +142,10 @@ def make_uuid():
 
 def is_hot_cue(c):
     """djmdCue.Kind: 0 = memory cue, 1..8 = hot cue A..H, 4 = memory loop (has an out point)."""
-    return 1 <= (c.Kind or 0) <= 8 and not (c.Kind == 4 and (c.OutMsec or -1) >= 0)
+    return 1 <= (c.Kind or 0) <= 8 and not (c.Kind == 4 and c.OutMsec is not None and c.OutMsec >= 0)
 
 
-def write_cues(db, content, cues, replace_all=False, dry_run=False, bpm=128.0, hot_cues=False):
+def write_cues(db, content, cues, replace_all=False, dry_run=False, bpm=128.0, hot_cues=False, beat_times=None):
     """Replace autocue's cues on this track. Returns (deleted, added, skipped_reason).
 
     Memory cues (default): Kind 0, loops Kind 4, max 10 per track.
@@ -185,6 +185,11 @@ def write_cues(db, content, cues, replace_all=False, dry_run=False, bpm=128.0, h
         loop = end is not None
         out_msec = int(round(end * 1000)) if loop else -1
         beats = int(round((end - t) / (60.0 / max(bpm, 1)))) if loop else 0
+        if loop and beat_times is not None:
+            grid = np.asarray(beat_times)
+            beats = int(np.argmin(abs(grid - end)) - np.argmin(abs(grid - t)))
+            if beats <= 0:
+                raise ValueError("Loop endpoints must span at least one grid beat")
         kind = HOT_SLOT[letter] if hot_cues else (4 if loop else 0)
         cue = tables.DjmdCue(
             ID=str(db.generate_unused_id(tables.DjmdCue)),
@@ -215,15 +220,15 @@ def open_snapshot():
             continue
     if src is None or not src.exists():
         sys.exit("could not locate master.db")
-    for old in Path(tempfile.gettempdir()).glob("autocue-snapshot-*"):
-        shutil.rmtree(old, ignore_errors=True)   # leftovers from interrupted runs
     tmp = Path(tempfile.mkdtemp(prefix="autocue-snapshot-"))
     dst = tmp / src.name
-    shutil.copy2(src, dst)
-    for suffix in ("-wal", "-shm"):
-        side = src.with_name(src.name + suffix)
-        if side.exists():
-            shutil.copy2(side, dst.with_name(dst.name + suffix))
+    from autocue_app.rekordbox import consistent_backup
+    original = Rekordbox6Database(path=src)
+    try:
+        consistent_backup(original, dst)
+    finally:
+        original.close()
+        original.engine.dispose()
     print(f"rekordbox is running - dry run against a snapshot ({dst})")
     db = Rekordbox6Database(path=dst, db_dir=src.parent)
 
@@ -238,13 +243,10 @@ def open_snapshot():
 
 def backup_db(db):
     src = Path(db.engine.url.database)
-    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     dst = src.with_name(f"{src.name}.autocue-{stamp}.bak")
-    shutil.copy2(src, dst)
-    for suffix in ("-wal", "-shm"):
-        side = src.with_name(src.name + suffix)
-        if side.exists():
-            shutil.copy2(side, dst.with_name(dst.name + suffix))
+    from autocue_app.rekordbox import consistent_backup
+    consistent_backup(db, dst)
     return dst
 
 
@@ -276,6 +278,7 @@ def main():
     sel.add_argument("--all", action="store_true")
     ap.add_argument("files", nargs="*", help="audio file names to match against the collection")
     ap.add_argument("--dry-run", action="store_true", help="analyse and report, write nothing")
+    ap.add_argument("--legacy-unreviewed", action="store_true", help="explicitly use the old unreviewed write workflow; prefer the approved-cue desktop workflow")
     ap.add_argument("--prefer-phrases", action="store_true",
                     help="where rekordbox phrase analysis disagrees, use its sections instead of the energy analysis")
     ap.add_argument("--replace-all", action="store_true",
@@ -299,6 +302,8 @@ def main():
                     help="put energy/genre/vocals/flags into the track's Comments field in rekordbox")
     ap.add_argument("--review", default="review.csv", help="review CSV path")
     args = ap.parse_args()
+    if not args.dry_run and not args.legacy_unreviewed:
+        ap.error("Use the desktop approved-cue workflow, or explicitly select --legacy-unreviewed")
 
     from pyrekordbox import Rekordbox6Database
     from pyrekordbox.utils import get_rekordbox_pid
@@ -315,7 +320,7 @@ def main():
         db = Rekordbox6Database()
     llms = []   # keyed by file name so a gemini.json made on another machine still matches
     for g in args.gemini:
-        llms.append({Path(k).name: v for k, v in json.loads(Path(g).read_text()).items()})
+        llms.append(json.loads(Path(g).read_text(encoding="utf-8-sig")))
     contents = [c for c in select_contents(db, args) if c is not None]
     print(f"{len(contents)} track(s) selected")
 
@@ -328,8 +333,11 @@ def main():
         print(f"[{i}/{len(contents)}] {path.name}", end=" ... ", flush=True)
         if not path.exists():
             print("FILE MISSING")
+            results.append({"path": str(path), "bpm": 0, "bars": 0, "flags": [], "cues": [], "error": "FILE MISSING"})
             continue
         t0 = time.time()
+        savepoint = None
+        registry_before = list(db.registry.__update_sequence__)
         try:
             downbeats, beat_times, phrases, mood = read_grid_and_phrases(db, c)
             rb = phrase_sections(phrases, downbeats)
@@ -343,7 +351,8 @@ def main():
             merge_with_phrases(r, rb, downbeats, args.prefer_phrases, fill=not args.vote)
             energy_drop = r["sections"].get("drop")
             opts = dict(second_drop=args.second_drop, end_loop_bars=args.end_loop, intro_loop_bars=args.intro_loop)
-            opinions = [l.get(path.name) for l in llms]
+            from autocue_app.util import match_opinion
+            opinions = [match_opinion(l, path, [x.FolderPath for x in contents]) for l in llms]
             if args.vote and rb:
                 opinions.append({**{k: v for k, v in rb.items() if v is not None}, "source_name": "rb-phrases"})
             if len(opinions) >= 2:
@@ -351,7 +360,7 @@ def main():
                 vote_sections(r, opinions, downbeats, tie_pref=("llm1", "energy") if args.prefer_gemini else ("energy",))
                 r["cues"] = derive_cues(r["sections"], downbeats, duration=r["duration"], **opts)
             elif llms:
-                merge_llm(r, llms[0].get(path.name), downbeats, args.prefer_gemini, **opts)
+                merge_llm(r, opinions[0], downbeats, args.prefer_gemini, **opts)
             else:
                 r["cues"] = derive_cues(r["sections"], downbeats, duration=r["duration"], **opts)
             # the read overrode a drop that the energy analysis and rekordbox's phrases agree on:
@@ -361,19 +370,31 @@ def main():
                     and abs(final_drop - energy_drop) > 2:
                 r["flags"].append(f"drop: 2/3 sources (energy + phrases) say {fmt_time(downbeats[energy_drop])}, "
                                   f"read's {fmt_time(downbeats[final_drop])} used")
+            if not args.dry_run:
+                savepoint = db.session.begin_nested()
             deleted, added, skip = write_cues(db, c, r["cues"], args.replace_all, args.dry_run, bpm=r["bpm"] or 128.0,
-                                              hot_cues=args.hot_cues)
+                                              hot_cues=args.hot_cues, beat_times=beat_times)
             if args.write_comments and not args.dry_run:
-                c.Commnt = track_comment(r)[:255]
+                previous_comment = c.Commnt or ""
+                addition = "[Autocue]" + track_comment(r) + "[/Autocue]"
+                if len(previous_comment + " " + addition) <= 255:
+                    c.Commnt = (previous_comment + " " + addition).strip()
+            if savepoint is not None:
+                db.flush()
+                savepoint.commit()
         except Exception as e:
             print(f"FAILED: {e}")
+            if savepoint is not None:
+                savepoint.rollback()
+                db.registry.__update_sequence__[:] = registry_before
+            results.append({"path": str(path), "bpm": 0, "bars": 0, "flags": [], "cues": [], "error": str(e)})
             continue
         if skip:
             r["flags"].append("NOT WRITTEN: " + skip)
         print(f"{r['bpm']:.1f} bpm, {r['bars']} bars, -{deleted}/+{added} cues, {time.time() - t0:.1f}s"
               + (f"  [{'; '.join(r['flags'])}]" if r["flags"] else ""))
         results.append(r)
-        pending += added
+        pending += added + deleted + int(args.write_comments and not args.dry_run)
 
     if args.json:
         Path(args.json).write_text(json.dumps(results, indent=1, default=str))
@@ -389,6 +410,8 @@ def main():
         print(f"\ncommitted {pending} cues on {len(results)} tracks - start rekordbox to see them")
     else:
         print("\nnothing to write")
+    db.close()
+    db.engine.dispose()
 
 
 if __name__ == "__main__":

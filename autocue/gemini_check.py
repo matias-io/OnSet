@@ -14,6 +14,7 @@ API_DOWN_UNTIL = 0.0                 # circuit breaker: skip the API for a while
 AGY_QUOTA_UNTIL = 0.0                # subscription quota exhausted: sleep until it resets
 API_BREAK = 6 * 3600
 from pathlib import Path
+from autocue_app.util import atomic_json, file_hash
 
 PROMPT = ('Listen to the audio file {name}. It is a 4/4 dance track. '
           'Give me timestamps (m:ss) for: (1) the first drop (the first moment the full kick drum and bass play together '
@@ -50,7 +51,7 @@ def ask_api(path, model, proxy_dir=None, timeout=300, key=None, attempts=8):
     """Direct Gemini API call: audio inline, JSON output forced, temperature 0. No agent, no tools."""
     p = Path(path)
     if proxy_dir:
-        p = Path(proxy_dir) / (p.stem + ".mp3")
+        p = proxy_for(p, proxy_dir)
     mime = {".mp3": "audio/mp3", ".flac": "audio/flac", ".wav": "audio/wav", ".ogg": "audio/ogg",
             ".m4a": "audio/aac", ".aiff": "audio/aiff"}.get(p.suffix.lower(), "audio/mp3")
     body = {
@@ -126,7 +127,7 @@ def proxy_for(path, proxy_dir):
     p = Path(path)
     proxy_dir = Path(proxy_dir)
     proxy_dir.mkdir(parents=True, exist_ok=True)
-    q = proxy_dir / (safe_stem(p.stem) + ".mp3")
+    q = proxy_dir / (safe_stem(p.stem) + "-" + file_hash(p)[:12] + ".mp3")
     if not q.exists():
         legacy = Path(__file__).parent / "proxies" / (p.stem + ".mp3")   # proxies made earlier under the original names
         src = legacy if legacy.exists() else p
@@ -249,13 +250,20 @@ def run_pass(todo, cache, args):
     else:
         model = args.model or "gemini-3.8-flash-high"
         print(f"using agy CLI ({model})")
-        fn = lambda p: ask(p, model, args.proxy_dir)
+        def fn(p):
+            with AGY_LOCK:
+                while time.time() < AGY_QUOTA_UNTIL:
+                    time.sleep(min(30, AGY_QUOTA_UNTIL - time.time()))
+                return ask(p, model, args.proxy_dir)
     consecutive_errors = 0
     with ThreadPoolExecutor(args.jobs) as ex:
         futs = {ex.submit(fn, p): p for p in todo}
         for i, f in enumerate(as_completed(futs), 1):
             p = futs[f]
-            d = f.result()
+            try:
+                d = f.result()
+            except Exception as exc:
+                d = {"error": str(exc)[:200]}
             if "error" in d and not online():   # don't burn retries while the network is down
                 wait_online()
             consecutive_errors = consecutive_errors + 1 if ("error" in d and d["error"] != "agy quota") else 0
@@ -264,7 +272,7 @@ def run_pass(todo, cache, args):
                 time.sleep(900)
                 consecutive_errors = 0
             cache[p] = d
-            Path(args.out).write_text(json.dumps(cache, indent=1))
+            atomic_json(args.out, cache)
             tag = d.get("error") or f"drop {d.get('drop')} break {d.get('breakdown')} outro {d.get('outro')} [{d.get('confidence')}] {d.get('seconds')}s via {d.get('via', d.get('model', 'agy'))}"
             print(f"[{i}/{len(todo)}] {Path(p).name[:55]:55} {tag}", flush=True)
 

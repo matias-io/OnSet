@@ -1,0 +1,10 @@
+numpy==1.26.4
+scipy==1.15.3
+soundfile==0.13.1
+imageio-ffmpeg==0.6.0
+torch==2.6.0
+torchaudio==2.6.0
+beat-this==1.1.0
+demucs==4.0.1
+essentia==2.1b6.dev1389
+edm98[inference]==0.1.0

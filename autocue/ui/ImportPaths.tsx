@@ -1,0 +1,5 @@
+import React,{useState} from 'react';
+export function ImportPaths({run}:{run:any}){
+ const [paths,setPaths]=useState(''),[result,setResult]=useState<any>(null);
+ return <details className="panel"><summary>Import by pasted file or folder paths</summary><p className="muted">Paste one local path per line, including paths copied from Explorer. Audio and historical analysis files stay in place.</p><label>Local file or folder paths<textarea aria-label="Import local paths" value={paths} onChange={e=>setPaths(e.target.value)} placeholder="C:\Music\track.flac"/></label><button disabled={!paths.trim()} onClick={()=>run(async()=>{const r=await window.autocue.call('import',{paths:paths.split(/\r?\n/).map(p=>p.trim().replace(/^"|"$/g,'')).filter(Boolean)});setResult(r);return r;})}>Import pasted paths</button>{result&&<><p>{result.imported} records processed · {result.track_ids?.length??result.imported} unique tracks matched.</p>{result.failed.map((f:any,i:number)=><p key={i} className="warning">{f.path}: {f.error}</p>)}</>}</details>;
+}

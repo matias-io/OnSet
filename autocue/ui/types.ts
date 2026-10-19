@@ -1,0 +1,4 @@
+export type Cue={id:string;role:string;name:string;time:number;end:number|null;review:string;confidence:string;source:string};
+export type Track={id:string;title:string;artist:string;version:string;path:string;locations:string[];duration:number;bpm:number|null;key:any;energy?:number;genres:string[];notes:string;revision:string|null;cues:Cue[];analysis:any;analysis_state:string;review_state:string;write_state:string;overrides?:any;mood_tags?:string[];familiarity?:number;themes?:string[];hooks?:any[]};
+export type Bridge={call:(method:string,params?:any)=>Promise<any>;pick:(kind:string)=>Promise<string[]>;media:(id:string,stem?:string)=>Promise<string>;previewMedia:(id:string,click:boolean)=>Promise<any>;export:(params:any)=>Promise<any>;account:(action:string,params?:any)=>Promise<any>;onEvent:(callback:(event:any)=>void)=>()=>void};
+declare global{interface Window{autocue:Bridge;}}

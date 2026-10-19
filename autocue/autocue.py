@@ -25,13 +25,13 @@ import soundfile as sf
 from autocue_core import CUE_SCHEME, analyze_with_grid, derive_cues, merge_llm, norm_cues, print_report, track_comment, vote_sections, write_review
 
 warnings.filterwarnings("ignore")
-from madmom.features.downbeats import RNNDownBeatProcessor, DBNDownBeatTrackingProcessor  # noqa: E402
 
 AUDIO_EXT = {".flac", ".mp3", ".m4a", ".wav", ".aiff", ".aif", ".ogg", ".opus"}
 
 
 def beat_grid(path):
     """Return (downbeat_times, bpm, first_beat_time) using madmom."""
+    from madmom.features.downbeats import RNNDownBeatProcessor, DBNDownBeatTrackingProcessor
     act = RNNDownBeatProcessor()(path)
     proc = DBNDownBeatTrackingProcessor(beats_per_bar=[4], fps=100, min_bpm=80, max_bpm=180)
     beats = proc(act)                      # columns: time, beat-in-bar (1..4)
@@ -132,7 +132,7 @@ def main():
     if args.from_json:
         results = json.loads(Path(args.from_json).read_text())
         finalize(results)
-        playlist = args.playlist or Path(results[0]["path"]).parent.name
+        playlist = args.playlist or (Path(results[0]["path"]).parent.name if results else "autocue")
         write_xml(results, args.out, args.prefix, playlist)
         print_report(results)
         print(f"\nwrote {args.out} ({len(results)} tracks)")

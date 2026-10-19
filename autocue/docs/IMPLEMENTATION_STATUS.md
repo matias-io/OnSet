@@ -1,0 +1,119 @@
+# Autocue implementation status
+
+Autocue 0.2.0 is an engineering candidate. The full requested plan is not yet fully verified for personal production. Generated fixtures establish software behavior; they do not establish musical accuracy or mixer equivalence.
+
+Last reviewed 2026-10-19 against the local quality report, package manifest, post-upgrade workspace comparison and current source. Evidence is scoped to the measured machine and fixtures.
+
+The complete specification is [PROJECT_PLAN.md](PROJECT_PLAN.md); [PLAN_PROGRESS.md](PLAN_PROGRESS.md) maps its requirement IDs to current baselines and open work. For continuation commands, source pointers and machine-specific preservation notes, start with [the current handoff](../HANDOFF.md).
+
+## Implemented
+
+| Area | Delivered implementation |
+|---|---|
+| Foundation | Managed Python 3.11, locked native/desktop/core and experimental WSL runtimes, diagnostics, repaired historical CLI regressions |
+| Persistence | SQLite identities and aliases, immutable observations, separate human edits, durable jobs, undo, stale dependency invalidation |
+| Analysis | Independent rhythm checks; band/onset/timbre/chroma and recurrence features; duration-aware structure baseline; native/Essentia global and local keys; Demucs stems; multidimensional energy |
+| Experimental sources | Isolated EDMFormer and all-in-one CPU environments, pinned source/assets, activations/embedding files, finite timing checks and explicit experimental status |
+| Review | Waveform and sections, precise cue/loop fields, keyboard adjustments, bulk approval/rejection with single undo, saved-position guard, stem players, metadata/mood/familiarity edits, benchmark labels |
+| Library | Standard/Camelot key normalization, BPM/energy/genre/vocal filters, pasted-path import, exact-hash relocation and complete workspace JSON |
+| Rekordbox | Consistent SQLCipher snapshots, approved-only exact preview/apply, deletion-only operations, manual/edited cue preservation, explicit historical ownership adoption, manifests/backups/restore and playlists |
+| Transitions | Eighteen technique families, multiple entry/exit windows, actual-grid timing, incoming pitch limits, local-overlap harmony/tonal/bass/vocal checks, loop alternatives and supported rehearsal renders |
+| Planning | Beam width 128, three alternatives, revision/timing/constraint validation, pins, omission reasons, validated fallback routes and JSON/CSV/HTML/PDF exports |
+| ChatGPT | OAuth/PKCE, Windows-protected main-process credentials, account/model selection, completed-event streaming, sourced enrichment and rejected-invalid-plan replacement suggestions |
+| Recovery | Owned process cancellation, resumable native-feature stages, queue deduplication, explicit unavailable-model evidence, workspace health guards, consistent snapshots and exact restoration preview, full SQLite history export, checkpoint/quit and recoverable interface errors |
+
+## Current engineering evidence (2026-10-19)
+
+- 93 Python regression tests pass (zero failures; one librosa empty-pitch tuning warning on the silent fixture), including generated audio, encrypted/plain database snapshots, exact loops, cue preservation/deletions, adoption, restore, process cancellation, immutable resources, stale set validation, shutdown pause versus explicit cancellation, queue deduplication, native-stage recovery, workspace snapshots/restore and benchmark metrics.
+- 26 desktop tests pass. Tests include locally signed account tokens, PKCE/nonces, refresh/account switching, cancelled sign-in, malformed/interrupted streams, key normalization and missing-evidence filtering, filtered analysis selection, cited Apple song identity and bounded service shutdown. These automated protocol tests use synthetic credentials; separate real-account acceptance is described below.
+- TypeScript and production Vite/Electron builds pass.
+- Installed 0.2.0 launched through Computer Use and imported 160 live rekordbox tracks. This exposed a zero-duration import bug, now fixed with pre-analysis audio durations, progress events and durable skipped/failed reports. A fresh live-library backend check imported all 160 tracks with durations in 49.63 seconds and no failures or database writes. The user handled the firewall prompt. Installed diagnostics, a fresh 160-record import, advancing/paused local playback and a clean exit/relaunch passed. Filtered analysis now defaults to visible results and disables empty-result actions. Shutdown preserves paused work, verified by installed resume/quit/reopen. The earlier empty-library discrepancy was traced to packaged-host AppData redirection and resolved for ordinary Windows launch; see the desktop verification report. Broader failure/recovery coverage remains open.
+- Native-to-WSL CPU inference completed all five requested sources on generated 24-second audio: Beat This!, Demucs, Essentia, EDMFormer and all-in-one. The latest native-analysis-3 resumption run reused native features and completed in 1,833.34 seconds on CPU; reported peak child RSS was 3,422,420,992 bytes. Runtime depends strongly on model loading, caching and concurrent machine work. Experimental outputs remain unverified musical opinions.
+- A 128-profile planning run produced three valid alternatives and 26,397 candidate transitions in 46.843 seconds. Later overlap refinements passed regression tests; this time is an observed run, not a universal runtime guarantee.
+- Computer Use acceptance is recorded separately in [desktop verification](DESKTOP_VERIFICATION.md). Only completed visible workflows are credited there.
+
+The local machine-readable report is `.artifacts/quality-report.json`; regenerate Python checks with `scripts/quality-report.py`. Desktop checks/build, native UI acceptance and model runs are separate evidence and are not rerun by that script. Historical reports are preserved. No live rekordbox library writes have been performed during implementation.
+
+## Remaining requested work and acceptance gates
+
+1. **Listening benchmark and model promotion.** Human-verified beat/downbeat, event, section, key, energy and transition labels are still required. Metrics, one-to-one matching, pairwise energy judgments, split templates and held-out release comparisons now exist. Check duplicate song/version grouping, collect labels, run ablations and assess the +5/+10 point targets. No improvement or calibrated probability is claimed without this evidence.
+2. **Real rekordbox inspection and restoration rehearsal.** Verify cue D, memory/hot loops, colours, counts, comments, preservation and playlists in a small test library, then rehearse consistent backup restoration there. Automated database fixtures cannot establish rekordbox's visible behavior. Full-library writes remain approval-based.
+3. **Broader ChatGPT acceptance.** User-completed sign-in, account-specific model discovery, plan-funded metadata enrichment, release web research and a validated 210-second single-track plan passed through the installed interface. A later restart retained the account and the saved plan and loaded models again. An earlier post-update research run lacked verified consulted citations and was conservatively downgraded. This citation-retention gap was subsequently repaired: live sourced-claim retention and a validated three-track 9:53 recommendation passed on 2026-10-19 using historical, unverified analyses. The evidence panel retained an actual DIRTYBIRD/Bandcamp source and exact-edit uncertainty. Restricted-policy/expired-token cases still need acceptance; account switching and refresh have isolated protocol coverage.
+4. **Broader recovery/performance matrix.** Long real tracks, pause/quit during every heavy stage, interrupted initial downloads, full-disk/cache limits, clean-machine installation, uninstall and rollback need additional destructive-failure testing in isolated environments. Cancellation cannot interrupt every native library call immediately. CUDA remains unverified on this CPU-only machine.
+5. **Musical recommendation refinement.** Learned local genre/mood/danceability estimators and learned transition acceptability are not yet delivered. Metadata, manual tags, sourced enrichment, interpretable character features and ChatGPT interpretation are available. Relative energy still needs personal calibration. Wordplay/themes/hooks require verified evidence. Variable-tempo alignment, arbitrary tempo ramps, mixer-specific gestures/effects and listening-based loop/separation quality need further evaluation.
+6. **Review and portability polish.** Benchmark ground truth currently uses an editable JSON form. Native full-history Save As export and exact row preservation through the installed upgrade passed. Additional file-dialog cases, restore/import round trips with edited revision history, missing external cache/stem relocation, all keyboard paths and accessibility across display sizes need broader acceptance coverage. All eleven rendered-preview families have generated-audio timing/peak checks; listening quality and the remaining manual gestures still need acceptance. Workspace JSON preserves current profiles, transitions, sets and labels. The new verified SQLite workspace export also preserves revision, correction, undo, job and artifact history. Audio, credentials, model caches and large feature files remain external; importing a portable snapshot from another machine still needs a dedicated workflow.
+
+Complete the end-to-end production gate only after these checks: import, deep analyse, inspect/correct/approve, plan transitions and sets, audition, validate timing, preview/apply/export, then restart with decisions intact. No live-performance control is implemented.
+
+The rebuilt 0.2.0 installer was installed with explicit approval. Windows package AppData redirection inherited from Codex explained the empty normal-launch workspace. The prepared workspace and matching encrypted Electron profile metadata were copied into ordinary AppData while preserving both original states. Explorer-launched account/model access, all 160 tracks, three jobs, the saved plan and a second clean restart passed. A native full-history export passed integrity and full-row comparison across every workspace table. See the verification report for paths and evidence.
+
+
+## Continuation verification (2026-10-19)
+
+The updated installed application passed real-account model discovery, five-profile release research, citation retention, and three-track set selection through Computer Use. The proposed Losing It -> Stop It -> La Danza route validated at 593.43 seconds with filter/cut transitions, key lock, and the requested pitch limit. Historical observations remain unverified and no cue approvals or real rekordbox writes occurred.
+
+New regression coverage found and repaired an SQLite savepoint escape: explicit outer transactions now protect cue and playlist changes when rekordbox starts before commit. Fault injection verifies no partial cue/comment or playlist mutation. Grid-only rekordbox seeds no longer suppress historical-analysis import, and missing historical key fields preserve imported key metadata. Citation audits survive restart and invalid enrichment batches cannot partially save. Rehearsal renders verify source fingerprints before reusing a cache. All eleven supported preview families passed duration, finite-sample and peak checks on generated audio.
+
+Before packaging, the installed acceptance patch was backed up in `.artifacts/before-citation-patch-20261019`. The current complete-verification installer includes those changes; both its extracted payload and the resulting installed files match the tested source. Full current results are in `.artifacts/quality-report.json`. Musical accuracy, listening calibration and real rekordbox visual/restore acceptance remain separate gates.
+
+
+A strengthened silence test found that a supplied grid could make digital silence look like a first groove at bar zero. `structure-resolution-2` now classifies near-zero signal as silence, records musical events as absent, and proposes no mix cues. The shared legacy baseline also avoids its bar-zero fallback for silent energy curves. The native feature cache remains version 3; resolved outputs require the new resolution version so old conclusions are recomputed. This is an invented-event regression repair, not a held-out musical accuracy claim.
+
+Expanded rekordbox fixtures also verify optional-loop omission at the memory-cue limit, preservation of eight manual cues, exact sixteen-beat memory/hot loops on a variable grid, and a complete encrypted SQLCipher write/restore round trip. Real rekordbox visual behavior remains unverified.
+
+
+Final continuation checks pass: 93 Python tests, 26 desktop tests, desktop build, installed bundled-runtime silence analysis and source-hash comparison. The 796,752,056-byte rebuilt installer is `release-0.2.0-complete-verification/Autocue Setup 0.2.0.exe`, SHA-256 `e558bb847222c46b6fee9adadf171d97c5fd807ec92e0a3bc5b508743d880b6e`. The user-approved installer completed through Computer Use on 2026-10-19 and launched the installed app successfully; the resulting installed files match the current tested source. Account/model discovery, retained citation display and the saved three-track plan passed. A fresh native full-history export passed integrity and exact full-row comparison against the pre-upgrade snapshot across all seven tables, retaining 160 tracks, five revisions, three jobs and 105 artifacts. The interrupted `release-0.2.0-citations-multitrack` output is superseded and must not be used.
+
+
+## Source continuation after the installer (2026-10-19, later)
+
+These changes are in source only and are **not in the verified 0.2.0 installer**. A new installer build and the action-time install confirmation are needed before installed-app credit. Automated record for this source: 101 Python tests, 30 desktop tests, and a successful TypeScript/Vite/Electron build. The UI changes have unit-test and typecheck evidence only; they have not been exercised through Computer Use.
+
+- **Planner late-entry bug (P10.2, P7.2).** `options()` keeps one best window per technique and then the top three. When a set entered a track after an early exit window, every top option could start before the entry point. The route was then dropped, and the planner reported "no valid set" even when a later exit window worked. `options(min_out_start=...)` now searches only playable windows. The planner, `replan_order` and `transition_alternatives` use it. Regression: `test_late_entry_searches_later_exit_windows`.
+- **Unsatisfiable briefs (P10.2).** Conflicts now name the cause before the generic message:
+  - an opening or closing track that is excluded or filtered out;
+  - an unknown or unavailable pinned track, or a pin position beyond the candidates;
+  - an identical opening and closing track;
+  - candidates too short for the minimum duration.
+- **Job control (P1.3, V1).**
+  - A pause requested between checkpoints is no longer overwritten with `running` when a track completes.
+  - A full disk or quota error (ENOSPC/EDQUOT) pauses the job with a clear error. It no longer fails every remaining track.
+  - Resuming a job whose worker has already finished re-enqueues it instead of setting an event nobody waits on.
+- **Import boundaries (I2, P1.2).**
+  - Workspace JSON transitions, plans and benchmark labels are checked for required IDs and `schema_version` before anything is written, so a malformed file can't partly import.
+  - An explicit file with an unsupported type (for example `.db`) is now reported as failed instead of being silently ignored.
+  - Key edits must be standard notation or Camelot (zero-padded forms such as `08A` are accepted).
+- **Restore (P6.2).** A missing backup file, or a future write-manifest schema, is refused with a clear `ValueError` before any mutation.
+- **Desktop (P5.2, P10.2).**
+  - The set brief is saved in the `set_brief` setting, which is validated by `SetBrief.parse`, and restored on the next launch. Removed tracks are pruned from it.
+  - Each plan card has a "Use this plan's brief" action. This closes the known issue where brief fields reset to defaults in a new session.
+  - Cue dragging snaps to the corrected grid, matching the keyboard steps.
+  - A cancelled pointer can no longer leave a stuck cue drag.
+  - Ctrl+A and Ctrl+R no longer approve or reject a focused cue, and Ctrl+Z works after clicking a button.
+  - Settings loads now report errors, and a failed experimental-model toggle rolls back.
+  - Icon-only and row controls have accessible names.
+
+Still open from the same audit (not done here):
+- portable workspace snapshot import with path remapping;
+- cache and stem relocation;
+- true prefix or partial replanning, and searching pinned transitions during planning;
+- transpose carrying;
+- SetBrief smoothness, contrast and playlist fields;
+- a structured benchmark label form;
+- spectrogram frequency ticks from coordinates;
+- review-priority sorting;
+- treating `transitions`/`plan` as cancellable jobs.
+
+
+## Evidence map
+
+| Record | What it establishes |
+|---|---|
+| `.artifacts/quality-report.json` | Recorded engineering suites, diagnostics and separately dated acceptance records |
+| `.artifacts/package-verification-continuation-20261019.json` | Exact installer identity, extracted/installed source comparison and completed installer UI acceptance |
+| `.artifacts/post-installer-workspace-verification-20261019.json` | Native export integrity and exact before/after rows across all seven workspace tables |
+| `.artifacts/live-adviser-verification-20261019.json` | Retained consulted URLs and independently validated three-track timing |
+| `.artifacts/installed-resolution-smoke-20261019.json` | Bundled Python silence analysis, absent events/no mix cues and SQLCipher availability |
+| `.artifacts/real-transition-preview-verification-20261019.json` | Real-source render duration, finite samples, action offsets and peak checks |
+
+The 77-source research count covers consulted pages in the completed request; it is not 77 supporting citations per track. Eight stored web claims retained exactly consulted URLs. Citation retention is provenance evidence, not independent factual or exact-edit verification.
