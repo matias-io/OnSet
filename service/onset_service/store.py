@@ -6,7 +6,7 @@ import sqlite3
 import threading
 import uuid
 from pathlib import Path
-from .util import DB_NAME, app_home, canonical, digest, file_hash, utcnow
+from .util import DB_NAME, adopt_legacy_database, app_home, canonical, digest, file_hash, utcnow
 from . import workspace
 
 
@@ -14,6 +14,7 @@ class Store:
     def __init__(self, home=None):
         self.home = Path(home or app_home())
         self.home.mkdir(parents=True, exist_ok=True)
+        adopt_legacy_database(self.home)
         self.lock = threading.RLock()
         self.db_path = self.home / DB_NAME
         self.db = sqlite3.connect(self.db_path, check_same_thread=False)

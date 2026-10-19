@@ -49,6 +49,18 @@ def migrate_legacy_home(legacy, home):
         legacy.rename(home)
     except OSError:
         return False
+    adopt_legacy_database(home)
+    return True
+
+
+def adopt_legacy_database(home):
+    """Renames a pre-OnSet `autocue.db` (with its WAL files) to DB_NAME inside `home`.
+
+    Covers workspaces opened by path (ONSET_WORKSPACE, --home), not only the default folder
+    move. Does nothing when DB_NAME already exists, so a current workspace is never replaced."""
+    home = Path(home)
+    if (home / DB_NAME).exists() or not (home / "autocue.db").exists():
+        return False
     for suffix in ("", "-wal", "-shm"):
         old = home / f"autocue.db{suffix}"
         if old.exists():

@@ -110,3 +110,24 @@ def test_legacy_autocue_folder_moves_once_with_its_database(tmp_path):
     assert [(home/f'workspace.db{s}').read_text() for s in ('','-wal','-shm')]==['autocue.db','autocue.db-wal','autocue.db-shm']
     legacy.mkdir();(legacy/'autocue.db').write_text('newer')
     assert not migrate_legacy_home(legacy,home) and (legacy/'autocue.db').exists()
+
+
+def test_a_workspace_opened_by_path_adopts_its_legacy_database(tmp_path, monkeypatch):
+    import sqlite3
+    from onset_service.store import Store
+    from onset_service.util import adopt_legacy_database
+    folder = tmp_path / 'given-workspace'
+    folder.mkdir()
+    legacy = sqlite3.connect(folder / 'autocue.db')
+    legacy.execute('CREATE TABLE tracks(id TEXT PRIMARY KEY, fingerprint TEXT UNIQUE, profile TEXT NOT NULL)')
+    legacy.execute("INSERT INTO tracks VALUES('t1','f1','{}')")
+    legacy.execute('PRAGMA user_version=1')
+    legacy.commit()
+    legacy.close()
+    monkeypatch.setenv('ONSET_WORKSPACE', str(folder))
+    store = Store()
+    assert store.db_path == folder / 'workspace.db' and not (folder / 'autocue.db').exists()
+    assert store.db.execute('SELECT count(*) FROM tracks').fetchone()[0] == 1
+    store.close()
+    (folder / 'autocue.db').write_text("stale copy")
+    assert not adopt_legacy_database(folder) and (folder / 'autocue.db').read_text() == "stale copy"
