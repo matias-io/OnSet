@@ -36,6 +36,10 @@ class SetBrief:
     variety: float = .5
     exploration: float = .5
     pinned: list[dict[str, Any]] = field(default_factory=list)
+    smoothness: float = .5
+    contrast: float = .5
+    playlists: list[str] = field(default_factory=list)
+    transpose: dict[str, float] = field(default_factory=dict)
     schema_version: int = 1
 
     @classmethod
@@ -53,6 +57,16 @@ class SetBrief:
         if not math.isfinite(result.tolerance_seconds) or not 0 <= result.variety <= 1 or not 0 <= result.exploration <= 1:
             raise ValueError("Tolerance must be finite; variety and exploration must be from 0 to 1")
         if result.skill not in (1,2,3): raise ValueError("Skill must be 1, 2 or 3")
+        if any(not isinstance(v,(int,float)) or isinstance(v,bool) or not 0 <= v <= 1 for v in (result.smoothness, result.contrast)):
+            raise ValueError("Smoothness and contrast must be from 0 to 1")
+        if not isinstance(result.playlists,list) or any(not isinstance(v,str) or not v.strip() for v in result.playlists):
+            raise ValueError("Playlists must be a list of names")
+        if not isinstance(result.transpose,dict) or any(not isinstance(v,(int,float)) or isinstance(v,bool) or not -12 <= v <= 12 or v != int(v)
+                                                        for v in result.transpose.values()):
+            raise ValueError("Transpose values must be whole semitones from -12 to 12")
+        for pin in result.pinned:
+            if pin.get("transition_id") is not None and (not isinstance(pin["transition_id"],str) or not pin["transition_id"]):
+                raise ValueError("Pinned transitions need a transition ID")
         for pin in result.pinned:
             if pin.get("track_id") and (not isinstance(pin.get("position"),int) or pin["position"] < 0):
                 raise ValueError("Pinned track positions must be nonnegative integers")

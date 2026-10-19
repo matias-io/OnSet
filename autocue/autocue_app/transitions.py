@@ -19,6 +19,7 @@ def windows(track, outgoing):
     if corrected:
         candidates = [{**s, "id": f"manual-section-{i}", "vocals": s.get("vocals", "unknown")}
                       for i, s in enumerate(corrected)]
+    mixable = [] if corrected else sorted(a.get("structure", {}).get("mix_windows", []), key=lambda w: (-w.get("score", 0), w["start"]))[:2]
     if outgoing:
         candidates += [{**w,"label":"loop","loop":True} for w in a.get("structure",{}).get("loop_candidates",[])]
     else:
@@ -38,7 +39,43 @@ def windows(track, outgoing):
     ordered = sorted(candidates, key=lambda w: (w["start"], w["id"]), reverse=outgoing)
     natural = [w for w in ordered if not w.get("loop")]
     loops = [w for w in ordered if w.get("loop")]
-    return natural[:6] + loops[:2] if loops else natural[:8]
+    chosen = natural[:6] + loops[:2] if loops else natural[:8]
+    ids = {w["id"] for w in chosen}
+    return chosen + [w for w in mixable if w["id"] not in ids]
+
+
+VOCAL_THRESHOLD = .3
+
+
+def vocal_at(track, position):
+    """Bar-level vocal activity from separated stems; None when no stem evidence exists."""
+    a = track.get("analysis") or {}
+    curve, db = a.get("vocal_activity"), a.get("downbeats") or []
+    if not curve or len(curve) != len(db) or position < 0:
+        return None
+    index = int(np.searchsorted(np.asarray(db, dtype=float), position, side="right")) - 1
+    return float(curve[min(max(index, 0), len(curve) - 1)])
+
+
+def vocal_overlap(a, b, start_a, end_a, start_b, end_b, wall):
+    """Measured simultaneous vocals over the actual overlap, or vocal pickups around a cut."""
+    if wall <= 0:
+        before_a = vocal_at(a, max(0, start_a - .5))
+        before_b = vocal_at(b, max(0, start_b - .5)) if start_b >= .5 else 0.
+        if before_a is None or before_b is None:
+            return {"state": "unknown", "source": "vocal-activity-v1"}
+        return {"state": "clear", "clash_seconds": 0., "source": "vocal-activity-v1",
+                "outgoing_phrase_cut": before_a > VOCAL_THRESHOLD, "incoming_pickup": before_b > VOCAL_THRESHOLD}
+    joint = []
+    for fraction in np.linspace(0, 1, 17)[:-1] + 1 / 32:
+        va = vocal_at(a, start_a + fraction * (end_a - start_a))
+        vb = vocal_at(b, start_b + fraction * (end_b - start_b))
+        if va is None or vb is None:
+            return {"state": "unknown", "source": "vocal-activity-v1"}
+        joint.append(min(va, vb))
+    clash = float(np.mean(np.asarray(joint) > VOCAL_THRESHOLD)) * wall
+    return {"state": "clash" if clash > 4 else "brief" if clash > 1 else "clear", "clash_seconds": round(clash, 2),
+            "peak_joint_activity": round(float(max(joint)), 3), "source": "vocal-activity-v1"}
 
 
 def local_key(track, position):
@@ -49,7 +86,7 @@ def local_key(track, position):
     return track.get("key")
 
 
-def overlap_harmony(a,b,start_a,end_a,start_b,end_b,rate_a,rate_b,key_lock):
+def overlap_harmony(a,b,start_a,end_a,start_b,end_b,rate_a,rate_b,key_lock,transpose_a=0,transpose_b=0):
     boundaries=[0.,1.]
     for track,start,end in ((a,start_a,end_a),(b,start_b,end_b)):
         if end>start:
@@ -58,8 +95,8 @@ def overlap_harmony(a,b,start_a,end_a,start_b,end_b,rate_a,rate_b,key_lock):
     weighted=weight=0.
     for left,right in zip(sorted(set(boundaries)),sorted(set(boundaries))[1:]):
         fraction=(left+right)/2
-        ka=sounding_key(local_key(a,start_a+fraction*(end_a-start_a)),rate_a,key_lock)
-        kb=sounding_key(local_key(b,start_b+fraction*(end_b-start_b)),rate_b,key_lock)
+        ka=sounding_key(local_key(a,start_a+fraction*(end_a-start_a)),rate_a,key_lock,transpose_a)
+        kb=sounding_key(local_key(b,start_b+fraction*(end_b-start_b)),rate_b,key_lock,transpose_b)
         score=compatibility(ka,kb)
         if score is not None:weighted+=score*(right-left);weight+=right-left
     return weighted/weight if weight else None
@@ -82,6 +119,8 @@ def options(a, b, brief=None, limit=3, outgoing_rate=1., min_out_start=0.):
     db_a, db_b = beat_times(a), beat_times(b)
     outgoing_windows, incoming_windows = windows(a, True), windows(b, False)
     key_cache = {}
+    transposes = brief.get("transpose") or {}
+    shift_a, shift_b = float(transposes.get(a["id"], 0)), float(transposes.get(b["id"], 0))
     for technique in CATALOGUE:
         if brief.get("techniques") and technique["id"] not in brief["techniques"]:
             continue
@@ -153,22 +192,34 @@ def options(a, b, brief=None, limit=3, outgoing_rate=1., min_out_start=0.):
                     continue
                 if bars and (end_a > out["end"] + .05 or end_b > incoming["end"] + .05):
                     continue
-                def key_for(track, position, playback_rate):
+                def key_for(track, position, playback_rate, shift):
                     cache_key=(track["id"],position,playback_rate)
-                    if cache_key not in key_cache:key_cache[cache_key]=sounding_key(local_key(track, position),playback_rate,brief.get("key_lock",True))
+                    if cache_key not in key_cache:key_cache[cache_key]=sounding_key(local_key(track, position),playback_rate,brief.get("key_lock",True),shift)
                     return key_cache[cache_key]
-                ka = key_for(a,t_a,outgoing_rate)
-                kb = key_for(b,t_b,rate)
+                ka = key_for(a,t_a,outgoing_rate,shift_a)
+                kb = key_for(b,t_b,rate,shift_b)
                 harmonic = compatibility(ka, kb)
                 if wall>8 and ((a.get("analysis") or {}).get("local_keys") or (b.get("analysis") or {}).get("local_keys")):
-                    harmonic=overlap_harmony(a,b,t_a,end_a,t_b,end_b,outgoing_rate,rate,brief.get("key_lock",True))
+                    harmonic=overlap_harmony(a,b,t_a,end_a,t_b,end_b,outgoing_rate,rate,brief.get("key_lock",True),shift_a,shift_b)
                 warnings = []
                 if harmonic is None:
                     warnings.append("Key unknown or weak in overlap")
-                if "unknown" in (out.get("vocals"), incoming.get("vocals")):
-                    warnings.append("Vocal overlap unverified")
-                if out.get("vocals") is True and incoming.get("vocals") is True and wall > 4:
+                vocals = vocal_overlap(a, b, t_a, end_a, t_b, end_b, wall)
+                if vocals["state"] == "unknown":
+                    if "unknown" in (out.get("vocals"), incoming.get("vocals")):
+                        warnings.append("Vocal overlap unverified")
+                    if out.get("vocals") is True and incoming.get("vocals") is True and wall > 4:
+                        continue
+                elif vocals["state"] == "clash":
                     continue
+                elif vocals["state"] == "brief":
+                    warnings.append(f"Vocals overlap for about {vocals['clash_seconds']:.0f}s; audition or cut a vocal")
+                if vocals.get("outgoing_phrase_cut"):
+                    warnings.append("Outgoing vocal is still active at the cut; check the phrase ending")
+                if vocals.get("incoming_pickup"):
+                    warnings.append("Incoming vocal pickup starts before this downbeat; start earlier or accept the clipped pickup")
+                if out.get("short_runway") or incoming.get("short_runway"):
+                    warnings.append("Mix window has little runway before the next major change")
                 tonal_density=min(out.get("tonal_density",.7),incoming.get("tonal_density",.7))
                 if technique["beatmatched"] and harmonic is not None and harmonic < .5 and wall > 8 and tonal_density>.25:
                     continue
@@ -186,6 +237,9 @@ def options(a, b, brief=None, limit=3, outgoing_rate=1., min_out_start=0.):
                 score = (harmonic if harmonic is not None else .4) * (2 if wall > 8 else .3) + 2 * (1 - min(abs(rate - 1) / .06, 1))
                 score += .4 if technique["id"] == "eq_swap" else 0
                 score -= .25 * len(warnings)
+                score += .15 if vocals["state"] == "clear" else 0
+                score += .2 * max(out.get("score", 0) if out.get("label") == "mixable" else 0,
+                                  incoming.get("score", 0) if incoming.get("label") == "mixable" else 0)
                 ea, eb = energy(a, t_a), energy(b, t_b)
                 if ea is not None and eb is not None:
                     score -= abs(eb - ea) * .1
@@ -205,6 +259,9 @@ def options(a, b, brief=None, limit=3, outgoing_rate=1., min_out_start=0.):
                 else:
                     actions += [{"at": 0, "action": "Switch at the phrase boundary; check any vocal pickup"}]
                 if loop:actions.insert(1,{"at":0,"action":f"Repeat the outgoing loop {loop['repetitions']} times, then exit at the handover"})
+                for label, shift in (("incoming", shift_b), ("outgoing", shift_a)):
+                    if shift:
+                        actions.insert(0, {"at": 0, "action": f"Set the {label} deck key shift to {shift:+g} semitones (key lock on)"})
                 if technique["id"] == "backspin":actions[-1]["action"]="Perform the backspin/brake before the incoming downbeat; rehearse manually"
                 if technique["id"] == "wordplay":actions[-1]["action"]="Connect the verified shared theme at these phrase boundaries; audition the actual words or hook"
                 option = {"schema_version": 1, "track_ids": [a["id"], b["id"]], "revisions": [a.get("revision"), b.get("revision")],
@@ -212,12 +269,13 @@ def options(a, b, brief=None, limit=3, outgoing_rate=1., min_out_start=0.):
                           "out_start": t_a, "out_end": end_a, "in_start": t_b, "in_end": end_b,
                           "out_rate": outgoing_rate, "in_rate": rate, "pitch_pct": (rate - 1) * 100,
                           "tempo_factor":factor,"out_loop":loop,"loop_extra_seconds":loop_extra,
+                          "out_transpose":shift_a,"in_transpose":shift_b,"vocal_overlap":vocals,
                           "target_bpm": target if beatmatched else bpm_b, "wall_seconds": wall,
                           "key_lock": brief.get("key_lock", True), "actions": actions, "warnings": sorted(set(warnings)),
                           "score": round(score, 3), "confidence": "unverified", "equipment": technique["equipment"],
                           "skill": technique["skill"], "preview_supported": technique["preview"], "stale": False,
                           "reason": f"{technique['name']}: {bars} bars; tonal compatibility " + ("unknown" if harmonic is None else f"{harmonic:.2f}")}
-                option["algorithm"] = "transition-2"
+                option["algorithm"] = "transition-3"
                 if best is None or (-option["score"], -option["out_start"],option["in_start"], option["out_window"], option["in_window"]) < (-best["score"],-best["out_start"],best["in_start"], best["out_window"], best["in_window"]):
                     best = option
         if best is not None: results.append(best)

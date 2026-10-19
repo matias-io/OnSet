@@ -215,6 +215,6 @@ def test_set_brief_setting_roundtrips_and_is_validated(tmp_path):
     assert saved['target_seconds']==5400 and saved['mood']=='warm' and saved['tolerance_seconds']==120
     reopened_value=service.settings({})['set_brief']
     assert reopened_value==saved
-    for bad in ('text',{'schema_version':2},{'smoothness':1},{'target_seconds':-1}):
+    for bad in ('text',{'schema_version':2},{'loudness':1},{'smoothness':2},{'target_seconds':-1}):
         with pytest.raises(ValueError):service.settings({'key':'set_brief','value':bad})
     service.close()
