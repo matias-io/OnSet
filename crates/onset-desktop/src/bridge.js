@@ -38,6 +38,8 @@
       onLive: (callback) => subscribe('onset:live', callback),
       openLive: () => invoke('open_live_window', {}),
       setLiveOnTop: (onTop) => invoke('set_live_on_top', { onTop }),
+      providers: () => invoke('providers_status', {}),
+      testProvider: (provider) => invoke('providers_test', { provider }),
     }),
   });
 })();

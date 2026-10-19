@@ -9,6 +9,7 @@
 
 mod chatgpt;
 mod live;
+mod providers;
 mod sidecar;
 
 use std::collections::HashMap;
@@ -79,6 +80,7 @@ const METHODS: &[&str] = &[
     "transitions-job",
     "import-workspace",
     "relocate-cache",
+    "genre-suggestions",
 ];
 
 const STEMS: &[&str] = &["drums", "bass", "vocals", "other"];
@@ -447,6 +449,59 @@ async fn ai_request(
     }
 }
 
+/// Which AI providers are available: each CLI's path and version, or how to install it, and
+/// whether a ChatGPT account is connected.
+#[tauri::command]
+async fn providers_status(state: State<'_, AppState>) -> Result<Value, String> {
+    let chatgpt = state.chatgpt.status();
+    let clis = blocking(|| {
+        Ok(providers::Provider::CLIS
+            .into_iter()
+            .map(providers::detect::find)
+            .collect::<Vec<_>>())
+    })
+    .await?;
+    Ok(json!({
+        "clis": clis,
+        "chatgpt": {
+            "connected": chatgpt["active"].is_string(),
+            "plan_enabled": chatgpt["accounts"].as_array().is_some_and(|a| a.iter().any(|x| x["plan_enabled"] == true)),
+        },
+    }))
+}
+
+/// Checks that one CLI answers: a tiny request with no web access. A failure usually means
+/// the tool is not signed in.
+#[tauri::command]
+async fn providers_test(provider: providers::Provider) -> Result<Value, String> {
+    let answer = blocking(move || {
+        providers::ask_cli(
+            provider,
+            &providers::Ask {
+                instructions: "Name the main genre of the track in the evidence.".into(),
+                evidence: json!({"title": "Sandstorm", "artist": "Darude"}),
+                schema: json!({"type": "object", "additionalProperties": false,
+                    "required": ["genre"], "properties": {"genre": {"type": "string"}}}),
+                web: false,
+                images: Vec::new(),
+                model: None,
+                timeout: Duration::from_secs(120),
+            },
+        )
+    })
+    .await;
+    match &answer {
+        Ok(a) => tracing::info!(
+            provider = provider.name(),
+            seconds = a.seconds,
+            "provider test passed"
+        ),
+        Err(e) => tracing::warn!(provider = provider.name(), "provider test failed: {e}"),
+    }
+    let a = answer?;
+    Ok(json!({"provider": a.provider, "seconds": a.seconds, "answer": a.value}))
+}
+
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)] // Tauri commands take owned arguments
 fn open_live_window(app: AppHandle) -> Result<(), String> {
@@ -644,6 +699,8 @@ fn main() {
             autocue_export,
             autocue_account,
             open_live_window,
+            providers_status,
+            providers_test,
             set_live_on_top,
         ])
         .setup(move |app| {
