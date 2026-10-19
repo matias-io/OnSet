@@ -29,15 +29,30 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// `ONSET_SERVICE_ROOT` (default: the repository's `service/` folder) and `ONSET_PYTHON`
-    /// (default: the root's `.venv` or `.runtime` interpreter).
+    /// `ONSET_SERVICE_ROOT` and `ONSET_PYTHON` if set; else an installed layout (`service/`
+    /// and `runtime/python.exe` beside the executable); else the repository's `service/`
+    /// with its `.venv` or `.runtime` interpreter, for development.
     pub fn locate() -> Result<Self, String> {
+        let installed = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(Path::to_path_buf));
+        Self::locate_in(installed.as_deref())
+    }
+
+    fn locate_in(installed: Option<&Path>) -> Result<Self, String> {
+        let bundled = installed.filter(|dir| dir.join("service").join("onset_service").is_dir());
         let root = std::env::var_os("ONSET_SERVICE_ROOT").map_or_else(
-            || PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../service")),
+            || {
+                bundled.map_or_else(
+                    || PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../service")),
+                    |dir| dir.join("service"),
+                )
+            },
             PathBuf::from,
         );
         let candidates = [
             std::env::var_os("ONSET_PYTHON").map(PathBuf::from),
+            bundled.map(|dir| dir.join("runtime").join("python.exe")),
             Some(root.join(".venv").join("Scripts").join("python.exe")),
             Some(root.join(".runtime").join("Scripts").join("python.exe")),
         ];
@@ -168,5 +183,36 @@ impl Service {
             std::thread::sleep(Duration::from_millis(100));
         }
         let _ = child.kill();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Runtime;
+
+    #[test]
+    fn an_installed_layout_beside_the_executable_wins_over_the_repository() {
+        if std::env::var_os("ONSET_SERVICE_ROOT").is_some() || std::env::var_os("ONSET_PYTHON").is_some() {
+            return; // explicit overrides take precedence by design
+        }
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("service").join("onset_service")).unwrap();
+        std::fs::create_dir_all(dir.path().join("runtime")).unwrap();
+        std::fs::write(dir.path().join("runtime").join("python.exe"), b"").unwrap();
+        let runtime = Runtime::locate_in(Some(dir.path())).unwrap();
+        assert_eq!(runtime.root, dir.path().join("service"));
+        assert_eq!(runtime.python, dir.path().join("runtime").join("python.exe"));
+    }
+
+    #[test]
+    fn without_a_bundled_service_the_repository_layout_is_used() {
+        if std::env::var_os("ONSET_SERVICE_ROOT").is_some() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        if let Ok(runtime) = Runtime::locate_in(Some(dir.path())) {
+            assert!(runtime.root.ends_with("service"));
+            assert!(!runtime.root.starts_with(dir.path()));
+        }
     }
 }

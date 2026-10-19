@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "Reimagine Media",
+    "shortDescription": "DJ preparation and live visuals for rekordbox",
+    "license": "../../LICENSE",
+    "resources": {
+      "../../service/onset_service/": "service/onset_service/",
+      "../../service/worker/": "service/worker/",
+      "../../service/models/manifest.json": "service/models/manifest.json",
+      "../../service/.artifacts/runtime/": "runtime/",
+      "../../offsets/": "offsets/",
+      "../../THIRD_PARTY_NOTICES.txt": "THIRD_PARTY_NOTICES.txt"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}
