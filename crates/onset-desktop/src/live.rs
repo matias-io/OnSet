@@ -1,6 +1,6 @@
 //! The live layer for the screens: OnSet's engine follows rekordbox's master deck (with the
-//! structure prepared in Autocue), and its state goes to the webviews as `onset:live` events
-//! about 30 times a second. Read-only: nothing here touches rekordbox or Autocue's data.
+//! structure prepared in OnSet), and its state goes to the webviews as `onset:live` events
+//! about 30 times a second. Read-only: nothing here touches rekordbox or the workspace.
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -46,12 +46,12 @@ pub struct LiveState {
     pub next_section: Option<&'static str>,
     pub beats_to_next_section: Option<u32>,
     pub drop_countdown_beats: Option<u32>,
-    /// `Autocue` when the DJ prepared the track there, else `rekordbox`.
+    /// `Prepared` when the DJ prepared the track, else `rekordbox`.
     pub structure_source: Option<&'static str>,
     pub next_cue: Option<LiveCue>,
 }
 
-/// Section names in Autocue's words: the engine carries Autocue's structure in rekordbox's
+/// Section names in the service's words: the engine carries the prepared structure in rekordbox's
 /// High-mood vocabulary (a drop is a Chorus, a build an Up, a breakdown a Down).
 fn section_name(kind: PhraseKind) -> &'static str {
     match kind {
@@ -190,12 +190,12 @@ mod tests {
     }
 
     #[test]
-    fn sections_use_autocues_words() {
+    fn sections_use_the_prepared_words() {
         let ms = MusicState {
             phrase: Some(PhraseKind::Up),
             next_phrase: Some(PhraseKind::Chorus),
             drop_countdown_beats: Some(16),
-            structure_source: Some(onset_core::structure::StructureSource::Autocue),
+            structure_source: Some(onset_core::structure::StructureSource::Prepared),
             ..MusicState::default()
         };
         let s = snapshot(
@@ -209,6 +209,6 @@ mod tests {
             (s.section, s.next_section, s.drop_countdown_beats),
             (Some("Build"), Some("Drop"), Some(16))
         );
-        assert_eq!(s.structure_source, Some("Autocue"));
+        assert_eq!(s.structure_source, Some("Prepared"));
     }
 }

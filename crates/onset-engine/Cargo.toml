@@ -11,7 +11,7 @@ description = "Onset's live layer: follows rekordbox's master deck and publishes
 [dependencies]
 onset-core.workspace = true
 onset-rekordbox.workspace = true
-onset-autocue.workspace = true
+onset-workspace.workspace = true
 onset-transport.workspace = true
 onset-audio.workspace = true
 onset-lyrics.workspace = true

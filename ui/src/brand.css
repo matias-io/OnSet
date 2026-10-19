@@ -1,0 +1,17 @@
+/* OnSet brand tokens, shared by the Prep screens (index.html) and the live view (live.html).
+   Violet is for preparation and controls; magenta (--live) only for what is live or on air. */
+@font-face{font-family:Inter;font-weight:400;font-display:swap;src:url('../../assets/fonts/Inter-Regular.ttf') format('truetype')}
+@font-face{font-family:Inter;font-weight:500;font-display:swap;src:url('../../assets/fonts/Inter-Medium.ttf') format('truetype')}
+@font-face{font-family:Inter;font-weight:600;font-display:swap;src:url('../../assets/fonts/Inter-SemiBold.ttf') format('truetype')}
+:root{
+  --bg:#0c0d10;--surface:#131418;--surface-2:#1a1b21;--surface-3:#22242b;--hover:#272a32;
+  --border:#24262d;--border-strong:#33363f;
+  --text:#ececf1;--text-2:#a9abb6;--muted:#71737f;
+  --accent:#8b7cf6;--accent-strong:#a194ff;--accent-soft:rgba(139,124,246,.14);--on-accent:#0d0b1a;
+  --live:#f472b6;--live-soft:rgba(244,114,182,.14);--on-live:#1f0714;
+  --good:#4ade80;--good-soft:rgba(74,222,128,.12);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.12);
+  --bad:#f87171;--bad-soft:rgba(248,113,113,.12);--info:#60a5fa;--info-soft:rgba(96,165,250,.12);
+  --radius:10px;--radius-sm:7px;--radius-lg:14px;
+  --font:Inter,"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+  --mono:"Cascadia Mono",Consolas,ui-monospace,monospace;
+}

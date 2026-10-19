@@ -4089,38 +4089,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
-name = "onset-app"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "arc-swap",
- "clap",
- "crossbeam-channel",
- "directories",
- "egui",
- "egui-wgpu",
- "egui-winit",
- "image",
- "onset-audio",
- "onset-autocue",
- "onset-core",
- "onset-engine",
- "onset-lyrics",
- "onset-rekordbox",
- "onset-render",
- "onset-transport",
- "parking_lot",
- "pollster",
- "serde",
- "tempfile",
- "toml 1.1.6+spec-1.1.0",
- "tracing",
- "tracing-subscriber",
- "wgpu",
- "winit",
-]
-
-[[package]]
 name = "onset-audio"
 version = "0.0.1"
 dependencies = [
@@ -4135,19 +4103,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "onset-autocue"
-version = "0.0.1"
-dependencies = [
- "onset-core",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
-]
-
-[[package]]
 name = "onset-cli"
 version = "0.0.1"
 dependencies = [
@@ -4156,11 +4111,11 @@ dependencies = [
  "crossbeam-channel",
  "directories",
  "onset-audio",
- "onset-autocue",
  "onset-core",
  "onset-lyrics",
  "onset-rekordbox",
  "onset-transport",
+ "onset-workspace",
  "rusqlite",
  "tracing",
  "tracing-subscriber",
@@ -4186,6 +4141,7 @@ dependencies = [
  "jsonwebtoken",
  "onset-core",
  "onset-engine",
+ "onset-workspace",
  "open",
  "parking_lot",
  "rfd",
@@ -4210,11 +4166,11 @@ dependencies = [
  "arc-swap",
  "crossbeam-channel",
  "onset-audio",
- "onset-autocue",
  "onset-core",
  "onset-lyrics",
  "onset-rekordbox",
  "onset-transport",
+ "onset-workspace",
  "parking_lot",
  "tempfile",
  "tracing",
@@ -4289,6 +4245,52 @@ dependencies = [
  "toml 1.1.6+spec-1.1.0",
  "tracing",
  "windows-sys 0.60.2",
+]
+
+[[package]]
+name = "onset-visuals"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "clap",
+ "crossbeam-channel",
+ "directories",
+ "egui",
+ "egui-wgpu",
+ "egui-winit",
+ "image",
+ "onset-audio",
+ "onset-core",
+ "onset-engine",
+ "onset-lyrics",
+ "onset-rekordbox",
+ "onset-render",
+ "onset-transport",
+ "onset-workspace",
+ "parking_lot",
+ "pollster",
+ "serde",
+ "tempfile",
+ "toml 1.1.6+spec-1.1.0",
+ "tracing",
+ "tracing-subscriber",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "onset-workspace"
+version = "0.0.1"
+dependencies = [
+ "directories",
+ "onset-core",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
 ]
 
 [[package]]

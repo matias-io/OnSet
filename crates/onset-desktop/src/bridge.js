@@ -1,10 +1,10 @@
-// The `window.autocue` API Autocue's screens were written against (Electron's preload), on
-// Tauri's IPC, plus `window.onset` for the live view. Runs before the page's own scripts;
-// Tauri's globals are looked up at call time, once they exist.
+// The `window.onset` API the preparation screens and the live view use, on Tauri's IPC.
+// Runs before the page's own scripts; Tauri's globals are looked up at call time, once they
+// exist.
 (() => {
   const core = () => window.__TAURI__.core;
   const events = () => window.__TAURI__.event;
-  // Electron rejected with Error objects; Tauri rejects with the command's message.
+  // The screens expect Error objects; Tauri rejects with the command's message.
   const invoke = (cmd, args) =>
     core()
       .invoke(cmd, args)
@@ -22,19 +22,15 @@
       if (stop) stop();
     };
   };
-  Object.defineProperty(window, 'autocue', {
-    value: Object.freeze({
-      call: (method, params = {}) => invoke('autocue_call', { method, params }),
-      pick: (kind) => invoke('autocue_pick', { kind }),
-      media: (id, stem) => invoke('autocue_media', { id, stem: stem ?? null }),
-      previewMedia: (id, click) => invoke('autocue_preview_media', { id, click }),
-      export: (params) => invoke('autocue_export', { params }),
-      account: (action, params = {}) => invoke('autocue_account', { action, params }),
-      onEvent: (callback) => subscribe('autocue:event', callback),
-    }),
-  });
   Object.defineProperty(window, 'onset', {
     value: Object.freeze({
+      call: (method, params = {}) => invoke('service_call', { method, params }),
+      pick: (kind) => invoke('pick_paths', { kind }),
+      media: (id, stem) => invoke('media_url', { id, stem: stem ?? null }),
+      previewMedia: (id, click) => invoke('preview_media', { id, click }),
+      export: (params) => invoke('export_file', { params }),
+      account: (action, params = {}) => invoke('chatgpt_account', { action, params }),
+      onEvent: (callback) => subscribe('service:event', callback),
       onLive: (callback) => subscribe('onset:live', callback),
       openLive: () => invoke('open_live_window', {}),
       setLiveOnTop: (onTop) => invoke('set_live_on_top', { onTop }),

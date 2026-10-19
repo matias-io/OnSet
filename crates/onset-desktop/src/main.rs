@@ -1,7 +1,7 @@
-//! OnSet desktop: Autocue's preparation screens and the live view in one Tauri app.
+//! OnSet desktop: the preparation screens and the live view in one Tauri app.
 //!
-//! The screens are Autocue's React UI, unchanged: `bridge.js` gives them the same
-//! `window.autocue` API the Electron preload did, backed by the commands below. Autocue's
+//! The screens are the React UI in `ui/`: `bridge.js` gives them the `window.onset` API,
+//! backed by the commands below. The
 //! Python service runs as a sidecar ([`sidecar`]); OnSet's engine feeds the live view
 //! ([`live`]). The DJ's rules carry over: service commands are allow-listed, audio is served
 //! only for files the service names, and nothing here writes to rekordbox by itself.
@@ -29,7 +29,7 @@ use crate::sidecar::{Runtime, Service};
 
 const BRIDGE: &str = include_str!("bridge.js");
 
-/// Service methods the screens may call, as the Electron shell allowed them.
+/// Service methods the screens may call.
 const METHODS: &[&str] = &[
     "workspace-health",
     "workspace-backups",
@@ -89,7 +89,7 @@ const STEMS: &[&str] = &["drums", "bass", "vocals", "other"];
 struct AppState {
     service: Service,
     chatgpt: Arc<ChatGpt>,
-    /// Audio files the screens may play, by the id in their `autocue-audio` URL.
+    /// Audio files the screens may play, by the id in their `onset-media` URL.
     media: Mutex<HashMap<String, PathBuf>>,
     next_media: AtomicU64,
 }
@@ -99,24 +99,28 @@ impl AppState {
         let id = format!("m{}", self.next_media.fetch_add(1, Ordering::Relaxed));
         self.media.lock().insert(id.clone(), file);
         // Windows webviews reach custom schemes as http://<scheme>.localhost/.
-        format!("http://autocue-audio.localhost/{id}")
+        format!("http://onset-media.localhost/{id}")
     }
 }
 
-/// `%AUTOCUE_HOME%`, else `%LOCALAPPDATA%\Autocue`, as Autocue resolves its workspace.
-fn autocue_home() -> PathBuf {
-    std::env::var_os("AUTOCUE_HOME").map_or_else(
-        || {
-            std::env::var_os("LOCALAPPDATA")
-                .map_or_else(|| PathBuf::from("."), PathBuf::from)
-                .join("Autocue")
-        },
-        PathBuf::from,
-    )
+/// The service's workspace folder, after moving a pre-OnSet (Autocue) workspace into it.
+fn workspace_home() -> PathBuf {
+    let home = onset_workspace::default_home().unwrap_or_else(|| PathBuf::from("workspace"));
+    match onset_workspace::move_legacy_home(&home) {
+        Ok(true) => {
+            tracing::info!(home = %home.display(), "moved the Autocue workspace into OnSet");
+        }
+        Ok(false) => {}
+        Err(e) => tracing::warn!(
+            "could not move the Autocue workspace to {}: {e}",
+            home.display()
+        ),
+    }
+    home
 }
 
 #[tauri::command]
-async fn autocue_call(
+async fn service_call(
     app: AppHandle,
     state: State<'_, AppState>,
     method: String,
@@ -156,14 +160,14 @@ async fn autocue_call(
 }
 
 #[tauri::command]
-async fn autocue_pick(window: tauri::WebviewWindow, kind: String) -> Result<Vec<String>, String> {
+async fn pick_paths(window: tauri::WebviewWindow, kind: String) -> Result<Vec<String>, String> {
     let dialog = rfd::AsyncFileDialog::new().set_parent(&window);
     let picked = if kind == "folder" {
         dialog.pick_folder().await.map(|f| vec![f])
     } else if kind == "workspace" {
         // One exported workspace (JSON or SQLite) from another computer.
         dialog
-            .add_filter("Autocue workspace export", &["json", "db"])
+            .add_filter("OnSet workspace export", &["json", "db"])
             .pick_file()
             .await
             .map(|f| vec![f])
@@ -188,7 +192,7 @@ async fn autocue_pick(window: tauri::WebviewWindow, kind: String) -> Result<Vec<
 }
 
 #[tauri::command]
-async fn autocue_media(
+async fn media_url(
     state: State<'_, AppState>,
     id: String,
     stem: Option<String>,
@@ -217,7 +221,7 @@ async fn autocue_media(
 }
 
 #[tauri::command]
-async fn autocue_preview_media(
+async fn preview_media(
     state: State<'_, AppState>,
     id: String,
     click: bool,
@@ -239,7 +243,7 @@ async fn autocue_preview_media(
 }
 
 #[tauri::command]
-async fn autocue_export(
+async fn export_file(
     window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     params: Value,
@@ -247,7 +251,7 @@ async fn autocue_export(
     let name = params
         .get("name")
         .and_then(Value::as_str)
-        .unwrap_or("autocue.json");
+        .unwrap_or("onset.json");
     let Some(file) = rfd::AsyncFileDialog::new()
         .set_parent(&window)
         .set_file_name(name)
@@ -313,9 +317,9 @@ async fn blocking<T: Send + 'static>(
         .map_err(|e| e.to_string())?
 }
 
-/// "Continue with ChatGPT", as the Electron main process handled `autocue:account`.
+/// "Continue with ChatGPT", with sign-in, model discovery and sign-out.
 #[tauri::command]
-async fn autocue_account(
+async fn chatgpt_account(
     app: AppHandle,
     state: State<'_, AppState>,
     action: String,
@@ -403,7 +407,7 @@ async fn ai_request(
     let mut result = blocking(move || {
         chat.request(&ask, &model, research, |delta| {
             let _ = events.emit(
-                "autocue:event",
+                "service:event",
                 json!({"method": "ai-progress", "params": {"delta": delta}}),
             );
         })
@@ -779,7 +783,7 @@ fn live_window(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Serves `http://autocue-audio.localhost/<id>` for registered files, with byte ranges so
+/// Serves `http://onset-media.localhost/<id>` for registered files, with byte ranges so
 /// the audio elements can seek.
 fn serve_media(app: &AppHandle, request: &tauri::http::Request<Vec<u8>>) -> Response<Vec<u8>> {
     let not_found = |why: &str| {
@@ -910,23 +914,23 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let home = autocue_home();
+    let home = workspace_home();
     if let Err(e) = std::fs::create_dir_all(&home) {
         tracing::error!("cannot create {}: {e}", home.display());
     }
 
     let app = tauri::Builder::default()
-        .register_asynchronous_uri_scheme_protocol("autocue-audio", |ctx, request, responder| {
+        .register_asynchronous_uri_scheme_protocol("onset-media", |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             std::thread::spawn(move || responder.respond(serve_media(&app, &request)));
         })
         .invoke_handler(tauri::generate_handler![
-            autocue_call,
-            autocue_pick,
-            autocue_media,
-            autocue_preview_media,
-            autocue_export,
-            autocue_account,
+            service_call,
+            pick_paths,
+            media_url,
+            preview_media,
+            export_file,
+            chatgpt_account,
             open_live_window,
             providers_status,
             providers_test,
@@ -939,12 +943,12 @@ fn main() {
             let handle = app.handle().clone();
             let events = handle.clone();
             let service = Service::start(&runtime, &home, move |event| {
-                let _ = events.emit("autocue:event", event);
+                let _ = events.emit("service:event", event);
             })?;
             tracing::info!(
                 python = %runtime.python.display(),
                 home = %home.display(),
-                "Autocue service started"
+                "service started"
             );
             app.manage(AppState {
                 service,
@@ -964,7 +968,7 @@ fn main() {
         if let RunEvent::Exit = event
             && let Some(state) = app.try_state::<AppState>()
         {
-            // Let the service checkpoint its jobs, as Quit did in the Electron shell.
+            // Let the service checkpoint its jobs before the app exits.
             state.service.stop(Duration::from_secs(30));
         }
     });

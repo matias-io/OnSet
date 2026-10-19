@@ -6,14 +6,14 @@ rust-version.workspace = true
 license-file.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "OnSet desktop: Autocue's preparation screens and the live view in one Tauri app"
+description = "OnSet desktop: the preparation screens and the live view in one Tauri app"
 
 [[bin]]
 name = "onset-desktop"
 path = "src/main.rs"
 
 [features]
-# Serve the built screens (autocue/dist) from inside the binary. Without it, the webview
+# Serve the built screens (ui/dist) from inside the binary. Without it, the webview
 # loads the Vite dev server at http://127.0.0.1:5173 instead.
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
@@ -21,6 +21,7 @@ custom-protocol = ["tauri/custom-protocol"]
 [dependencies]
 onset-core.workspace = true
 onset-engine.workspace = true
+onset-workspace.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

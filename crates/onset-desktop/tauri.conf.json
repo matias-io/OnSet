@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "identifier": "io.github.matias-io.onset",
   "build": {
-    "frontendDist": "../../autocue/dist",
+    "frontendDist": "../../ui/dist",
     "devUrl": "http://127.0.0.1:5173"
   },
   "app": {

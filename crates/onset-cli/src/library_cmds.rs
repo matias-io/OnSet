@@ -1,5 +1,5 @@
-//! `schema`, `library`, `anlz` and `autocue`: read-only views of the rekordbox data layer
-//! and of what Onset takes from Autocue.
+//! `schema`, `library`, `anlz` and `prepared`: read-only views of the rekordbox data layer
+//! and of what the show takes from the preparation workspace.
 use std::path::PathBuf;
 
 use crate::common::{cache_dir, open_library, resolve_paths};
@@ -154,7 +154,7 @@ pub fn lyrics(app_dir: Option<PathBuf>, grep: Option<String>, offline: bool) -> 
     Ok(())
 }
 
-pub fn autocue(
+pub fn prepared(
     app_dir: Option<PathBuf>,
     workspace: Option<PathBuf>,
     title: &str,
@@ -169,21 +169,21 @@ pub fn autocue(
         .ok_or_else(|| anyhow::anyhow!("{title:?} has no analysis file"))?;
     let a = onset_rekordbox::anlz::load_analysis(&paths, rel)?;
     let path = workspace
-        .or_else(onset_autocue::Workspace::default_path)
-        .ok_or_else(|| anyhow::anyhow!("no Autocue workspace location"))?;
-    let ws = onset_autocue::Workspace::open(&path)?;
+        .or_else(onset_workspace::Workspace::default_path)
+        .ok_or_else(|| anyhow::anyhow!("no workspace location"))?;
+    let ws = onset_workspace::Workspace::open(&path)?;
 
     println!(
         "{} - {}   (rekordbox id {})",
         track.artist, track.title, track.id.0
     );
-    println!("Autocue workspace: {}", path.display());
+    println!("Workspace: {}", path.display());
     let Some(prepared) = ws.prepared(Some(track.id.0), track.file_path.as_deref())? else {
-        println!("Autocue has no structure for this track; Onset keeps rekordbox's phrases.");
+        println!("No prepared structure for this track; the show keeps rekordbox's phrases.");
         return Ok(());
     };
     println!(
-        "Autocue track {}: {} sections ({:?}), {} approved cues, {} bars of energy",
+        "Prepared track {}: {} sections ({:?}), {} approved cues, {} bars of energy",
         prepared.track_id,
         prepared.sections.len(),
         prepared.section_source,
@@ -212,8 +212,8 @@ pub fn autocue(
         }
     };
     print("rekordbox phrases", a.phrases.as_ref());
-    let ours = onset_autocue::phrase_map(&prepared, &a.grid);
-    print("Autocue phrases (what the show follows)", ours.as_ref());
+    let ours = onset_workspace::phrase_map(&prepared, &a.grid);
+    print("Prepared phrases (what the show follows)", ours.as_ref());
     for c in &prepared.approved_cues {
         println!(
             "  approved cue {:<3} {:>7.1}s  {}",

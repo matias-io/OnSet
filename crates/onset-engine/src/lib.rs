@@ -152,7 +152,7 @@ struct Current {
     meta: TrackMeta,
     analysis: Option<Analysis>,
     cues: Vec<HotCue>,
-    /// Whose phrases `analysis` carries: Autocue's when the DJ prepared the track there.
+    /// Whose phrases `analysis` carries: the prepared structure when the DJ prepared the track.
     structure_source: StructureSource,
     /// How the source referred to it, so a repeat read is not a reload.
     track_ref: TrackRef,
@@ -258,7 +258,7 @@ pub fn resolve_track(library: &Library, r: &TrackRef) -> Option<TrackMeta> {
 fn load_current(
     library: &Library,
     paths: &RekordboxPaths,
-    autocue: Option<&onset_autocue::Workspace>,
+    workspace: Option<&onset_workspace::Workspace>,
     meta: TrackMeta,
     track_ref: TrackRef,
 ) -> Current {
@@ -270,26 +270,26 @@ fn load_current(
     let mut cues = library.cues(meta.id);
     let mut structure_source = StructureSource::Rekordbox;
 
-    // The structure the DJ prepared in Autocue replaces rekordbox's phrases, placed on
+    // The structure the DJ prepared replaces rekordbox's phrases, placed on
     // rekordbox's own beat grid; approved cues join rekordbox's.
-    let prepared = autocue.and_then(|ws| {
+    let prepared = workspace.and_then(|ws| {
         ws.prepared(Some(meta.id.0), meta.file_path.as_deref())
-            .map_err(|e| tracing::warn!(title = %meta.title, "Autocue workspace: {e}"))
+            .map_err(|e| tracing::warn!(title = %meta.title, "workspace: {e}"))
             .ok()
             .flatten()
     });
     if let (Some(p), Some(a)) = (&prepared, analysis.as_mut())
-        && let Some(map) = onset_autocue::phrase_map(p, &a.grid)
+        && let Some(map) = onset_workspace::phrase_map(p, &a.grid)
     {
         tracing::info!(
             title = %meta.title,
             sections = map.phrases.len(),
             approved_cues = p.approved_cues.len(),
-            "structure from Autocue"
+            "prepared structure"
         );
         a.phrases = Some(map);
-        cues = onset_autocue::merged_cues(&cues, &p.approved_cues);
-        structure_source = StructureSource::Autocue;
+        cues = onset_workspace::merged_cues(&cues, &p.approved_cues);
+        structure_source = StructureSource::Prepared;
     }
     Current {
         meta,
@@ -332,7 +332,7 @@ fn streaming_candidates(
 fn start_sim(
     library: &Library,
     paths: &RekordboxPaths,
-    autocue: Option<&onset_autocue::Workspace>,
+    workspace: Option<&onset_workspace::Workspace>,
     title: &str,
     cfg: &EngineConfig,
 ) -> anyhow::Result<(SimSource, Current)> {
@@ -351,7 +351,7 @@ fn start_sim(
     let tap = player.tap_audio();
     let analyzer = Analyzer::new(player.tap_sample_rate());
     let track_ref = TrackRef::Id(meta.id);
-    let current = load_current(library, paths, autocue, meta, track_ref);
+    let current = load_current(library, paths, workspace, meta, track_ref);
     Ok((
         SimSource {
             player,
@@ -385,14 +385,14 @@ impl Engine {
             .collect();
         tracks.sort_by_key(|t| t.label.to_lowercase());
 
-        // Autocue's workspace, when the DJ prepares tracks there; read-only.
-        let autocue = onset_autocue::Workspace::open_default();
-        if let Some(ws) = &autocue {
-            tracing::info!(path = %ws.path().display(), "Autocue workspace found");
+        // The preparation workspace, when the DJ prepares tracks; read-only.
+        let workspace = onset_workspace::Workspace::open_default();
+        if let Some(ws) = &workspace {
+            tracing::info!(path = %ws.path().display(), "workspace found");
         }
 
         let (source, current) = if let Some(title) = &cfg.sim_track {
-            let (sim, current) = start_sim(&library, &paths, autocue.as_ref(), title, &cfg)?;
+            let (sim, current) = start_sim(&library, &paths, workspace.as_ref(), title, &cfg)?;
             (Source::Sim(Box::new(sim)), Some(current))
         } else {
             let mut live = live_source(&cfg);
@@ -429,7 +429,7 @@ impl Engine {
                     cfg,
                     paths,
                     library,
-                    autocue,
+                    workspace,
                     source,
                     current,
                     capture,
@@ -526,8 +526,8 @@ struct Running {
     cfg: EngineConfig,
     paths: RekordboxPaths,
     library: Library,
-    /// Autocue's workspace, opened read-only, when one exists.
-    autocue: Option<onset_autocue::Workspace>,
+    /// The preparation workspace, opened read-only, when one exists.
+    workspace: Option<onset_workspace::Workspace>,
     source: Source,
     current: Option<Current>,
     capture: Option<Capture>,
@@ -599,7 +599,7 @@ impl Running {
                 match start_sim(
                     &self.library,
                     &self.paths,
-                    self.autocue.as_ref(),
+                    self.workspace.as_ref(),
                     title,
                     &self.cfg,
                 ) {
@@ -690,7 +690,7 @@ impl Running {
             let mut current = load_current(
                 &self.library,
                 &self.paths,
-                self.autocue.as_ref(),
+                self.workspace.as_ref(),
                 meta,
                 snapshot.track.clone(),
             );
@@ -756,7 +756,7 @@ impl Running {
             let mut current = load_current(
                 &self.library,
                 &self.paths,
-                self.autocue.as_ref(),
+                self.workspace.as_ref(),
                 meta,
                 TrackRef::Unknown,
             );

@@ -46,7 +46,7 @@ pub fn verified_citation(requested: Option<&str>, citations: &BTreeSet<String>) 
 }
 
 /// Annotates every enrichment claim with a citation check and downgrades unsupported web
-/// claims, as the Electron shell did before handing records to the service.
+/// claims before the records reach the service.
 pub fn retain_enrichment_evidence(
     result: &mut Value,
     citations: &BTreeSet<String>,

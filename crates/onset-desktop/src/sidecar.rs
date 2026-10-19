@@ -1,5 +1,5 @@
-//! Autocue's Python service as a child process: one JSON-RPC message per line on stdin and
-//! stdout, as `autocue_app/rpc.py` speaks it. Replies resolve the matching call; messages
+//! The Python service as a child process: one JSON-RPC message per line on stdin and
+//! stdout, as `onset_service/rpc.py` speaks it. Replies resolve the matching call; messages
 //! with a `method` are events, forwarded to the screens.
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -22,23 +22,22 @@ pub struct Service {
     pending: Pending,
 }
 
-/// Where Autocue's Python source and interpreter are.
+/// Where the Python service's source and interpreter are.
 pub struct Runtime {
     pub python: PathBuf,
     pub root: PathBuf,
 }
 
 impl Runtime {
-    /// `AUTOCUE_ROOT` (default: the repository's `autocue/` folder) and `AUTOCUE_PYTHON`
-    /// (default: the root's `.venv` or `.runtime` interpreter), as the Electron shell found
-    /// them in development.
+    /// `ONSET_SERVICE_ROOT` (default: the repository's `service/` folder) and `ONSET_PYTHON`
+    /// (default: the root's `.venv` or `.runtime` interpreter).
     pub fn locate() -> Result<Self, String> {
-        let root = std::env::var_os("AUTOCUE_ROOT").map_or_else(
-            || PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../autocue")),
+        let root = std::env::var_os("ONSET_SERVICE_ROOT").map_or_else(
+            || PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../service")),
             PathBuf::from,
         );
         let candidates = [
-            std::env::var_os("AUTOCUE_PYTHON").map(PathBuf::from),
+            std::env::var_os("ONSET_PYTHON").map(PathBuf::from),
             Some(root.join(".venv").join("Scripts").join("python.exe")),
             Some(root.join(".runtime").join("Scripts").join("python.exe")),
         ];
@@ -48,7 +47,7 @@ impl Runtime {
             .find(|p| p.exists())
             .ok_or_else(|| {
                 format!(
-                    "Autocue's Python runtime is missing. Set AUTOCUE_PYTHON, or run \
+                    "The Python service's runtime is missing. Set ONSET_PYTHON, or run \
                      scripts/bootstrap.ps1 in {}",
                     root.display()
                 )
@@ -64,7 +63,7 @@ impl Service {
         on_event: impl Fn(Value) + Send + 'static,
     ) -> std::io::Result<Self> {
         let mut cmd = Command::new(&runtime.python);
-        cmd.args(["-u", "-m", "autocue_app", "--home"])
+        cmd.args(["-u", "-m", "onset_service", "--home"])
             .arg(home)
             .arg("rpc")
             .current_dir(&runtime.root)
@@ -88,7 +87,7 @@ impl Service {
 
         let replies = pending.clone();
         std::thread::Builder::new()
-            .name("autocue-service-out".into())
+            .name("service-out".into())
             .spawn(move || {
                 for line in BufReader::new(stdout).lines() {
                     let Ok(line) = line else { break };
@@ -120,12 +119,12 @@ impl Service {
                     let _ = tx.send(Err("Analysis service stopped".into()));
                 }
             })?;
-        // Library logs stay out of the screens, as in the Electron shell; keep them at debug.
+        // Library logs stay out of the screens; keep them at debug.
         std::thread::Builder::new()
-            .name("autocue-service-err".into())
+            .name("service-err".into())
             .spawn(move || {
                 for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                    tracing::debug!(target: "autocue_service", "{line}");
+                    tracing::debug!(target: "onset_service", "{line}");
                 }
             })?;
 

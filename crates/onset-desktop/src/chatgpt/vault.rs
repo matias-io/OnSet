@@ -1,5 +1,5 @@
 //! The account vault: connected ChatGPT accounts and their tokens, encrypted for the current
-//! Windows user with DPAPI (what Electron's safeStorage used underneath) and written
+//! Windows user with DPAPI and written
 //! atomically. The screens never see tokens; only the status in [`super::Status`] leaves.
 use std::path::{Path, PathBuf};
 

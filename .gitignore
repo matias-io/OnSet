@@ -5,7 +5,6 @@
 
 # Local-only documentation and agent context (kept out of the public repo for now)
 CLAUDE.md
-AGENTS.md
 docs/superpowers/
 docs/internal/
 docs/screenshots/

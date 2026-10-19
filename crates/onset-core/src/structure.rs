@@ -10,23 +10,23 @@ use crate::track::HotCue;
 pub enum StructureSource {
     /// rekordbox's phrase analysis.
     Rekordbox,
-    /// The structure the DJ prepared and corrected in Autocue, on rekordbox's beat grid.
-    Autocue,
+    /// The structure the DJ prepared and corrected in OnSet, on rekordbox's beat grid.
+    Prepared,
 }
 
 impl StructureSource {
     pub fn name(self) -> &'static str {
         match self {
             Self::Rekordbox => "rekordbox",
-            Self::Autocue => "Autocue",
+            Self::Prepared => "Prepared",
         }
     }
 
-    /// What the DJ sees: OnSet calls Autocue's preparation area Prep.
+    /// What the DJ sees: OnSet calls its preparation area Prep.
     pub fn label(self) -> &'static str {
         match self {
             Self::Rekordbox => "rekordbox",
-            Self::Autocue => "Prep",
+            Self::Prepared => "Prep",
         }
     }
 }

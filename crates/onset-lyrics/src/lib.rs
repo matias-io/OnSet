@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 const USER_AGENT: &str = concat!(
     "Onset/",
     env!("CARGO_PKG_VERSION"),
-    " (https://github.com/matias-io/visualdj)"
+    " (https://github.com/matias-io/OnSet)"
 );
 const LRCLIB: &str = "https://lrclib.net/api";
 const MUSICBRAINZ: &str = "https://musicbrainz.org/ws/2";

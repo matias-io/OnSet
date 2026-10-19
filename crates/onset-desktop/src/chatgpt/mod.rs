@@ -1,5 +1,4 @@
-//! "Continue with ChatGPT": the account sign-in and AI requests that used ChatGPT plan usage
-//! in Autocue's Electron shell, ported to Rust with the same safeguards. Sign-in is OAuth with
+//! "Continue with ChatGPT": account sign-in and AI requests on the DJ's ChatGPT plan. Sign-in is OAuth with
 //! PKCE, state and nonce through a one-time loopback callback; the identity token is verified
 //! against OpenAI's published keys. Tokens stay in the DPAPI vault and never reach the
 //! screens. Requests treat the musical context as untrusted evidence, force a strict JSON

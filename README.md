@@ -42,6 +42,9 @@ setup before using OnSet at a show.
   Glow or Karaoke style when lyrics are available.
 - Choose your output display, audio input, quality and effects in the launcher.
   Add your own blackout logo or edit the scene shaders.
+- Prepare before the show: analyse tracks, review and approve cues, compare
+  transitions and plan sets, then write approved cues to rekordbox after an exact
+  preview and backup. See [preparing a set](docs/PREPARATION.md).
 
 OnSet runs on the same Windows laptop as rekordbox. It listens to the controller's
 recording input, with Windows output capture as a fallback. rekordbox plays the music;
@@ -68,7 +71,7 @@ toolchain in `rust-toolchain.toml` selects the Rust version.
 ```powershell
 git clone https://github.com/matias-io/OnSet.git
 cd OnSet
-cargo build --locked --release -p onset-app -p onset-cli
+cargo build --locked --release -p onset-visuals -p onset-cli
 .\target\release\onset.exe
 ```
 
@@ -210,8 +213,17 @@ AlphaTheta or rekordbox.
 <details>
 <summary>Workspace, checks, developer commands and shader authoring</summary>
 
-The workspace separates musical state, library access, live transport, audio analysis,
-lyrics, rendering, the desktop app and developer commands. `onset-core` has no I/O.
+| Folder | What it holds |
+| --- | --- |
+| `crates/` | Rust workspace: `onset-core` (musical state, no I/O), `onset-rekordbox`, `onset-transport`, `onset-audio`, `onset-engine`, `onset-render`, `onset-lyrics`, `onset-workspace` (reads the preparation workspace), `onset-visuals` (the show, `onset.exe`), `onset-desktop` (preparation and live view, Tauri) and `onset-cli` |
+| `service/` | Python preparation service the desktop app runs: analysis, cue review, transitions, set planning and rekordbox writes (`onset_service`), the WSL deep-model worker, tests and one-off tools |
+| `ui/` | React screens the desktop app serves |
+| `assets/`, `offsets/` | Shaders, fonts, brand and rekordbox calibration data |
+| `docs/` | Guides, the preparation plan and its progress; `docs/history/` keeps dated records |
+
+The Rust workspace separates musical state, library access, live transport, audio
+analysis, lyrics, rendering, the desktop app and developer commands. Setup and checks
+for `service/` and `ui/` are in [desktop operation](docs/DESKTOP.md).
 
 ```mermaid
 flowchart LR
