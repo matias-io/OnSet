@@ -132,6 +132,16 @@ def test_multitrack_adviser_context_and_import_preserve_constraints(tmp_path, so
     saved=service.import_plan(proposal)
     assert len(saved['track_ids'])==3 and len(saved['transition_ids'])==2
     assert service.validate_plan(saved)['valid']
+    # Validation and the saved-set list look up only the transitions a plan names; loading
+    # every stored transition took close to a minute per set on a real library.
+    real_artifacts=service.store.artifacts
+    def no_full_transition_load(kind,*args,**kwargs):
+        assert kind!='transition','loaded every stored transition'
+        return real_artifacts(kind,*args,**kwargs)
+    service.store.artifacts=no_full_transition_load
+    assert service.validate_plan(saved)['valid']
+    assert any(s['id']==saved['id'] and not s.get('stale') for s in service.saved_sets())
+    service.store.artifacts=real_artifacts
     service.store.edit(ids[1],{'key':'C# major'})
     with pytest.raises(ValueError,match='stale|changed'):
         service.validate_plan(service.store.artifact('set',saved['id']))

@@ -134,8 +134,9 @@ class Service:
 
     def saved_sets(self):
         values=self.store.artifacts('set')[-12:][::-1]
+        tracks=self.store.tracks()
         for plan in values:
-            try:self.validate_plan(plan)
+            try:self.validate_plan(plan,tracks)
             except (ValueError,KeyError) as error:
                 plan.update(stale=True,validation_error=str(error))
         return values
@@ -420,10 +421,16 @@ class Service:
         self.store.artifact_batch("set", [(plan['id'],plan) for plan in result['plans']])
         return result
 
-    def validate_plan(self, plan):
+    def validate_plan(self, plan, tracks=None):
+        """Validation needs only the transitions the plan names. Loading every stored
+        transition (tens of thousands after a few set searches) took close to a minute."""
         from .planning import validate_plan
-        transition_map = {t["id"]: t for t in self.store.artifacts("transition")}
-        return validate_plan(plan, self.store.tracks(), transition_map, plan.get("brief"))
+        transition_map = {}
+        for link in plan.get("transition_ids") or []:
+            option = self.store.artifact("transition", link) if isinstance(link, str) else None
+            if option is not None:
+                transition_map[link] = option
+        return validate_plan(plan, tracks if tracks is not None else self.store.tracks(), transition_map, plan.get("brief"))
 
     def import_plan(self, plan):
         check_version(plan)
