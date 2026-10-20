@@ -35,6 +35,7 @@
       openLive: () => invoke('open_live_window', {}),
       setLiveOnTop: (onTop) => invoke('set_live_on_top', { onTop }),
       startVisuals: () => invoke('visuals_start', {}),
+      showMode: (on) => invoke('show_mode', { on }),
       providers: () => invoke('providers_status', {}),
       testProvider: (provider) => invoke('providers_test', { provider }),
       lookUpDetails: (providers, trackIds, web) =>

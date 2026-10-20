@@ -171,6 +171,12 @@ impl Service {
             .unwrap_or_else(|_| Err("Analysis service stopped".into()))
     }
 
+    /// While a show runs the service yields the processor to the visuals: below-normal
+    /// priority and Windows' efficiency mode (`EcoQoS`). `false` restores both.
+    pub fn set_background(&self, on: bool) -> Result<(), String> {
+        set_background(&self.child.lock(), on)
+    }
+
     /// Closes the service's input so it checkpoints and exits, then kills it after `grace`.
     pub fn stop(&self, grace: Duration) {
         self.stdin.lock().take();
@@ -186,9 +192,81 @@ impl Service {
     }
 }
 
+/// Below-normal priority and efficiency mode for `child`, or back to normal.
+pub fn set_background(child: &Child, on: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::Threading::{
+            BELOW_NORMAL_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS,
+            PROCESS_POWER_THROTTLING_CURRENT_VERSION, PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+            PROCESS_POWER_THROTTLING_STATE, ProcessPowerThrottling, SetPriorityClass,
+            SetProcessInformation,
+        };
+        let handle = child.as_raw_handle();
+        let class = if on {
+            BELOW_NORMAL_PRIORITY_CLASS
+        } else {
+            NORMAL_PRIORITY_CLASS
+        };
+        let throttling = PROCESS_POWER_THROTTLING_STATE {
+            Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+            ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+            StateMask: if on {
+                PROCESS_POWER_THROTTLING_EXECUTION_SPEED
+            } else {
+                0
+            },
+        };
+        // SAFETY: `handle` belongs to the live child held by the lock above, and
+        // `throttling` is a correctly sized PROCESS_POWER_THROTTLING_STATE.
+        unsafe {
+            if SetPriorityClass(handle, class) == 0 {
+                return Err(format!(
+                    "Cannot change the service's priority: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            // Efficiency mode is a hint; older Windows versions lack it.
+            SetProcessInformation(
+                handle,
+                ProcessPowerThrottling,
+                std::ptr::from_ref(&throttling).cast(),
+                u32::try_from(std::mem::size_of::<PROCESS_POWER_THROTTLING_STATE>())
+                    .expect("small struct"),
+            );
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = on;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::Runtime;
+
+    #[cfg(windows)]
+    #[test]
+    fn background_lowers_and_restores_the_priority_class() {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::Threading::{
+            BELOW_NORMAL_PRIORITY_CLASS, GetPriorityClass, NORMAL_PRIORITY_CLASS,
+        };
+        let mut child = std::process::Command::new("ping")
+            .args(["-n", "5", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        // SAFETY: the handle belongs to `child`, alive until killed below.
+        let class = |c: &std::process::Child| unsafe { GetPriorityClass(c.as_raw_handle()) };
+        super::set_background(&child, true).unwrap();
+        assert_eq!(class(&child), BELOW_NORMAL_PRIORITY_CLASS);
+        super::set_background(&child, false).unwrap();
+        assert_eq!(class(&child), NORMAL_PRIORITY_CLASS);
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 
     #[test]
     fn an_installed_layout_beside_the_executable_wins_over_the_repository() {

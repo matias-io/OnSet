@@ -41,6 +41,10 @@ class Service:
         self.heavy = threading.Semaphore(1)
         self.controls = {}
         self.shutting_down = threading.Event()
+        # Show mode (plan O4): while visuals run, jobs wait at their next checkpoint and nothing
+        # writes to rekordbox. `show_paused` holds the jobs show mode paused, to resume after.
+        self.show = False
+        self.show_paused = set()
         for job in self.store.jobs() if workspace.health(self.store)["healthy"] else []:
             if job["state"] in {"running", "queued", "cancelling"}:
                 job.update(state="paused", error="Interrupted at application shutdown; resume to continue")
@@ -83,6 +87,7 @@ class Service:
             "review-bulk": lambda: self.store.review_bulk(p["id"], p["cue_ids"], p["status"], p.get("revision")),
             "undo": lambda: self.store.undo(p["id"]), "jobs": self.store.jobs,
             "job-control": lambda: self.job_control(p["id"], p["action"]),
+            "show-mode": lambda: self.show_mode(bool(p.get("on"))),
             "catalogue": lambda: CATALOGUE,
             "transitions": lambda: self.transitions(p), "plan": lambda: self.plan(p),
             "plan-job": lambda: self.enqueue("plan", {**p, "deep": False}),
@@ -226,6 +231,11 @@ class Service:
         record.update(state="queued", stage="queued", progress=0, error=None)
         control = {"cancel": threading.Event(), "pause": threading.Event(), "active": True, "started": False, "requested_cancel": False}
         control["pause"].set()
+        if self.show:
+            # Queued during a show: it starts once the show is over.
+            control["pause"].clear()
+            record.update(state="paused", stage="waiting for the show to end")
+            self.show_paused.add(record["id"])
         self.controls[record["id"]] = control
         self.store.job(record)
         pool = self.heavy_pool if kind == "worker-setup" or kind == "analyze" and params.get("deep", True) else self.pool
@@ -327,10 +337,40 @@ class Service:
             self.store.job(record)
             self.notify({"method": "job-progress", "params": record.copy()})
 
+    def show_mode(self, on):
+        """Starts or ends show mode and returns which jobs it paused or resumed."""
+        changed = []
+        if on and not self.show:
+            self.show = True
+            for record in self.store.jobs():
+                control = self.controls.get(record["id"])
+                if control and control["active"] and control["pause"].is_set()                         and record["state"] in {"running", "queued"}:
+                    control["pause"].clear()
+                    record["state"] = "paused"
+                    self.store.job(record)
+                    self.show_paused.add(record["id"])
+                    changed.append(record["id"])
+        elif not on and self.show:
+            self.show = False
+            for job_id in sorted(self.show_paused):
+                control = self.controls.get(job_id)
+                record = next((j for j in self.store.jobs() if j["id"] == job_id), None)
+                if control and control["active"] and record and record["state"] == "paused":
+                    control["pause"].set()
+                    record["state"] = "running" if control.get("started") else "queued"
+                    self.store.job(record)
+                    changed.append(job_id)
+            self.show_paused.clear()
+        return {"show": self.show, "jobs": changed}
+
     def job_control(self, job_id, action):
         record = next((j for j in self.store.jobs() if j["id"] == job_id), None)
         if not record:
             raise ValueError("Unknown job")
+        if self.show and action == "resume":
+            raise ValueError("Jobs resume when the show ends")
+        # A job the DJ pauses or cancels during the show stays that way afterwards.
+        self.show_paused.discard(job_id)
         control = self.controls.get(job_id)
         if action == "resume" and (not control or not control["active"] or record["state"] in {"failed", "partial", "cancelled"}):
             record["completed"] = [tid for tid in record["completed"] if tid not in record.get("partial_tracks", [])]
@@ -759,10 +799,14 @@ class Service:
         return prepare(self.store, p.get("track_ids") or [t["id"] for t in self.store.tracks()], p.get("db_path"), p.get("plain", False), p.get("hot", False), p.get("comments", False))
 
     def rb_apply(self, p):
+        if self.show:
+            raise ValueError("rekordbox is not written to during a show")
         from .rekordbox import apply
         return apply(self.store, p["id"])
 
     def restore(self, p):
+        if self.show:
+            raise ValueError("rekordbox is not written to during a show")
         from .rekordbox import restore
         return restore(self.store, p["id"])
 
