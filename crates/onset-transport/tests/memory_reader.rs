@@ -182,6 +182,14 @@ fn play_tracker_needs_movement_to_call_it_playing() {
         "a single equal read within the grace period is still playing"
     );
     assert!(
+        tracker.is_playing(t0 + Duration::from_millis(100)),
+        "is_playing agrees with the last update"
+    );
+    assert!(
+        !tracker.is_playing(t0 + Duration::from_millis(600)),
+        "is_playing needs no new read to see the deck stop"
+    );
+    assert!(
         !tracker.update(10.05, t0 + Duration::from_millis(600)),
         "no movement for half a second: paused"
     );

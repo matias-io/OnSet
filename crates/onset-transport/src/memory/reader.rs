@@ -754,6 +754,12 @@ impl PlayTracker {
     pub fn rate(&self) -> Option<f64> {
         self.rate
     }
+
+    /// Whether the deck moved recently, as of `now`.
+    pub fn is_playing(&self, now: Instant) -> bool {
+        self.last_movement
+            .is_some_and(|t| now.duration_since(t) <= Self::GRACE)
+    }
 }
 
 /// Builds the snapshot the engine consumes from the master deck's state. With no tempo
@@ -800,7 +806,8 @@ mod live {
 
     use std::collections::HashMap;
     use std::path::Path;
-    use std::sync::mpsc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, mpsc};
 
     use onset_core::track::TrackId;
     use onset_core::transport::TrackRef;
@@ -814,18 +821,26 @@ mod live {
         ChainReader, DeckChooser, DeckFiles, DeckState, Mem, PlayTracker, snapshot_from_deck,
     };
 
-    /// How often the open-file list is refreshed.
+    /// How often the open-file list is refreshed while it is wanted.
     const FILES_EVERY: Duration = Duration::from_millis(1500);
+    /// How quickly the watcher notices it is wanted again.
+    const FILES_IDLE: Duration = Duration::from_millis(200);
 
     /// Starts the thread that lists rekordbox's open audio files; it stops when the
     /// receiver is dropped. Enumeration goes through every handle in the system and a few
-    /// can stall, so it never runs on the poll thread.
-    fn spawn_file_watcher(pid: u32) -> mpsc::Receiver<Vec<PathBuf>> {
+    /// can stall, so it never runs on the poll thread, and it runs only while `wanted`: some
+    /// deck plays a track that rekordbox's content id doesn't name.
+    fn spawn_file_watcher(pid: u32, wanted: Arc<AtomicBool>) -> mpsc::Receiver<Vec<PathBuf>> {
         let (tx, rx) = mpsc::channel();
         std::thread::Builder::new()
             .name("onset-open-files".into())
             .spawn(move || {
-                loop {
+                // The reader holds the other reference; once it is gone, so is this thread.
+                while Arc::strong_count(&wanted) > 1 {
+                    if !wanted.load(Ordering::Acquire) {
+                        std::thread::sleep(FILES_IDLE);
+                        continue;
+                    }
                     let files = open_audio_files(pid).unwrap_or_default();
                     if tx.send(files).is_err() {
                         break;
@@ -835,6 +850,33 @@ mod live {
             })
             .ok();
         rx
+    }
+
+    /// Tells the watcher whether its list is wanted and takes in what it sent: deck
+    /// candidates only, logged when they change. While nothing needs it the last list is
+    /// kept: it only names paused decks, which haven't changed.
+    fn refresh_files(
+        reader: &ChainReader<Process>,
+        trackers: &[PlayTracker],
+        files_wanted: &AtomicBool,
+        files_rx: &mpsc::Receiver<Vec<PathBuf>>,
+        open_files: &mut Vec<PathBuf>,
+        durations: &HashMap<String, f64>,
+    ) {
+        files_wanted.store(
+            playing_without_id(reader, trackers, Instant::now()),
+            Ordering::Release,
+        );
+        while let Ok(files) = files_rx.try_recv() {
+            let files: Vec<PathBuf> = files
+                .into_iter()
+                .filter(|f| is_deck_candidate(f, durations))
+                .collect();
+            if files != *open_files {
+                tracing::info!(files = ?files, "loaded tracks changed");
+                *open_files = files;
+            }
+        }
     }
 
     fn norm_path(p: &Path) -> String {
@@ -959,6 +1001,7 @@ mod live {
             /// Consecutive polls in which a found deck lost its signature.
             stale_polls: u32,
             files_rx: mpsc::Receiver<Vec<PathBuf>>,
+            files_wanted: Arc<AtomicBool>,
             open_files: Vec<PathBuf>,
             deck_files: DeckFiles,
             /// A deck scan running on its own thread; a heap pass takes seconds.
@@ -1070,14 +1113,30 @@ mod live {
         }
     }
 
-    /// True when a deck under way has no track id and the last scan is old enough to repeat:
+    /// Decks playing a track that rekordbox's content id doesn't name. rekordbox builds its
+    /// player objects only for playing decks, so a paused deck never has an id; counting
+    /// paused decks kept a full heap scan running every 30 s while nothing played.
+    fn playing_without_id(
+        reader: &ChainReader<Process>,
+        trackers: &[PlayTracker],
+        now: Instant,
+    ) -> bool {
+        (0..reader.deck_count()).any(|i| {
+            trackers.get(i).is_some_and(|t| t.is_playing(now)) && reader.track_id(i).is_none()
+        })
+    }
+
+    /// True when a deck plays without a track id and the last scan is old enough to repeat:
     /// rekordbox may have built a player for a track loaded since.
-    fn wants_ids(reader: &ChainReader<Process>, last_scan: Instant, now: Instant) -> bool {
+    fn wants_ids(
+        reader: &ChainReader<Process>,
+        trackers: &[PlayTracker],
+        last_scan: Instant,
+        now: Instant,
+    ) -> bool {
         now.duration_since(last_scan) >= ID_RESCAN
             && reader.player_needle().is_some()
-            && (0..reader.deck_count()).any(|i| {
-                reader.deck(i).is_some_and(|d| d.position_s > 1.0) && reader.track_id(i).is_none()
-            })
+            && playing_without_id(reader, trackers, now)
     }
 
     /// Pairs the open files with the decks (by length and, where the deck's tempo reads, by
@@ -1152,6 +1211,8 @@ mod live {
                 let pid = process.pid;
                 let scan = spawn_scan(pid, offsets.clone());
                 let reader = Box::new(ChainReader::new(process, offsets));
+                // Wanted until the first poll knows better.
+                let files_wanted = Arc::new(AtomicBool::new(true));
                 self.state = State::Connected {
                     reader,
                     trackers: Vec::new(),
@@ -1159,7 +1220,8 @@ mod live {
                     failures: 0,
                     last_scan: Instant::now(),
                     stale_polls: 0,
-                    files_rx: spawn_file_watcher(pid),
+                    files_rx: spawn_file_watcher(pid, files_wanted.clone()),
+                    files_wanted,
                     open_files: Vec::new(),
                     deck_files: DeckFiles::default(),
                     scan: Some(scan),
@@ -1235,20 +1297,19 @@ mod live {
                     last_scan,
                     stale_polls,
                     files_rx,
+                    files_wanted,
                     open_files,
                     deck_files,
                     scan,
                 } => {
-                    while let Ok(files) = files_rx.try_recv() {
-                        let files: Vec<PathBuf> = files
-                            .into_iter()
-                            .filter(|f| is_deck_candidate(f, &self.durations))
-                            .collect();
-                        if files != *open_files {
-                            tracing::info!(files = ?files, "loaded tracks changed");
-                            *open_files = files;
-                        }
-                    }
+                    refresh_files(
+                        reader,
+                        trackers,
+                        files_wanted,
+                        files_rx,
+                        open_files,
+                        &self.durations,
+                    );
                     // Decks vanish when rekordbox rebuilds its players (a restart, a mode
                     // change); a fresh scan finds the new ones.
                     *stale_polls = if reader.found_decks_stale() {
@@ -1256,7 +1317,7 @@ mod live {
                     } else {
                         0
                     };
-                    let want_ids = wants_ids(reader, *last_scan, now);
+                    let want_ids = wants_ids(reader, trackers, *last_scan, now);
                     tend_scan(
                         reader,
                         trackers,
