@@ -59,6 +59,20 @@ pub struct TempoFields {
     pub pitch_offset: i64,
 }
 
+/// rekordbox's player objects, one family apart from the decks: each holds the playhead of
+/// the deck it plays (the same value) and leads to the loaded track's content id. Found by
+/// scanning for a module pointer at a fixed distance from their position field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrackIdFields {
+    /// Module-relative value of the pointer that marks a player object.
+    pub anchor_module_offset: u64,
+    /// Where that pointer sits, relative to the player's position field.
+    pub anchor_offset: i64,
+    /// From the position field: add each hop but the last and read a pointer there, then add
+    /// the last and read the content id (u32).
+    pub chain: Vec<i64>,
+}
+
 /// Finds the deck objects by scanning memory for their anchors instead of following static
 /// chains, which change with every allocation order. Decks are numbered by address.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,6 +87,9 @@ pub struct DeckSignature {
     /// The deck's tempo, when known.
     #[serde(default)]
     pub tempo: Option<TempoFields>,
+    /// Where the loaded track's content id is found, when known.
+    #[serde(default)]
+    pub track_id: Option<TrackIdFields>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -9,8 +9,11 @@
 //! value is the deck's position; everything else that ticks at an audio rate (time-since-play
 //! clocks, output counters) fails one of the steps. Around the position sits the player object,
 //! which carries pointers into the rekordbox module (its vtables and statics). Those
-//! pointers at their distances from the position are the signature. The track's identity
-//! does not come from memory at all: rekordbox keeps the loaded files open.
+//! pointers at their distances from the position are the signature. The calibrated deck's
+//! tempo and pitch are recorded when they sit beside the position. The track's identity comes
+//! from rekordbox's player objects where the offsets file names them (`TrackIdFields`, found
+//! by hand so far), else from the files rekordbox keeps open, matched by length and BPM.
+//! Several runs can be merged into the anchors they all found (`merge_offsets`).
 //!
 //! The CLI and the launcher both drive this; only the reporter differs.
 use std::collections::{BTreeMap, BTreeSet};
@@ -253,15 +256,22 @@ fn scan_counters(s: &mut Session<'_>, p: &Process) -> Vec<Counter> {
     confirmed
 }
 
-/// Playback counters that started with play, best first (see `rank`). A scan can begin before
-/// the operator presses play and pass the deck while it is still paused, so this scans again
-/// until counters missing from the paused baseline appear.
+/// Seconds between asking for play and scanning, so the press lands before the scan reads
+/// the deck. A scan that began first could pass the deck while still paused; covering that
+/// took a second scan, which kept the deck playing long enough to reach a short track's loops.
+const PLAY_COUNTDOWN_S: u64 = 5;
+
+/// Playback counters that started with play, best first (see `rank`). The scan waits for a
+/// countdown after asking for play, and scans again if the press still came late.
 fn ranked_counters(
     s: &mut Session<'_>,
     p: &Process,
     baseline: &BTreeSet<u64>,
 ) -> anyhow::Result<Vec<Counter>> {
-    s.say("Step 2: press play on that deck.");
+    s.say(format!(
+        "Step 2: press play on that deck now (scanning in {PLAY_COUNTDOWN_S} s)."
+    ));
+    s.sleep(Duration::from_secs(PLAY_COUNTDOWN_S))?;
     let deadline = Instant::now() + s.step_limit;
     let mut baseline = baseline.clone();
     let started = loop {
@@ -279,14 +289,6 @@ fn ranked_counters(
         }
         s.say("  no newly playing deck found yet; scanning again");
         s.sleep(Duration::from_secs(2))?;
-    };
-    // Play may have come mid-scan, after the pass read the deck while it was still paused:
-    // a second scan, with the deck certainly playing, has its position.
-    let again = started_with_play(&baseline, scan_counters(s, p));
-    let started = if again.len() >= MIN_STOPPED {
-        again
-    } else {
-        started
     };
     let best = rank(started);
     s.say(format!(
@@ -418,9 +420,7 @@ fn best_signature(
             .collect();
         by_set.entry(key).or_default().push(*c);
     }
-    let (key, members) = by_set
-        .into_iter()
-        .max_by_key(|(k, v)| (v.len(), k.len()))
+    let (key, members) = pick_layout(s, p, by_set)
         .context("no position candidate sits in an object with module pointers")?;
     let mut anchors: Vec<Anchor> = key
         .iter()
@@ -475,6 +475,7 @@ fn best_signature(
             max_decks: 4,
             master_flag: None,
             tempo: None,
+            track_id: None,
         },
         counter,
     ))
@@ -501,6 +502,84 @@ fn tempo_fields(p: &Process, pos: u64) -> Option<TempoFields> {
 /// player), so a cap of four can drop the deck that is playing.
 fn deck_limit(found: usize) -> usize {
     found.clamp(4, 8)
+}
+
+/// Among the layouts the position candidates sit in, the deck layout. Each layout is cut down
+/// to the pointers its objects share (as `refine` does), then scored by how many objects that
+/// finds. rekordbox 7.2.19 also keeps the playhead in its player objects, twice in each, and
+/// those are more numerous than the decks; a layout holding two candidates in one object is
+/// therefore ranked after every layout that holds one. Before this, the layout with the most
+/// candidates won, and on one deck that was the player object, whose signature found only it.
+fn pick_layout(
+    s: &mut Session<'_>,
+    p: &Process,
+    by_set: BTreeMap<LayoutKey, Vec<Counter>>,
+) -> Option<(LayoutKey, Vec<Counter>)> {
+    if by_set.len() < 2 {
+        return by_set.into_iter().next();
+    }
+    let values: Vec<u64> = by_set
+        .keys()
+        .flatten()
+        .map(|(_, module_offset)| p.module_base + module_offset)
+        .collect::<BTreeSet<u64>>()
+        .into_iter()
+        .collect();
+    let hits = find_u64_values(p, &values, SIBLING_HITS);
+    let objects = |key: &[(i64, u64)], primary: u64| -> usize {
+        let anchors: Vec<Anchor> = key
+            .iter()
+            .map(|(offset, module_offset)| Anchor {
+                offset: *offset,
+                module_offset: *module_offset,
+            })
+            .collect();
+        let found: Vec<Vec<u64>> = key
+            .iter()
+            .map(|(_, module_offset)| {
+                values
+                    .iter()
+                    .position(|v| *v == p.module_base + module_offset)
+                    .map(|i| hits[i].clone())
+                    .unwrap_or_default()
+            })
+            .collect();
+        let shared = shared_signature(p, primary, &anchors, &found);
+        if shared.anchors.len() < MIN_ANCHORS {
+            0
+        } else {
+            shared.decks.len()
+        }
+    };
+    let scored: Vec<(bool, usize, LayoutKey, Vec<Counter>)> = by_set
+        .into_iter()
+        .map(|(k, v)| {
+            let single = !holds_twice(&v);
+            (single, objects(&k, v[0].addr), k, v)
+        })
+        .collect();
+    for (single, n, k, v) in &scored {
+        s.say(format!(
+            "  layout with {} anchor(s) around {} candidate(s){}: finds {n} object(s)",
+            k.len(),
+            v.len(),
+            if *single { "" } else { " in one object" }
+        ));
+    }
+    scored
+        .into_iter()
+        .max_by_key(|(single, n, k, v)| (*single, *n, v.len(), k.len()))
+        .map(|(_, _, k, v)| (k, v))
+}
+
+/// A layout: the (offset, module offset) of each module pointer around a position field.
+type LayoutKey = Vec<(i64, u64)>;
+
+/// True when two of a layout's candidates sit in one object (closer than its anchor window).
+fn holds_twice(candidates: &[Counter]) -> bool {
+    let mut addrs: Vec<u64> = candidates.iter().map(|c| c.addr).collect();
+    addrs.sort_unstable();
+    addrs.windows(2).any(|w| w[1] - w[0] < ANCHOR_BELOW)
 }
 
 /// Hits kept per anchor value when looking for sibling decks.
@@ -586,6 +665,56 @@ pub fn refine_existing(dir: &Path, s: &mut Session<'_>) -> anyhow::Result<PathBu
     Ok(path)
 }
 
+/// Combines several calibrations of one rekordbox version into the one they agree on: the
+/// anchors every run found (in the first run's order, so its rarest anchor stays first), the
+/// largest deck limit, and the optional fields from the first run that has them. A pointer
+/// one run saw by chance drops out; one every run saw is part of the deck's layout.
+pub fn merge_offsets(runs: &[Offsets]) -> anyhow::Result<Offsets> {
+    let first = runs.first().context("no calibrations to merge")?;
+    for run in runs {
+        if run.rekordbox_version != first.rekordbox_version {
+            bail!(
+                "calibrations of different versions: {} and {}",
+                first.rekordbox_version,
+                run.rekordbox_version
+            );
+        }
+        if run.position_format != first.position_format {
+            bail!("the calibrations disagree on the position format");
+        }
+    }
+    let sigs: Vec<&DeckSignature> = runs
+        .iter()
+        .map(|r| {
+            r.signature
+                .as_ref()
+                .context("a calibration has no signature")
+        })
+        .collect::<anyhow::Result<_>>()?;
+    let anchors: Vec<Anchor> = sigs[0]
+        .anchors
+        .iter()
+        .filter(|a| sigs.iter().all(|s| s.anchors.contains(a)))
+        .cloned()
+        .collect();
+    if anchors.len() < MIN_ANCHORS {
+        bail!(
+            "the calibrations share only {} anchor(s); at least {MIN_ANCHORS} are needed",
+            anchors.len()
+        );
+    }
+    let mut merged = first.clone();
+    merged.signature = Some(DeckSignature {
+        anchors,
+        max_decks: sigs.iter().map(|s| s.max_decks).max().unwrap_or(4),
+        master_flag: sigs.iter().find_map(|s| s.master_flag.clone()),
+        tempo: sigs.iter().find_map(|s| s.tempo),
+        track_id: sigs.iter().find_map(|s| s.track_id.clone()),
+    });
+    merged.provenance = Some(format!("merged from {} calibrations", runs.len()));
+    Ok(merged)
+}
+
 /// Runs the guided session against the running rekordbox and writes
 /// `<out_dir>/<version>.toml`, returning its path.
 pub fn calibrate(out_dir: &Path, s: &mut Session<'_>) -> anyhow::Result<PathBuf> {
@@ -595,7 +724,9 @@ pub fn calibrate(out_dir: &Path, s: &mut Session<'_>) -> anyhow::Result<PathBuf>
         "rekordbox {version} (pid {}), module at {:#x}",
         p.pid, p.module_base
     ));
-    s.say("This takes a minute or two: with a track paused, play it, pause it, play it again.");
+    s.say(
+        "This takes about three minutes: with a track paused, play it, pause it, play it again.          The deck plays for under a minute of that.",
+    );
     s.say(
         "Step 1: load a track on any deck and leave it paused, at least a minute before any \
          loop or the end of the track (anywhere else is fine; the start is not needed).",
@@ -661,6 +792,77 @@ pub fn calibrate(out_dir: &Path, s: &mut Session<'_>) -> anyhow::Result<PathBuf>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn run(anchors: &[(i64, u64)], max_decks: usize) -> Offsets {
+        Offsets {
+            rekordbox_version: "7.2.19".into(),
+            platform: "windows".into(),
+            position_format: PositionFormat::I32,
+            position_rate_hz: 0.0,
+            master_deck: None,
+            decks: Vec::new(),
+            signature: Some(DeckSignature {
+                anchors: anchors
+                    .iter()
+                    .map(|(offset, module_offset)| Anchor {
+                        offset: *offset,
+                        module_offset: *module_offset,
+                    })
+                    .collect(),
+                max_decks,
+                master_flag: None,
+                tempo: None,
+                track_id: None,
+            }),
+            provenance: None,
+        }
+    }
+
+    #[test]
+    fn a_layout_holding_the_playhead_twice_in_one_object_is_the_player() {
+        // rekordbox 7.2.19's player object keeps the playhead at two places 0x220 apart;
+        // a deck object keeps it once.
+        let player = [
+            counter(0x26f_291b_04e8, CounterFormat::I32, 38.4),
+            counter(0x26f_291b_02c8, CounterFormat::I32, 38.4),
+        ];
+        assert!(holds_twice(&player));
+        let decks = [
+            counter(0x26f_6374_de14, CounterFormat::I32, 38.4),
+            counter(0x26f_6374_f104, CounterFormat::I32, 38.4),
+        ];
+        assert!(!holds_twice(&decks));
+    }
+
+    #[test]
+    fn merging_keeps_the_anchors_every_run_found() {
+        let a = run(&[(-420, 1), (-412, 2), (-364, 3), (-36, 4), (-8, 99)], 4);
+        let mut b = run(&[(-412, 2), (-420, 1), (-36, 4), (-364, 3)], 8);
+        b.signature.as_mut().unwrap().tempo = Some(TempoFields {
+            bpm_offset: -4,
+            pitch_offset: 4,
+        });
+        let merged = merge_offsets(&[a, b]).unwrap();
+        let sig = merged.signature.unwrap();
+        let kept: Vec<(i64, u64)> = sig
+            .anchors
+            .iter()
+            .map(|a| (a.offset, a.module_offset))
+            .collect();
+        assert_eq!(kept, vec![(-420, 1), (-412, 2), (-364, 3), (-36, 4)]);
+        assert_eq!(sig.max_decks, 8);
+        assert!(sig.tempo.is_some());
+    }
+
+    #[test]
+    fn merging_refuses_runs_that_share_too_little() {
+        let a = run(&[(-420, 1), (-412, 2), (-364, 3)], 4);
+        let b = run(&[(-420, 1), (-8, 7), (-16, 8)], 4);
+        assert!(merge_offsets(&[a, b]).is_err());
+        let mut other = run(&[(-420, 1), (-412, 2), (-364, 3)], 4);
+        other.rekordbox_version = "7.2.18".into();
+        assert!(merge_offsets(&[run(&[(-420, 1), (-412, 2), (-364, 3)], 4), other]).is_err());
+    }
 
     fn counter(addr: u64, format: CounterFormat, seconds: f64) -> Counter {
         Counter {

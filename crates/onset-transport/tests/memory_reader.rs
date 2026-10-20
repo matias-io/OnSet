@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use onset_transport::memory::offsets::{
     Anchor, DeckChains, DeckSignature, FlagField, Offsets, PositionFormat, TempoFields,
+    TrackIdFields,
 };
 use onset_transport::memory::reader::{
     ChainReader, DeckChooser, DeckFiles, FakeMem, PlayTracker, decks_from_hits, parse_track_info,
@@ -280,6 +281,7 @@ fn signature_rekordbox() -> (FakeMem, DeckSignature) {
             mask: 0x80,
         }),
         tempo: None,
+        track_id: None,
     };
     for (pos, samples) in [(0x9000u64, 44_100i32), (0x7000, 88_200)] {
         mem.put_u64(pos - 0x20, BASE + 0x1046);
@@ -484,6 +486,67 @@ fn reader_reads_the_track_bpm_beside_the_position() {
     let bpm = with_tempo.track_bpm.expect("tempo read");
     assert!((bpm - 126.0).abs() < 0.01, "{bpm}");
     assert_eq!(reader.deck(0).expect("deck at 0x7000").track_bpm, None);
+}
+
+/// The two-deck fake with player objects as rekordbox 7.2.19 lays them out: a marker
+/// pointer 200 bytes below the position, and the content id at `[[pos - 0x78] + 0x38] + 0x110`.
+fn with_players(players: &[(u64, i32, u32)]) -> ChainReader<FakeMem> {
+    let (mut mem, mut sig) = signature_rekordbox();
+    sig.track_id = Some(TrackIdFields {
+        anchor_module_offset: 0x5000,
+        anchor_offset: -200,
+        chain: vec![-0x78, 0x38, 0x110],
+    });
+    for (n, (pos, samples, id)) in players.iter().enumerate() {
+        let a = 0x20_0000 + n as u64 * 0x1000;
+        let b = a + 0x800;
+        mem.put_u64(pos - 200, BASE + 0x5000);
+        mem.put_bytes(*pos, &samples.to_le_bytes());
+        mem.put_u64(pos - 0x78, a);
+        mem.put_u64(a + 0x38, b);
+        mem.put_bytes(b + 0x110, &id.to_le_bytes());
+    }
+    let offsets = Offsets {
+        rekordbox_version: "7.2.19".into(),
+        platform: "windows".into(),
+        position_format: PositionFormat::I32,
+        position_rate_hz: 44_100.0,
+        master_deck: None,
+        decks: Vec::new(),
+        signature: Some(sig),
+        provenance: None,
+    };
+    assert_eq!(
+        Offsets::from_toml(&offsets.to_toml().unwrap()).unwrap(),
+        offsets
+    );
+    let mut reader = ChainReader::new(mem, offsets);
+    reader.adopt_hits(&[0x9000 - 0x20, 0x7000 - 0x20]);
+    let hits: Vec<u64> = players.iter().map(|(pos, _, _)| pos - 200).collect();
+    assert_eq!(reader.adopt_player_hits(&hits), players.len());
+    reader
+}
+
+#[test]
+fn the_player_at_a_decks_playhead_names_its_track() {
+    // Deck 0 (0x7000) is at 2 s, deck 1 (0x9000) at 1 s. One player per deck, plus a stale
+    // copy of deck 0's player and an unloaded one at zero.
+    let reader = with_players(&[
+        (0x30_0000, 88_200, 157_452_017),
+        (0x31_0000, 88_200, 157_452_017),
+        (0x32_0000, 44_100, 195_752_842),
+        (0x33_0000, 0, 68_956_487),
+    ]);
+    assert_eq!(reader.track_id(0), Some(157_452_017));
+    assert_eq!(reader.track_id(1), Some(195_752_842));
+}
+
+#[test]
+fn players_that_disagree_or_sit_elsewhere_name_nothing() {
+    let disagree = with_players(&[(0x30_0000, 88_200, 1), (0x31_0000, 88_200, 2)]);
+    assert_eq!(disagree.track_id(0), None, "two tracks at one playhead");
+    let elsewhere = with_players(&[(0x30_0000, 300_000, 1)]);
+    assert_eq!(elsewhere.track_id(0), None, "no player at the playhead");
 }
 
 #[test]

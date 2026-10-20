@@ -52,3 +52,12 @@ mask = 1
 # Tonight (126.02) synced to 125.00 read 125.0 and -0.00833.
 bpm_offset = -4
 pitch_offset = 4
+
+[signature.track_id]
+# rekordbox's player objects: each holds the playhead of the deck it plays and leads to the
+# loaded track's content id (djmdContent.ID) at [[pos - 0x78] + 0x38] + 0x110. They carry
+# module+0x57fe968 at pos - 200. Seen with Miami 2 Ibiza (157452017) at 355.25 s on deck 1
+# and Lady Hear Me Tonight (195752842) on deck 2, and earlier with Stop It (126351799).
+anchor_module_offset = 92268904
+anchor_offset = -200
+chain = [-120, 56, 272]

@@ -151,6 +151,8 @@ pub struct ChainReader<M: Mem> {
     track_bpm: Option<f32>,
     /// Position field addresses found through the signature, in deck order.
     found: Vec<u64>,
+    /// Position fields of the player objects (see `TrackIdFields`).
+    players: Vec<u64>,
 }
 
 /// True when every anchor of `sig` reads as expected around a position field at `pos`.
@@ -188,6 +190,7 @@ impl<M: Mem> ChainReader<M> {
             track_rate_hz: None,
             track_bpm: None,
             found: Vec::new(),
+            players: Vec::new(),
         }
     }
 
@@ -199,6 +202,91 @@ impl<M: Mem> ChainReader<M> {
     /// Records the position fields a signature scan found, in deck order.
     pub fn set_found_decks(&mut self, positions: Vec<u64>) {
         self.found = positions;
+    }
+
+    /// The bytes that mark a player object, when the offsets know them.
+    pub fn player_needle(&self) -> Option<[u8; 8]> {
+        let ids = self.offsets.signature.as_ref()?.track_id.as_ref()?;
+        Some(
+            self.mem
+                .module_base()
+                .wrapping_add(ids.anchor_module_offset)
+                .to_le_bytes(),
+        )
+    }
+
+    /// Records the player objects found from hits of `player_needle`.
+    pub fn adopt_player_hits(&mut self, hits: &[u64]) -> usize {
+        let Some(ids) = self
+            .offsets
+            .signature
+            .as_ref()
+            .and_then(|s| s.track_id.as_ref())
+        else {
+            return 0;
+        };
+        let mut players: Vec<u64> = hits
+            .iter()
+            .filter_map(|h| h.checked_add_signed(-ids.anchor_offset))
+            .collect();
+        players.sort_unstable();
+        players.dedup();
+        self.players = players;
+        self.players.len()
+    }
+
+    pub fn player_positions(&self) -> &[u64] {
+        &self.players
+    }
+
+    pub fn set_players(&mut self, players: Vec<u64>) {
+        self.players = players;
+    }
+
+    /// The content id of the track on deck `index`: the id every player object at the deck's
+    /// playhead leads to. `None` when no player is there, the deck sits at the start (where
+    /// unloaded players also read zero), or the players disagree.
+    pub fn track_id(&self, index: usize) -> Option<u32> {
+        let ids = self.offsets.signature.as_ref()?.track_id.as_ref()?;
+        let rate = self.position_rate();
+        let deck = self.read_position(*self.found.get(index)?)?;
+        if deck < PLAYER_MIN_S * rate {
+            return None;
+        }
+        let mut seen: Option<u32> = None;
+        for player in &self.players {
+            let Some(at) = self.read_position(*player) else {
+                continue;
+            };
+            if (at - deck).abs() > PLAYER_MATCH_S * rate {
+                continue;
+            }
+            let Some(id) = self.follow_id(*player, &ids.chain) else {
+                continue;
+            };
+            match seen {
+                Some(other) if other != id => return None,
+                _ => seen = Some(id),
+            }
+        }
+        seen
+    }
+
+    fn follow_id(&self, pos: u64, chain: &[i64]) -> Option<u32> {
+        let (last, hops) = chain.split_last()?;
+        let mut addr = pos;
+        for hop in hops {
+            addr = self.mem.read_u64(addr.checked_add_signed(*hop)?).ok()?;
+            if addr == 0 {
+                return None;
+            }
+        }
+        let mut b = [0u8; 4];
+        self.mem
+            .read_exact(addr.checked_add_signed(*last)?, &mut b)
+            .ok()?;
+        let id = u32::from_le_bytes(b);
+        (id != 0).then_some(id)
     }
 
     /// Decks readable right now: the found ones with a signature, else the chained ones.
@@ -407,6 +495,12 @@ pub fn parse_track_info(text: &str) -> TrackRef {
         None => TrackRef::Unknown,
     }
 }
+
+/// A player object at a deck's playhead plays that deck: both hold the same position, read
+/// microseconds apart, so they agree to well within this many seconds.
+const PLAYER_MATCH_S: f64 = 0.25;
+/// Below this many seconds every unloaded player reads alike, so no match is trusted.
+const PLAYER_MIN_S: f64 = 0.5;
 
 /// How far a deck's track BPM may sit from the library's and still be the same track, as a
 /// fraction: rekordbox shows the tempo to two decimals and keeps the pitch apart (Lady Hear
@@ -708,6 +802,7 @@ mod live {
     use std::path::Path;
     use std::sync::mpsc;
 
+    use onset_core::track::TrackId;
     use onset_core::transport::TrackRef;
 
     use super::super::REKORDBOX_EXE;
@@ -767,6 +862,12 @@ mod live {
             .get(&norm_path(path))
             .is_some_and(|d| *d >= MIN_TRACK_S)
     }
+
+    /// Most hits considered when looking for player objects (7.2.19 has about a dozen).
+    const PLAYER_HITS: usize = 256;
+    /// Least time between scans made only because a playing deck has no track id: rekordbox
+    /// may build a player when a track loads, but a scan is a pass over the whole heap.
+    const ID_RESCAN: Duration = Duration::from_secs(30);
 
     /// Most needle hits considered per scan; the decks are the first few real ones.
     const SIGNATURE_HITS: usize = 64;
@@ -869,6 +970,7 @@ mod live {
     /// runtime repair replaced them.
     struct DeckScan {
         found: Vec<u64>,
+        players: Vec<u64>,
         anchors: Option<Vec<crate::memory::offsets::Anchor>>,
     }
 
@@ -895,6 +997,7 @@ mod live {
                     reader.set_anchors(anchors);
                 }
                 reader.set_found_decks(found.found);
+                reader.set_players(found.players);
                 trackers.resize(reader.deck_count(), PlayTracker::default());
                 *last_scan = now;
                 *scan = None;
@@ -931,9 +1034,15 @@ mod live {
                 let before = offsets.signature.as_ref().map(|s| s.anchors.clone());
                 let mut reader = ChainReader::new(process, offsets);
                 discover_decks(&mut reader);
+                if let Some(needle) = reader.player_needle() {
+                    let hits = find_bytes(reader.mem(), &needle, PLAYER_HITS);
+                    let n = reader.adopt_player_hits(&hits);
+                    tracing::info!(players = n, "player scan");
+                }
                 let after = reader.signature().map(|s| s.anchors.clone());
                 let _ = tx.send(DeckScan {
                     found: reader.deck_positions().to_vec(),
+                    players: reader.player_positions().to_vec(),
                     anchors: if after == before { None } else { after },
                 });
             });
@@ -941,6 +1050,34 @@ mod live {
             tracing::warn!(error = %e, "cannot start the deck scan thread");
         }
         rx
+    }
+
+    /// Names an unknown track: by the content id the player at the deck's playhead leads to,
+    /// else by the open file paired with the deck.
+    fn identify(
+        track: &mut TrackRef,
+        reader: &ChainReader<Process>,
+        deck_files: &DeckFiles,
+        deck: usize,
+    ) {
+        if *track != TrackRef::Unknown {
+            return;
+        }
+        if let Some(id) = reader.track_id(deck) {
+            *track = TrackRef::Id(TrackId(u64::from(id)));
+        } else if let Some(file) = deck_files.file_for(deck) {
+            *track = TrackRef::FilePath(file.clone());
+        }
+    }
+
+    /// True when a deck under way has no track id and the last scan is old enough to repeat:
+    /// rekordbox may have built a player for a track loaded since.
+    fn wants_ids(reader: &ChainReader<Process>, last_scan: Instant, now: Instant) -> bool {
+        now.duration_since(last_scan) >= ID_RESCAN
+            && reader.player_needle().is_some()
+            && (0..reader.deck_count()).any(|i| {
+                reader.deck(i).is_some_and(|d| d.position_s > 1.0) && reader.track_id(i).is_none()
+            })
     }
 
     /// Pairs the open files with the decks (by length and, where the deck's tempo reads, by
@@ -1119,11 +1256,12 @@ mod live {
                     } else {
                         0
                     };
+                    let want_ids = wants_ids(reader, *last_scan, now);
                     tend_scan(
                         reader,
                         trackers,
                         last_scan,
-                        *stale_polls >= STALE_POLLS,
+                        *stale_polls >= STALE_POLLS || want_ids,
                         scan,
                         now,
                     );
@@ -1163,11 +1301,7 @@ mod live {
                             reader.track_bpm(),
                             trackers[i].rate(),
                         );
-                        if snapshot.track == TrackRef::Unknown
-                            && let Some(file) = deck_files.file_for(i)
-                        {
-                            snapshot.track = TrackRef::FilePath(file.clone());
-                        }
+                        identify(&mut snapshot.track, reader, deck_files, i);
                         return Some(snapshot);
                     }
                     *failures += 1;
