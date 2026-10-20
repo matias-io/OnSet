@@ -21,13 +21,15 @@ A ten-minute walkthrough of OnSet with rekordbox: preparation in the app, then t
    - **AI adviser** — tick a provider and **Compare with the planner**; it sends track profiles and the validated plans, never audio. *ChatGPT returned a valid alternative (9 shared tracks, same opener) and a critique: close on Heaven Takes You Home for the easing the brief asks for, and fewer backspins at intermediate level.*
 5. **Live** — press play on deck 1 in rekordbox. OnSet Live names the track from rekordbox's own content id and shows BPM, key, time, the current and next section, the beat in the bar and the drop countdown; move MASTER to deck 2 and it follows. *Verified: Miami 2 Ibiza and Lady Hear Me Tonight, each named correctly as MASTER moved.*
 6. **Visuals** — the show follows the same deck. *Liquid scene, overlay "Miami 2 Ibiza · playing · 125.0 BPM · 1:30 · phrase Verse (from Prep) · next Bridge in 37 · drop in 101 beats".*
-7. **Cues to rekordbox** (optional, last) — approve a track's cues, **Preview memory cues** / **Preview hot cues** shows the exact change, then close rekordbox and **Apply these changes**; OnSet backs up the database first and the writer refuses while rekordbox runs.
+7. **Cues to rekordbox** (optional, last) — approve a track's cues, **Preview memory cues** / **Preview hot cues** shows the exact change, then close rekordbox and **Apply these changes**; OnSet backs up the database first and the writer refuses while rekordbox runs. *Losing It: all six cues approved; both previews reported every cue "Manual, changed, or untracked existing cue preserved" and "No approved changes to write", because rekordbox already holds those cues. The writer only replaces cues it can prove OnSet wrote. Pick a track with no hot cues in rekordbox to show a real write.*
 
 ## Rough edges seen while preparing it
 
 - The visuals launcher shows its technical overlay (frame times, phrase line) and the taskbar over the show; switch the overlay off under **On screen** before an audience. The visuals' own interface is being moved into the app.
 - Light analysis recomputes key: *Lady Hear Me Tonight* shows 10B (D major) in OnSet where rekordbox has 3B.
 - The planner context sent to an AI adviser lacked four of the plan's transition IDs (ChatGPT pointed it out).
+- Approving cues does not refresh the page: they still read "Proposed" and the tiles show 0 approved until the app restarts (the workspace has them approved).
+- F5 in the main window drops the app's bridge and the library shows 0 tracks; restart OnSet instead.
 - *Ray Of Solar* fails light analysis ("Grid extends past the audio").
 - The energy curve on plans needs rated or calibrated tracks.
 - Multi-word typing through Computer Use goes via the clipboard and can paste something else when the clipboard changes underneath it.
