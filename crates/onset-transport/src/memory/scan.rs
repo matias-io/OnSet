@@ -120,24 +120,28 @@ fn counters_in_batch(
     pitch_tolerance: f64,
     out: &mut Vec<Counter>,
 ) {
-    // Each region keeps its own first-read time: copying half a gigabyte takes a good
-    // fraction of the window, and a rate measured against the batch's end time would be
-    // wrong by that much for the regions copied first.
-    let mut first: Vec<(Region, Vec<u8>, Instant)> = Vec::with_capacity(regions.len());
+    // Copying a large region takes a good fraction of the window, so a single timestamp per
+    // region is wrong for most of its bytes: the start and end of each copy are kept and a
+    // value's read time is placed by its offset within the region (see `elapsed_at`).
+    let origin = Instant::now();
+    let mut first: Vec<(Region, Vec<u8>, (f64, f64))> = Vec::with_capacity(regions.len());
     for r in regions {
+        let started = origin.elapsed().as_secs_f64();
         if let Some(bytes) = p.read_region(r) {
-            first.push((*r, bytes, Instant::now()));
+            first.push((*r, bytes, (started, origin.elapsed().as_secs_f64())));
         }
     }
     std::thread::sleep(dt);
-    for (r, a, read_at) in &first {
+    for (r, a, first_copy) in &first {
+        let started = origin.elapsed().as_secs_f64();
         let Some(b) = p.read_region(r) else {
             continue;
         };
-        let elapsed = read_at.elapsed().as_secs_f64();
+        let second_copy = (started, origin.elapsed().as_secs_f64());
         let n = a.len().min(b.len());
         let mut i = 0;
         while i + 4 <= n {
+            let elapsed = elapsed_at(i as f64 / n as f64, *first_copy, second_copy);
             // Narrowest integer first: a 32-bit field read as i64 picks up its neighbour.
             for format in [CounterFormat::I32, CounterFormat::I64, CounterFormat::F64] {
                 let (Some(va), Some(vb)) =
@@ -169,6 +173,14 @@ fn counters_in_batch(
             i += 4;
         }
     }
+}
+
+/// Seconds between the two reads of a value `fraction` of the way into a region, given when
+/// each copy of the region started and finished. Copies read memory front to back, so the
+/// value was read that fraction of the way through each copy.
+fn elapsed_at(fraction: f64, first: (f64, f64), second: (f64, f64)) -> f64 {
+    let at = |(start, end): (f64, f64)| start + fraction.clamp(0.0, 1.0) * (end - start);
+    at(second) - at(first)
 }
 
 fn read_counter_at(p: &Process, addr: u64, format: CounterFormat) -> Option<f64> {
@@ -492,6 +504,25 @@ pub fn roots_for_tail(p: &Process, tail: &Chain, accept: impl Fn(u64) -> bool) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_value_is_timed_by_its_place_in_a_slow_region_copy() {
+        // Copies take 0.3 s each, 0.4 s apart. With one end-of-copy timestamp, a value at the
+        // start of the region looked 0.3 s closer in time than it was: a position counter
+        // then advanced "too fast" by 0.3/0.4 and failed the pitch tolerance.
+        let first = (0.0, 0.3);
+        let second = (0.7, 1.0);
+        assert!((elapsed_at(0.0, first, second) - 0.7).abs() < 1e-9);
+        assert!((elapsed_at(1.0, first, second) - 0.7).abs() < 1e-9);
+        // Copies of different speeds: the middle of the region is timed halfway through each.
+        assert!((elapsed_at(0.5, (0.0, 0.2), (0.5, 1.1)) - 0.7).abs() < 1e-9);
+        // A rate that a single timestamp got wrong now matches the audio rate exactly.
+        let advance = 44_100.0 * 0.7;
+        let (nominal, ratio) = matching_rate(advance, elapsed_at(0.0, first, second), 0.2).unwrap();
+        assert_eq!(nominal, 44_100.0);
+        assert!((ratio - 1.0).abs() < 1e-9);
+        assert!(matching_rate(advance, 0.7 - 0.3, 0.2).is_none());
+    }
 
     #[test]
     fn substring_search_finds_first_match() {

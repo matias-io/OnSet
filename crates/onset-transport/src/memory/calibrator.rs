@@ -188,12 +188,48 @@ fn rank(confirmed: Vec<Counter>) -> Vec<Counter> {
     best
 }
 
+/// One line per group of counters showing the same second (largest first, at most eight):
+/// what the operator can compare with the deck's displayed time when a step is not seen.
+fn group_summary(counters: &[Counter]) -> Vec<String> {
+    let mut groups: BTreeMap<i64, (usize, f64, BTreeSet<&'static str>)> = BTreeMap::new();
+    for c in counters {
+        let secs = c.seconds(c.second);
+        let entry = groups
+            .entry((secs * 2.0).round() as i64)
+            .or_insert((0, secs, BTreeSet::new()));
+        entry.0 += 1;
+        entry.2.insert(match c.format {
+            CounterFormat::I32 => "i32",
+            CounterFormat::I64 => "i64",
+            CounterFormat::F64 => "f64",
+        });
+    }
+    let mut ordered: Vec<_> = groups.into_values().collect();
+    ordered.sort_by_key(|g| std::cmp::Reverse(g.0));
+    ordered
+        .into_iter()
+        .take(8)
+        .map(|(n, secs, formats)| {
+            let formats: Vec<_> = formats.into_iter().collect();
+            format!("{n} counter(s) at {secs:.1} s ({})", formats.join(", "))
+        })
+        .collect()
+}
+
+/// Paused scans whose counters make up the baseline. One scan misses many of rekordbox's
+/// hundreds of clocks (on 7.2.18 a single pass caught 161 of about 480), and every clock it
+/// misses would later pass for the deck starting.
+const BASELINE_SCANS: usize = 3;
+
 /// The addresses of every audio-rate counter running while the operator's deck is paused.
 fn paused_baseline(s: &mut Session<'_>, p: &Process) -> anyhow::Result<BTreeSet<u64>> {
     s.say("  recording what runs with the deck paused...");
-    let baseline: BTreeSet<u64> = scan_counters(s, p).iter().map(|c| c.addr).collect();
-    if s.cancelled() {
-        bail!("calibration cancelled");
+    let mut baseline = BTreeSet::new();
+    for _ in 0..BASELINE_SCANS {
+        baseline.extend(scan_counters(s, p).iter().map(|c| c.addr));
+        if s.cancelled() {
+            bail!("calibration cancelled");
+        }
     }
     s.say(format!(
         "  {} counter(s) run while paused (rekordbox's own clocks); these are ignored",
@@ -222,11 +258,14 @@ fn ranked_counters(
 ) -> anyhow::Result<Vec<Counter>> {
     s.say("Step 2: press play on that deck.");
     let deadline = Instant::now() + s.step_limit;
+    let mut baseline = baseline.clone();
     let started = loop {
-        let started = started_with_play(baseline, scan_counters(s, p));
+        let started = started_with_play(&baseline, scan_counters(s, p));
         if started.len() >= MIN_STOPPED {
             break started;
         }
+        // Too few to be a deck: clocks the paused scans missed. Ignore them from now on.
+        baseline.extend(started.iter().map(|c| c.addr));
         if Instant::now() >= deadline {
             bail!(
                 "no deck started playing: no new playback counter appeared after the paused scan. \
@@ -236,12 +275,19 @@ fn ranked_counters(
         s.say("  no newly playing deck found yet; scanning again");
         s.sleep(Duration::from_secs(2))?;
     };
+    // Play may have come mid-scan, after the pass read the deck while it was still paused:
+    // a second scan, with the deck certainly playing, has its position.
+    let again = started_with_play(&baseline, scan_counters(s, p));
+    let started = if again.len() >= MIN_STOPPED { again } else { started };
     let best = rank(started);
     s.say(format!(
         "  {} counter(s) confirmed; the largest group reads {:.1} s",
         best.len(),
         best[0].seconds(best[0].second)
     ));
+    for line in group_summary(&best) {
+        s.say(format!("    {line}"));
+    }
     Ok(best)
 }
 
