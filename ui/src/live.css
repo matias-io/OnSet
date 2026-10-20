@@ -10,6 +10,8 @@ body{margin:0;background:var(--bg)}
 .live-dot.running{background:var(--live);box-shadow:0 0 0 3px var(--live-soft)}
 .live-dot.unidentified,.live-dot.idle{background:var(--warn)}
 .live-dot.error{background:var(--bad)}
+.live-visuals{padding:2px 10px;border-radius:var(--radius-sm);border:1px solid var(--accent);background:var(--accent-soft);color:var(--accent-strong);font:inherit;cursor:pointer}
+.live-visuals:hover{background:var(--accent);color:var(--bg)}
 .live-ontop{display:flex;gap:6px;align-items:center;cursor:pointer}
 .live-ontop input{accent-color:var(--accent)}
 .live-track h1{margin:0;font-size:20px;font-weight:600;line-height:1.25;letter-spacing:-.01em;overflow-wrap:anywhere}

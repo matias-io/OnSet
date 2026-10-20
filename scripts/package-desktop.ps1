@@ -3,8 +3,9 @@
 #
 # Needs: Node, Rust, the Tauri CLI (cargo install tauri-cli --version "^2" --locked), and the
 # service environment from service/scripts/bootstrap.ps1. The installer bundles the service
-# sources, the WSL worker files, the model manifest, rekordbox offsets and a portable Python
-# runtime; music, workspaces, credentials and model caches are never included.
+# sources, the WSL worker files, the model manifest, rekordbox offsets, a portable Python
+# runtime and the full-screen visuals (onset.exe, started from the OnSet Live window); music,
+# workspaces, credentials and model caches are never included.
 [CmdletBinding()]
 param([switch]$SkipRuntime)
 
@@ -27,6 +28,14 @@ try {
     if (-not (Test-Path -LiteralPath service/.artifacts/runtime/python.exe)) {
         throw 'service/.artifacts/runtime is missing; run without -SkipRuntime'
     }
+
+    # The visuals ship beside onset-desktop.exe; stage the release build where the
+    # installer configuration picks it up, wherever CARGO_TARGET_DIR points.
+    cargo build --release -p onset-visuals
+    if ($LASTEXITCODE) { throw 'Visuals build failed' }
+    $built = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { 'target' }
+    New-Item -ItemType Directory -Force service/.artifacts/visuals | Out-Null
+    Copy-Item -Force (Join-Path $built 'release/onset.exe') service/.artifacts/visuals/onset.exe
 
     Push-Location crates/onset-desktop
     try {

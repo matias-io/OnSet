@@ -13,6 +13,7 @@ mod chatgpt;
 mod live;
 mod providers;
 mod sidecar;
+mod visuals;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -939,6 +940,7 @@ fn main() {
             ai_compare_sets,
             ai_read_structure,
             set_live_on_top,
+            visuals::visuals_start,
             calibration::calibration_status,
             calibration::calibration_start,
             calibration::calibration_cancel,
@@ -960,6 +962,7 @@ fn main() {
                 media: Mutex::default(),
                 next_media: AtomicU64::new(1),
             });
+            app.manage(visuals::Visuals::default());
             main_window(&handle)?;
             live_window(&handle)?;
             live::spawn(handle);

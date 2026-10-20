@@ -25,12 +25,15 @@ export type LiveState = {
 type Onset = {
   onLive: (callback: (s: LiveState) => void) => () => void;
   setLiveOnTop: (onTop: boolean) => Promise<void>;
+  /** Starts the full-screen visuals (`onset.exe` beside the app): `started` or `running`. */
+  startVisuals: () => Promise<'started' | 'running'>;
 };
 const onset = (window as unknown as {onset?: Onset}).onset;
 
 function Live() {
   const [live, setLive] = useState<LiveState | null>(null);
   const [onTop, setOnTop] = useState(false);
+  const [visuals, setVisuals] = useState<string | null>(null);
   useEffect(() => onset?.onLive(setLive), []);
 
   if (!onset) return <main className="live"><p className="live-status">The live view needs the OnSet desktop app.</p></main>;
@@ -44,6 +47,14 @@ function Live() {
         <Logo size={20} />
         <span className={`live-dot ${live.state}`} aria-hidden="true" />
         <span className="live-status">{live.status}</span>
+        <button type="button" className="live-visuals" title={visuals ?? 'Open the full-screen visuals'}
+          onClick={() => {
+            onset.startVisuals()
+              .then(r => setVisuals(r === 'running' ? 'The visuals are already open' : 'Visuals started'))
+              .catch((e: unknown) => setVisuals(String(e)));
+          }}>
+          Start visuals
+        </button>
         <label className="live-ontop">
           <input type="checkbox" checked={onTop}
             onChange={e => {setOnTop(e.target.checked); void onset.setLiveOnTop(e.target.checked);}} />
@@ -86,6 +97,8 @@ function Live() {
           <strong>{barsAndBeats(live.drop_countdown_beats)}</strong>
         </section>
       )}
+
+      {visuals && <p className="live-cue" role="status">{visuals}</p>}
 
       {live.next_cue && (
         <p className="live-cue">{cueName(live.next_cue.slot)} in {live.next_cue.seconds.toFixed(1)} s</p>
