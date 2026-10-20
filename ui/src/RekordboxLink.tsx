@@ -54,7 +54,7 @@ export function RekordboxLink(){
     </Card>
 
     {!running&&!outcome&&<Card title={status.calibrated?'Calibrate again':'Calibrate'}>
-      <p className="muted">Takes about two minutes at the decks. Calibrate again after a rekordbox update, or if the live view shows the wrong track or time.</p>
+      <p className="muted">Takes about three minutes at the decks; the first, paused part is the longest. Calibrate again after a rekordbox update, or if the live view shows the wrong track or time.</p>
       <ol className="calib-checklist">
         <li>rekordbox is open in <strong>Performance</strong> mode.</li>
         <li>A track is loaded on any deck and <strong>paused</strong>, at least a minute before any loop or the end. The start isn’t needed.</li>
@@ -78,7 +78,7 @@ export function RekordboxLink(){
         <div className="calib-now">{progress.seen?'Got it':current.title}</div>
         <p>{progress.seen?'Hold on for the next step.':current.hint}</p>
         <div className="row calib-meta">
-          {progress.scanning&&<span className="calib-busy"><span className="calib-spinner" aria-hidden="true"/>Reading rekordbox’s memory (up to 40 s)</span>}
+          {progress.scanning&&<span className="calib-busy"><span className="calib-spinner" aria-hidden="true"/>{progress.step===1?"Reading rekordbox’s memory (a minute or two)":"Reading rekordbox’s memory (up to 40 s)"}</span>}
           <small>{elapsed} s</small>
         </div>
       </div>}
