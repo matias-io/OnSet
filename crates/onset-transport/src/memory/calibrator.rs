@@ -2,10 +2,12 @@
 //! memory and describe the object that holds it, so `offsets/<version>.toml` can find every
 //! deck at runtime by scanning for that description (see `DeckSignature`).
 //!
-//! The operator plays a track, pauses it and plays it again. A counter that advances while
-//! the deck plays, holds still while it is paused and resumes from the same value is the
-//! deck's position; everything else that ticks at an audio rate (time-since-play clocks,
-//! output counters) fails one of the three. Around the position sits the player object,
+//! The operator loads a track and leaves it paused, then plays it, pauses it and plays it
+//! again. rekordbox keeps hundreds of audio-rate clocks running whatever the decks do, so a
+//! first scan with the deck paused records them and they are ignored. A counter that starts
+//! advancing when the deck plays, holds still while it is paused and resumes from the same
+//! value is the deck's position; everything else that ticks at an audio rate (time-since-play
+//! clocks, output counters) fails one of the steps. Around the position sits the player object,
 //! which carries pointers into the rekordbox module (its vtables and statics). Those
 //! pointers at their distances from the position are the signature. The track's identity
 //! does not come from memory at all: rekordbox keeps the loaded files open.
@@ -27,8 +29,6 @@ use super::scan::{
     Counter, CounterFormat, confirm_counters, find_bytes, find_sample_counters, find_u64_values,
 };
 
-/// A scan counts as "a deck is playing" once this many counters advance.
-const MIN_COUNTERS: usize = 8;
 /// Counters that must stop for the pause to count (the position has a few copies).
 const MIN_STOPPED: usize = 3;
 /// Bytes below and above the position field searched for module pointers.
@@ -47,7 +47,8 @@ const SETTLE: Duration = Duration::from_millis(800);
 
 /// The steps the operator performs, in order, as the launcher lists them up front.
 pub const STEPS: &[&str] = &[
-    "Load a track on any deck and press play",
+    "Load a track on any deck and leave it paused, at least a minute before any loop or the end",
+    "Press play on that deck when asked",
     "Pause that deck",
     "Press play on it again",
 ];
@@ -156,6 +157,51 @@ fn count_still(p: &Process, counters: &[Counter], dt: Duration) -> usize {
         .count()
 }
 
+/// Counters advancing now that were not already advancing in the paused baseline: the ones
+/// playback started. rekordbox's always-running clocks are in both scans and drop out.
+fn started_with_play(baseline: &BTreeSet<u64>, confirmed: Vec<Counter>) -> Vec<Counter> {
+    confirmed
+        .into_iter()
+        .filter(|c| !baseline.contains(&c.addr))
+        .collect()
+}
+
+/// Groups counters by the second they show, largest group first (the position exists in
+/// several copies), then puts 32-bit integers first, since a 32-bit field read as 64 bits
+/// drags its neighbour along.
+fn rank(confirmed: Vec<Counter>) -> Vec<Counter> {
+    let mut groups: BTreeMap<i64, Vec<Counter>> = BTreeMap::new();
+    for c in confirmed {
+        groups
+            .entry((c.seconds(c.second) * 2.0).round() as i64)
+            .or_default()
+            .push(c);
+    }
+    let mut ordered: Vec<Vec<Counter>> = groups.into_values().collect();
+    ordered.sort_by_key(|g| std::cmp::Reverse(g.len()));
+    let mut best: Vec<Counter> = ordered.into_iter().flatten().collect();
+    best.sort_by_key(|c| match c.format {
+        CounterFormat::I32 => 0,
+        CounterFormat::I64 => 1,
+        CounterFormat::F64 => 2,
+    });
+    best
+}
+
+/// The addresses of every audio-rate counter running while the operator's deck is paused.
+fn paused_baseline(s: &mut Session<'_>, p: &Process) -> anyhow::Result<BTreeSet<u64>> {
+    s.say("  recording what runs with the deck paused...");
+    let baseline: BTreeSet<u64> = scan_counters(s, p).iter().map(|c| c.addr).collect();
+    if s.cancelled() {
+        bail!("calibration cancelled");
+    }
+    s.say(format!(
+        "  {} counter(s) run while paused (rekordbox's own clocks); these are ignored",
+        baseline.len()
+    ));
+    Ok(baseline)
+}
+
 /// One pass over rekordbox's memory for values advancing at an audio rate, confirmed twice.
 fn scan_counters(s: &mut Session<'_>, p: &Process) -> Vec<Counter> {
     s.say("  scanning for playback positions (two passes over rekordbox's memory)...");
@@ -166,37 +212,31 @@ fn scan_counters(s: &mut Session<'_>, p: &Process) -> Vec<Counter> {
     confirmed
 }
 
-/// Confirmed playback counters, best first: grouped by the second they show, largest group
-/// first (the position exists in several copies); within that, 32-bit integers first, since
-/// a 32-bit field read as 64 bits drags its neighbour along. Scans again until a deck plays.
-fn ranked_counters(s: &mut Session<'_>, p: &Process) -> anyhow::Result<Vec<Counter>> {
+/// Playback counters that started with play, best first (see `rank`). A scan can begin before
+/// the operator presses play and pass the deck while it is still paused, so this scans again
+/// until counters missing from the paused baseline appear.
+fn ranked_counters(
+    s: &mut Session<'_>,
+    p: &Process,
+    baseline: &BTreeSet<u64>,
+) -> anyhow::Result<Vec<Counter>> {
+    s.say("Step 2: press play on that deck.");
     let deadline = Instant::now() + s.step_limit;
-    let confirmed = loop {
-        let confirmed = scan_counters(s, p);
-        if confirmed.len() >= MIN_COUNTERS {
-            break confirmed;
+    let started = loop {
+        let started = started_with_play(baseline, scan_counters(s, p));
+        if started.len() >= MIN_STOPPED {
+            break started;
         }
         if Instant::now() >= deadline {
-            bail!("no playback counter found; is a deck playing?");
+            bail!(
+                "no deck started playing: no new playback counter appeared after the paused scan. \
+                 Start again with the deck paused and press play only when asked"
+            );
         }
-        s.say("  no playing deck found yet; scanning again");
+        s.say("  no newly playing deck found yet; scanning again");
         s.sleep(Duration::from_secs(2))?;
     };
-    let mut groups: BTreeMap<i64, Vec<Counter>> = BTreeMap::new();
-    for c in &confirmed {
-        groups
-            .entry((c.seconds(c.second) * 2.0).round() as i64)
-            .or_default()
-            .push(*c);
-    }
-    let mut ordered: Vec<Vec<Counter>> = groups.into_values().collect();
-    ordered.sort_by_key(|g| std::cmp::Reverse(g.len()));
-    let mut best: Vec<Counter> = ordered.into_iter().flatten().collect();
-    best.sort_by_key(|c| match c.format {
-        CounterFormat::I32 => 0,
-        CounterFormat::I64 => 1,
-        CounterFormat::F64 => 2,
-    });
+    let best = rank(started);
     s.say(format!(
         "  {} counter(s) confirmed; the largest group reads {:.1} s",
         best.len(),
@@ -208,13 +248,14 @@ fn ranked_counters(s: &mut Session<'_>, p: &Process) -> anyhow::Result<Vec<Count
 /// The deck's absolute position: a counter that moves while the deck plays, holds still
 /// while it is paused, and continues from the same value when play resumes.
 fn absolute_position_counters(s: &mut Session<'_>, p: &Process) -> anyhow::Result<Vec<Counter>> {
-    let counters = ranked_counters(s, p)?;
+    let baseline = paused_baseline(s, p)?;
+    let counters = ranked_counters(s, p, &baseline)?;
     wait_for(
         s,
-        "Step 2: pause that deck (press play/pause once).",
+        "Step 3: pause that deck (press play/pause once).",
         || {
-            // Every counter here was advancing; a few of them stopping is the pause (time-
-            // since-play clocks and any other deck keep running).
+            // Every counter here started with play; a few of them stopping is the pause
+            // (time-since-play clocks and any other deck keep running).
             count_still(p, &counters, Duration::from_millis(300)) >= MIN_STOPPED
         },
     )?;
@@ -234,7 +275,7 @@ fn absolute_position_counters(s: &mut Session<'_>, p: &Process) -> anyhow::Resul
         keep.len()
     ));
     let held_counters: Vec<Counter> = keep.iter().map(|(c, _)| *c).collect();
-    wait_for(s, "Step 3: press play on that deck again.", || {
+    wait_for(s, "Step 4: press play on that deck again.", || {
         any_counter_moving(p, &held_counters, Duration::from_millis(300))
     })?;
     let t0 = Instant::now();
@@ -464,8 +505,11 @@ pub fn calibrate(out_dir: &Path, s: &mut Session<'_>) -> anyhow::Result<PathBuf>
         "rekordbox {version} (pid {}), module at {:#x}",
         p.pid, p.module_base
     ));
-    s.say("This takes a minute or two: play a track, pause it, play it again.");
-    s.say("Step 1: load a track on any deck and press play.");
+    s.say("This takes a minute or two: with a track paused, play it, pause it, play it again.");
+    s.say(
+        "Step 1: load a track on any deck and leave it paused, at least a minute before any \
+         loop or the end of the track (anywhere else is fine; the start is not needed).",
+    );
     let counters = absolute_position_counters(s, &p)?;
     let (mut signature, counter) = best_signature(s, &p, &counters)?;
     let (anchors, _) = refine(s, &p, counter.addr, &signature.anchors)?;
@@ -516,4 +560,81 @@ pub fn calibrate(out_dir: &Path, s: &mut Session<'_>) -> anyhow::Result<PathBuf>
     offsets.save(&path)?;
     s.say(format!("wrote {}", path.display()));
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn counter(addr: u64, format: CounterFormat, seconds: f64) -> Counter {
+        Counter {
+            addr,
+            format,
+            first: seconds * 44_100.0 - 4_410.0,
+            second: seconds * 44_100.0,
+            rate_hz: 44_100.0,
+            nominal_hz: 44_100.0,
+            playback_rate: 1.0,
+        }
+    }
+
+    #[test]
+    fn clocks_running_while_paused_are_not_position_candidates() {
+        // rekordbox 7.2.18 runs hundreds of audio-rate clocks with every deck paused. A scan
+        // that started before play saw only those; they never stop, so the pause was never seen.
+        let clocks: Vec<Counter> = (0..600)
+            .map(|i| counter(0x1000 + i * 8, CounterFormat::I32, 4.6))
+            .collect();
+        let baseline: BTreeSet<u64> = clocks.iter().map(|c| c.addr).collect();
+        let positions = [0x1d7_16f0_cca4, 0x1d7_16fe_ecc0, 0x1d7_1700_c7d8];
+        let mut after_play = clocks.clone();
+        after_play.extend(
+            positions
+                .iter()
+                .map(|a| counter(*a, CounterFormat::I32, 117.8)),
+        );
+        let started = started_with_play(&baseline, after_play);
+        assert_eq!(
+            started.iter().map(|c| c.addr).collect::<Vec<_>>(),
+            positions
+        );
+    }
+
+    #[test]
+    fn a_scan_that_only_saw_clocks_has_nothing_new() {
+        let clocks: Vec<Counter> = (0..10)
+            .map(|i| counter(0x2000 + i * 8, CounterFormat::I32, 9.2))
+            .collect();
+        let baseline: BTreeSet<u64> = clocks.iter().map(|c| c.addr).collect();
+        assert!(started_with_play(&baseline, clocks).len() < MIN_STOPPED);
+    }
+
+    #[test]
+    fn ranking_puts_the_largest_group_and_narrow_integers_first() {
+        let ranked = rank(vec![
+            counter(1, CounterFormat::F64, 30.0),
+            counter(2, CounterFormat::I64, 117.8),
+            counter(3, CounterFormat::I32, 117.8),
+            counter(4, CounterFormat::I32, 117.9),
+            counter(5, CounterFormat::I32, 30.0),
+        ]);
+        assert_eq!(ranked[0].format, CounterFormat::I32);
+        assert_eq!(ranked.last().map(|c| c.format), Some(CounterFormat::F64));
+        let i32s: Vec<u64> = ranked
+            .iter()
+            .filter(|c| c.format == CounterFormat::I32)
+            .map(|c| c.addr)
+            .collect();
+        assert_eq!(
+            i32s,
+            vec![3, 4, 5],
+            "the 117.8 s group comes before the smaller 30 s group"
+        );
+    }
+
+    #[test]
+    fn the_steps_start_with_the_deck_paused() {
+        assert!(STEPS[0].contains("paused"));
+        assert_eq!(STEPS.len(), 4);
+    }
 }
