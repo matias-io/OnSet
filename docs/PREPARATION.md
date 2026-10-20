@@ -26,6 +26,7 @@ The latest recorded checks pass 93 Python tests, 26 desktop tests and the produc
 
 | Document | Purpose |
 |---|---|
+| [Demo](DEMO.md) | Ten-minute walkthrough of preparation, the live link and the visuals |
 | [Desktop operation](DESKTOP.md) | Daily workflow, accounts, analysis, builds, shared CLI and recovery |
 | [Windows runbook](WINDOWS_RUNBOOK.md) | Current installation, preparation and write/restore procedure |
 | [Implementation status](IMPLEMENTATION_STATUS.md) | Implemented scope, evidence and incomplete acceptance gates |
