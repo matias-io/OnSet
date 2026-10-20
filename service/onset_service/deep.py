@@ -7,6 +7,9 @@ import queue
 import threading
 from pathlib import Path
 
+# Seconds allowed for WSL to start and answer before deep models are skipped.
+WSL_START_S = 180
+
 
 def wsl_path(path):
     p = Path(path).resolve().as_posix()
@@ -47,8 +50,11 @@ def run_deep(audio, home, checkpoint, experimental=(), model_dir=None):
     result = {"models": {}}
     try:
         from .processes import run_process
+        # WSL shuts its VM down when idle, and each track spends minutes in native stages
+        # first, so most tracks start it cold. On a busy laptop that took over 60 s (warm,
+        # this call still takes about 14 s), and every deep model was then skipped.
         linux_home = run_process(["wsl.exe", "--exec", "printenv", "HOME"], checkpoint,
-                                 "starting WSL runtime", 60).strip()
+                                 "starting WSL runtime", WSL_START_S).strip()
         if not linux_home.startswith("/") or "\n" in linux_home:
             raise RuntimeError("Could not locate the WSL analysis runtime; run worker setup")
         command = ["wsl.exe", "--exec", linux_home + "/.local/share/onset/venv/bin/python", wsl_path(script)]
