@@ -4141,6 +4141,7 @@ dependencies = [
  "jsonwebtoken",
  "onset-core",
  "onset-engine",
+ "onset-transport",
  "onset-workspace",
  "open",
  "parking_lot",

@@ -344,3 +344,30 @@ kbd{display:inline-block;min-width:18px;padding:0 5px;border-radius:4px;border:1
 .bad{color:var(--bad)}
 .comparison p{margin:2px 0}
 .reads td,.reads th{text-align:left;padding:3px 8px 3px 0}
+/* rekordbox link: calibration panel */
+.calib-live{color:var(--text-2)}
+.calib-checklist{margin:12px 0 16px;padding-left:20px;display:flex;flex-direction:column;gap:6px;color:var(--text-2)}
+.calib-checklist strong{color:var(--text)}
+.calib-steps{list-style:none;margin:0 0 16px;padding:0;display:flex;gap:6px;flex-wrap:wrap}
+.calib-steps li{display:flex;align-items:center;gap:8px;padding:6px 10px 6px 6px;border-radius:999px;background:var(--surface-2);color:var(--muted);font-size:12.5px}
+.calib-dot{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:var(--surface-3);font-size:11px;font-weight:700}
+.calib-steps li.active{background:var(--accent-soft);color:var(--text)}
+.calib-steps li.active .calib-dot{background:var(--accent);color:var(--on-accent)}
+.calib-steps li.done{color:var(--good)}
+.calib-steps li.done .calib-dot{background:var(--good-soft)}
+.calib-steps li.failed{color:var(--bad)}
+.calib-steps li.failed .calib-dot{background:var(--bad-soft)}
+.calib-prompt{border:1px solid var(--accent);background:var(--accent-soft);border-radius:var(--radius-lg);padding:22px;text-align:center}
+.calib-now{font-size:30px;font-weight:700;letter-spacing:-.02em;color:var(--text);margin-bottom:6px}
+.calib-meta{justify-content:center;margin-top:12px;gap:16px}
+.calib-busy{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-2)}
+.calib-spinner{width:14px;height:14px;border-radius:50%;border:2px solid var(--surface-3);border-top-color:var(--accent);animation:calib-spin .9s linear infinite}
+@keyframes calib-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.calib-spinner{animation:none}}
+.calib-result{display:flex;gap:12px;align-items:flex-start;padding:14px;border-radius:var(--radius);line-height:1.5}
+.calib-result>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.calib-result.good{background:var(--good-soft);color:var(--good)}
+.calib-result.bad{background:var(--bad-soft);color:var(--bad)}
+.calib-result strong{color:var(--text)}
+.calib-path{overflow-wrap:anywhere}
+.calib-log{margin:0;max-height:240px;overflow:auto;font-family:var(--mono);font-size:11.5px;color:var(--text-2);white-space:pre-wrap;overflow-wrap:anywhere}

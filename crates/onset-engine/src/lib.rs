@@ -56,6 +56,8 @@ pub enum EngineCommand {
     SetAudioDevice(Option<String>),
     /// Look up and cache the lyrics of every track in the collection, in the background.
     PrefetchLyrics,
+    /// Reload the rekordbox calibration and find the decks again, after a new calibration.
+    Reconnect,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -395,15 +397,7 @@ impl Engine {
             let (sim, current) = start_sim(&library, &paths, workspace.as_ref(), title, &cfg)?;
             (Source::Sim(Box::new(sim)), Some(current))
         } else {
-            let mut live = live_source(&cfg);
-            live.set_file_durations(
-                library
-                    .tracks()
-                    .iter()
-                    .filter_map(|t| Some((t.file_path.clone()?, f64::from(t.duration_s?))))
-                    .collect(),
-            );
-            (Source::Live(live), None)
+            (Source::Live(live_source_for(&cfg, &library)), None)
         };
         let simulator = matches!(source, Source::Sim(_));
         let capture = if cfg.capture_audio && !simulator {
@@ -495,6 +489,19 @@ impl Engine {
     pub fn command(&self, cmd: EngineCommand) {
         let _ = self.commands.send(cmd);
     }
+}
+
+/// The rekordbox source, told how long each library file is.
+fn live_source_for(cfg: &EngineConfig, library: &Library) -> Box<dyn TransportSource> {
+    let mut live = live_source(cfg);
+    live.set_file_durations(
+        library
+            .tracks()
+            .iter()
+            .filter_map(|t| Some((t.file_path.clone()?, f64::from(t.duration_s?))))
+            .collect(),
+    );
+    live
 }
 
 #[cfg(windows)]
@@ -640,6 +647,16 @@ impl Running {
                 self.audio_choice.lock().clone_from(choice);
                 self.tend_audio(true);
             }
+            (EngineCommand::Reconnect, Source::Live(_)) => {
+                tracing::info!("reloading the rekordbox calibration");
+                self.source = Source::Live(live_source_for(&self.cfg, &self.library));
+                self.current = None;
+                self.deck = None;
+                self.unresolved = None;
+                self.clock = Clock::new();
+                self.last_status = None;
+            }
+            (EngineCommand::Reconnect, Source::Sim(_)) => {}
             (_, Source::Live(_)) => {
                 tracing::debug!(?cmd, "transport command ignored: rekordbox is in control");
             }

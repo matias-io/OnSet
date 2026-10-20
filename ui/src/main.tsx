@@ -20,6 +20,7 @@ import {WorkspaceRecovery} from './WorkspaceRecovery';
 import {PortableImport,CacheRelocation} from './Portable';
 import {AiAdviser} from './AiAdviser';
 import {GenreEvidence} from './GenreEvidence';
+import {RekordboxLink} from './RekordboxLink';
 import {Logo} from './Logo';
 import {Button,Card,Disclosure,Empty,Field,Icon,KeyValues,Pill,Segmented,Stat,Tabs,TrackPicker} from './ui';
 import {emptyFilters,matchesFilters,canonicalKey,analysisSelection,restoreBrief,pruneBriefTracks,snapGrid,nearest,roleColor,clock} from './library';
@@ -397,7 +398,7 @@ function App(){
       {page==='settings'&&<>
         {head('Settings')}
         <div className="settings">
-          <nav className="settings-nav" aria-label="Settings sections">{[['jobs','Jobs'],['account','ChatGPT'],['analysis','Analysis engine'],['energy','Energy calibration'],['data','Data & backups']].map(([id,label])=><button key={id} className={settingsTab===id?'active':''} onClick={()=>setSettingsTab(id)}>{label}</button>)}</nav>
+          <nav className="settings-nav" aria-label="Settings sections">{[['jobs','Jobs'],['account','ChatGPT'],['analysis','Analysis engine'],['energy','Energy calibration'],['rekordbox','rekordbox link'],['data','Data & backups']].map(([id,label])=><button key={id} className={settingsTab===id?'active':''} onClick={()=>setSettingsTab(id)}>{label}</button>)}</nav>
           <div>
             {settingsTab==='jobs'&&<Card title="Analysis jobs" actions={<Button size="sm" kind="ghost" onClick={()=>api.call('quit')}>Checkpoint jobs and quit</Button>}>
               {jobs.map(j=><div className="job" key={j.id}>
@@ -427,6 +428,7 @@ function App(){
               <p className="muted" style={{marginBottom:16}}>Compare tracks by ear, then recalibrate. Ratings become relative to your collection; your own ratings stay separate.</p>
               <EnergyCompare tracks={tracks} run={run}/>
             </Card>}
+            {settingsTab==='rekordbox'&&<RekordboxLink/>}
             {settingsTab==='data'&&<>
               <WorkspaceRecovery run={run}/>
               <PortableImport run={run}/>

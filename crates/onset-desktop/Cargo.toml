@@ -21,6 +21,7 @@ custom-protocol = ["tauri/custom-protocol"]
 [dependencies]
 onset-core.workspace = true
 onset-engine.workspace = true
+onset-transport.workspace = true
 onset-workspace.workspace = true
 anyhow.workspace = true
 serde.workspace = true

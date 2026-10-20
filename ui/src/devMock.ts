@@ -1,6 +1,24 @@
 /// <reference types="vite/client" />
 // Development-only sample bridge so the renderer can be previewed in a plain browser (`npm run dev`).
 // Vite removes this block from production builds; the desktop app always provides the real bridge.
+// A calibration run, sped up, with the calibrator's own lines (crates/onset-transport/src/memory/calibrator.rs).
+function calibrationMock(){
+ const listeners=new Set<(e:any)=>void>();let timers:number[]=[],calibrating=false,calibrated=false;
+ const emit=(e:any)=>listeners.forEach(l=>l(e));
+ const script:[number,string][]=[[0,'rekordbox 7.2.18 (pid 26984), module at 0x7ff6a0000000'],[0,'This takes a minute or two: with a track paused, play it, pause it, play it again.'],[0,'Step 1: load a track on any deck and leave it paused, at least a minute before any loop or the end of the track (anywhere else is fine; the start is not needed).'],[300,'  recording what runs with the deck paused...'],[300,"  scanning for playback positions (two passes over rekordbox's memory)..."],[4000,"  765 counter(s) run while paused (rekordbox's own clocks); these are ignored"],[0,'Step 2: press play on that deck.'],[500,"  scanning for playback positions (two passes over rekordbox's memory)..."],[4000,'  12 counter(s) confirmed; the largest group reads 117.8 s'],[0,'Step 3: pause that deck (press play/pause once). (waiting up to 240 s)'],[3000,'  seen'],[1000,'  4 counter(s) hold still while paused'],[0,'Step 4: press play on that deck again. (waiting up to 240 s)'],[3000,'  seen'],[800,'  4 counter(s) resumed from the paused value: absolute positions'],[2500,'  a runtime scan finds 1 deck object(s): 0x1d716f0c000'],[200,'wrote C:\\Users\\dj\\AppData\\Local\\Temp\\onset-calibration\\7.2.18.toml']];
+ return {
+  calibrationStatus:async()=>({supported:true,rekordbox_running:true,version:'7.2.18',problem:null,calibrated,calibration_path:calibrated?'C:\\Users\\dj\\AppData\\Local\\OnSet\\offsets\\7.2.18.toml':null,offsets_dir:'C:\\Users\\dj\\AppData\\Local\\OnSet\\offsets',calibrating,steps:[]}),
+  startCalibration:async()=>{
+   if(calibrating)throw new Error('a calibration is already running');
+   calibrating=true;let at=0;
+   timers=script.map(([wait,text])=>{at+=wait;return window.setTimeout(()=>emit({kind:'line',text}),at);});
+   timers.push(window.setTimeout(()=>{calibrating=false;calibrated=true;emit({kind:'done',path:'C:\\Users\\dj\\AppData\\Local\\OnSet\\offsets\\7.2.18.toml',backup:null});},at+300));
+  },
+  cancelCalibration:async()=>{if(!calibrating)return;timers.forEach(clearTimeout);calibrating=false;emit({kind:'failed',error:'calibration cancelled'});},
+  onCalibration:(cb:(e:any)=>void)=>{listeners.add(cb);return()=>{listeners.delete(cb);};},
+  onLive:(cb:(s:any)=>void)=>{const t=window.setInterval(()=>cb({state:'idle',status:'rekordbox: no track on the master deck'}),1000);return()=>clearInterval(t);},
+ };
+}
 if(import.meta.env.DEV&&typeof window!=='undefined'&&!(window as any).onset){
  const titles=[['Losing It','FISHER'],['Stop It','Fisher'],['La Danza','Ramon Tapia'],['Cola','CamelPhat & Elderbrook'],['Turn Off The Lights','Chris Lake'],['Drop It','Biscits'],['Pump The Brakes','Dom Dolla'],['Rumble','Skrillex & Fred again..'],['Body Language','Fisher'],['Tell Me Why','Supermode'],['Hypnotized','Purple Disco Machine'],['Afraid To Feel','LF SYSTEM']];
  const keys=['A minor','F minor','8A','C major','G minor','D minor','11B','E minor','Bb minor','F# minor','A major','Eb major'];
@@ -48,6 +66,7 @@ if(import.meta.env.DEV&&typeof window!=='undefined'&&!(window as any).onset){
   pick:async()=>[],media:async()=>'',previewMedia:async()=>({url:'',note:'Preview rendering is unavailable in the browser preview.'}),export:async()=>({}),
   account:async(action:string)=>action==='status'?{accounts:[{id:'acct',email:'dj@example.com',plan_enabled:true}],active:'acct',selected_model:'gpt'}:action==='models'?[{id:'gpt',name:'GPT-6.1-Sol'}]:{},
   onEvent:()=>()=>{},
+  ...calibrationMock(),
  };
 }
 export {};

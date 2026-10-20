@@ -168,7 +168,7 @@ During the show:
 | Symptom | What to check |
 | --- | --- |
 | Waiting for rekordbox | Open Performance mode, load a track and allow about 20 seconds for deck discovery |
-| Version is not calibrated | Run **Setup → Calibrate** with rekordbox open |
+| Version is not calibrated | Run **Setup → Calibrate** (or **Settings → rekordbox link** in the desktop app) with rekordbox open |
 | Motion does not respond to audio | Check the device shown in **Audio**; select the controller's recording input or the output carrying the mix |
 | Track details are one song behind | Run `onset-cli calibrate --refine` from the OnSet folder |
 | A streamed track takes time to appear | Matching uses the stored waveform and can take a few seconds |
@@ -204,10 +204,13 @@ before the paused scan finishes makes the deck look like one of those clocks. Ca
 takes about two minutes and saves `offsets/<version>.toml`. If tracks appear one song
 behind, `onset-cli calibrate --refine` can save a repaired multi-deck signature.
 
-The OnSet desktop app's live view reads the same files from `offsets/` beside
-`onset-desktop.exe` (`%LOCALAPPDATA%\OnSet\offsets` for the installed app) or from
-`ONSET_OFFSETS`. It has no calibration screen of its own yet: calibrate with `onset.exe`
-or `onset-cli`, then copy the file there.
+In the OnSet desktop app, open **Settings → rekordbox link**. It shows whether rekordbox is
+running and calibrated for its version, then walks through the same steps with one large
+prompt at a time ("Keep the deck paused", "Press play now", ...). The result is saved in
+`offsets/` beside `onset-desktop.exe` (`%LOCALAPPDATA%\OnSet\offsets` for the installed
+app) or in `ONSET_OFFSETS`, where the live view reads it; a calibration it replaces is
+kept as `<version>.toml.bak-<time>`, and the live view reconnects with the new one at once.
+Cancelling or a failed run saves nothing.
 
 OnSet does not write to rekordbox's database, analysis files or process memory. It
 creates its own config and caches, including a decrypted copy of the library database.

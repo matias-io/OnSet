@@ -8,6 +8,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod ai;
+mod calibration;
 mod chatgpt;
 mod live;
 mod providers;
@@ -938,6 +939,9 @@ fn main() {
             ai_compare_sets,
             ai_read_structure,
             set_live_on_top,
+            calibration::calibration_status,
+            calibration::calibration_start,
+            calibration::calibration_cancel,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

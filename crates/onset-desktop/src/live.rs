@@ -2,15 +2,24 @@
 //! structure prepared in OnSet), and its state goes to the webviews as `onset:live` events
 //! about 30 times a second. Read-only: nothing here touches rekordbox or the workspace.
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use onset_core::music_state::MusicState;
 use onset_core::phrase::PhraseKind;
-use onset_engine::{Engine, EngineConfig, EngineStatus};
+use onset_engine::{Engine, EngineCommand, EngineConfig, EngineStatus};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 const PERIOD: Duration = Duration::from_millis(33);
+
+/// Set after a calibration: the engine reloads the offsets and finds the decks again.
+static RECONNECT: AtomicBool = AtomicBool::new(false);
+
+/// Asks the live engine to reload the rekordbox calibration (it reads it only on connecting).
+pub fn reconnect() {
+    RECONNECT.store(true, Ordering::Release);
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LiveTrack {
@@ -103,7 +112,8 @@ fn snapshot(status: &EngineStatus, ms: &MusicState) -> LiveState {
 }
 
 /// `ONSET_OFFSETS`, else `offsets/` beside the executable, else the repository's `offsets/`.
-fn offsets_dir() -> PathBuf {
+/// The live view reads calibrations here first, and the calibration panel saves them here.
+pub fn offsets_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("ONSET_OFFSETS") {
         return PathBuf::from(dir);
     }
@@ -163,6 +173,9 @@ pub fn spawn(app: AppHandle) {
                 }
             };
             loop {
+                if RECONNECT.swap(false, Ordering::AcqRel) {
+                    engine.command(EngineCommand::Reconnect);
+                }
                 let state = snapshot(&engine.status(), &engine.state());
                 let _ = app.emit("onset:live", &state);
                 std::thread::sleep(PERIOD);

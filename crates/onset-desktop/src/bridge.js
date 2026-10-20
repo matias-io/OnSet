@@ -41,6 +41,10 @@
       compareSets: (providers, brief, plans) => invoke('ai_compare_sets', { providers, brief, plans }),
       readStructure: (providers, trackId, audio) =>
         invoke('ai_read_structure', { providers, trackId, audio }),
+      calibrationStatus: () => invoke('calibration_status', {}),
+      startCalibration: () => invoke('calibration_start', {}),
+      cancelCalibration: () => invoke('calibration_cancel', {}),
+      onCalibration: (callback) => subscribe('onset:calibration', callback),
     }),
   });
 })();
