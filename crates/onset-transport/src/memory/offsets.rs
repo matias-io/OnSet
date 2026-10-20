@@ -50,6 +50,15 @@ pub struct FlagField {
     pub mask: u8,
 }
 
+/// Tempo fields inside the deck object, relative to the position field: the deck's current
+/// BPM and its pitch as a fraction (-0.0083 is -0.83 %), both f32. Together they give the
+/// loaded track's own BPM, which tells loaded files apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TempoFields {
+    pub bpm_offset: i64,
+    pub pitch_offset: i64,
+}
+
 /// Finds the deck objects by scanning memory for their anchors instead of following static
 /// chains, which change with every allocation order. Decks are numbered by address.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,6 +70,9 @@ pub struct DeckSignature {
     /// Set on the deck that is MASTER, when known.
     #[serde(default)]
     pub master_flag: Option<FlagField>,
+    /// The deck's tempo, when known.
+    #[serde(default)]
+    pub tempo: Option<TempoFields>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

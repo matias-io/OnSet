@@ -6,7 +6,9 @@ decks = []
 provenance = "onset calibrate at unix 1790311719"
 
 [signature]
-max_decks = 4
+# Five objects share this layout on 7.2.19 (four decks and a player); in address order
+# the playing deck can be the fifth.
+max_decks = 8
 
 [[signature.anchors]]
 offset = -420
@@ -44,3 +46,9 @@ module_offset = 92088496
 # Found with `onset-cli memflag`: 1 on the MASTER deck, 0 on the others.
 offset = -396
 mask = 1
+
+[signature.tempo]
+# The deck's tempo (f32 BPM) and pitch (f32 fraction) beside the position: Lady Hear Me
+# Tonight (126.02) synced to 125.00 read 125.0 and -0.00833.
+bpm_offset = -4
+pitch_offset = 4

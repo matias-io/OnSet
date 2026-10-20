@@ -129,6 +129,17 @@ pub struct DeckState {
     pub position_raw: f64,
     pub track_info: Option<String>,
     pub anlz_path: Option<String>,
+    /// The loaded track's own BPM (the deck's tempo without its pitch), when the offsets
+    /// know the tempo fields and they read as a plausible tempo.
+    pub track_bpm: Option<f32>,
+}
+
+/// A track's own BPM from a deck's tempo and pitch (a fraction), when both are plausible:
+/// unloaded decks read zero, and other layouts read noise.
+pub fn track_bpm_from(bpm: f32, pitch: f32) -> Option<f32> {
+    let plausible =
+        bpm.is_finite() && pitch.is_finite() && (40.0..=300.0).contains(&bpm) && pitch.abs() < 1.0;
+    plausible.then(|| bpm / (1.0 + pitch))
 }
 
 pub struct ChainReader<M: Mem> {
@@ -319,6 +330,7 @@ impl<M: Mem> ChainReader<M> {
                 position_raw: raw,
                 track_info: None,
                 anlz_path: None,
+                track_bpm: self.track_bpm_at(pos_addr),
             });
         }
         let d = self.offsets.decks.get(index)?;
@@ -341,6 +353,7 @@ impl<M: Mem> ChainReader<M> {
             position_raw: raw,
             track_info: d.track_info.as_ref().and_then(|c| self.read_text(c)),
             anlz_path: d.anlz_path.as_ref().and_then(|c| self.read_text(c)),
+            track_bpm: None,
         })
     }
 }
@@ -354,6 +367,20 @@ impl<M: Mem> ChainReader<M> {
             PositionFormat::F64 => self.mem.read_f64(addr).ok()?,
         };
         raw.is_finite().then_some(raw)
+    }
+
+    /// The loaded track's own BPM from the tempo fields beside the position at `pos`.
+    fn track_bpm_at(&self, pos: u64) -> Option<f32> {
+        let tempo = self.offsets.signature.as_ref()?.tempo?;
+        let bpm = self
+            .mem
+            .read_f32(pos.checked_add_signed(tempo.bpm_offset)?)
+            .ok()?;
+        let pitch = self
+            .mem
+            .read_f32(pos.checked_add_signed(tempo.pitch_offset)?)
+            .ok()?;
+        track_bpm_from(bpm, pitch)
     }
 }
 
@@ -381,6 +408,11 @@ pub fn parse_track_info(text: &str) -> TrackRef {
     }
 }
 
+/// How far a deck's track BPM may sit from the library's and still be the same track, as a
+/// fraction: rekordbox shows the tempo to two decimals and keeps the pitch apart (Lady Hear
+/// Me Tonight, 126.02 in the library, reads 125.00 at -0.83 %, which gives 126.05).
+const BPM_TOLERANCE: f32 = 0.005;
+
 /// Which deck holds which open audio file. rekordbox keeps a track's file open while it is
 /// loaded, so the open files name the loaded tracks; this pairs them with decks. A file
 /// that appears while one deck is free goes to that deck; with several free decks, a deck
@@ -401,6 +433,26 @@ impl DeckFiles {
         positions: &[Option<f64>],
         duration_of: &dyn Fn(&Path) -> Option<f64>,
     ) -> &[Option<PathBuf>] {
+        self.update_with_tempo(open, positions, duration_of, &[], &|_| None)
+    }
+
+    /// As `update`, also told each deck's track BPM (`bpms[i]`, see `DeckState::track_bpm`)
+    /// and each file's BPM from the library. A deck whose BPM is known holds only a file of
+    /// that BPM, so files rekordbox keeps open without a deck (it does, for tracks loaded in
+    /// an earlier session) stop competing for the decks.
+    pub fn update_with_tempo(
+        &mut self,
+        open: &[PathBuf],
+        positions: &[Option<f64>],
+        duration_of: &dyn Fn(&Path) -> Option<f64>,
+        bpms: &[Option<f32>],
+        bpm_of: &dyn Fn(&Path) -> Option<f32>,
+    ) -> &[Option<PathBuf>] {
+        let bpm_fits = |deck: usize, file: &Path| -> Option<bool> {
+            let deck_bpm = (*bpms.get(deck)?)?;
+            let file_bpm = bpm_of(file)?;
+            Some((deck_bpm - file_bpm).abs() <= file_bpm * BPM_TOLERANCE)
+        };
         self.assigned.resize(positions.len(), None);
         for slot in &mut self.assigned {
             if slot.as_ref().is_some_and(|f| !open.contains(f)) {
@@ -426,7 +478,10 @@ impl DeckFiles {
             if new_files.is_empty() || free.is_empty() {
                 break;
             }
-            if new_files.len() == 1 && free.len() == 1 {
+            if new_files.len() == 1
+                && free.len() == 1
+                && bpm_fits(free[0], new_files[0]) != Some(false)
+            {
                 self.assigned[free[0]] = Some(new_files[0].clone());
                 continue;
             }
@@ -440,6 +495,13 @@ impl DeckFiles {
                         (Some(p), Some(d)) => p <= d + 1.0,
                         _ => true,
                     })
+                    .filter(|i| bpm_fits(*i, file) != Some(false))
+                    .collect();
+                // A deck whose BPM matches the file's is the strongest evidence there is.
+                let matched: Vec<usize> = fits
+                    .iter()
+                    .copied()
+                    .filter(|i| bpm_fits(*i, file) == Some(true))
                     .collect();
                 // Several decks could hold it: an unloaded deck reads zero, so a lone deck
                 // that has moved off zero is the one with a track.
@@ -448,8 +510,8 @@ impl DeckFiles {
                     .copied()
                     .filter(|i| positions[*i].is_some_and(|p| p > 0.5))
                     .collect();
-                let pick = match (fits.as_slice(), moved.as_slice()) {
-                    ([one], _) | (_, [one]) => Some(*one),
+                let pick = match (fits.as_slice(), matched.as_slice(), moved.as_slice()) {
+                    ([one], _, _) | (_, [one], _) | (_, [], [one]) => Some(*one),
                     _ => None,
                 };
                 if let Some(i) = pick {
@@ -881,6 +943,35 @@ mod live {
         rx
     }
 
+    /// Pairs the open files with the decks (by length and, where the deck's tempo reads, by
+    /// BPM) and logs a change.
+    fn attribute_files(
+        deck_files: &mut DeckFiles,
+        open: &[PathBuf],
+        states: &[Option<DeckState>],
+        positions: &[Option<f64>],
+        durations: &HashMap<String, f64>,
+        bpms: &HashMap<String, f32>,
+    ) {
+        let before: Vec<Option<PathBuf>> = (0..positions.len())
+            .map(|i| deck_files.file_for(i).cloned())
+            .collect();
+        let deck_bpms: Vec<Option<f32>> = states
+            .iter()
+            .map(|s| s.as_ref().and_then(|s| s.track_bpm))
+            .collect();
+        let after = deck_files.update_with_tempo(
+            open,
+            positions,
+            &|p| durations.get(&norm_path(p)).copied(),
+            &deck_bpms,
+            &|p| bpms.get(&norm_path(p)).copied(),
+        );
+        if after != before.as_slice() {
+            tracing::info!(decks = ?after, ?positions, "deck tracks");
+        }
+    }
+
     /// The rekordbox memory transport: finds the process, loads the offsets for its version,
     /// and reports the master deck at every poll.
     pub struct MemoryTransport {
@@ -888,6 +979,8 @@ mod live {
         state: State,
         /// Library file lengths by normalised path, for deck attribution.
         durations: HashMap<String, f64>,
+        /// Library BPMs by normalised path, for deck attribution.
+        bpms: HashMap<String, f32>,
         /// The MASTER deck at the last poll, to log changes.
         last_master: Option<usize>,
     }
@@ -904,6 +997,7 @@ mod live {
                     next_try: Instant::now(),
                 },
                 durations: HashMap::new(),
+                bpms: HashMap::new(),
                 last_master: None,
             }
         }
@@ -975,6 +1069,10 @@ mod live {
             }
         }
 
+        fn set_file_bpms(&mut self, table: Vec<(PathBuf, f32)>) {
+            self.bpms = table.into_iter().map(|(p, b)| (norm_path(&p), b)).collect();
+        }
+
         fn set_file_durations(&mut self, table: Vec<(PathBuf, f64)>) {
             self.durations = table.into_iter().map(|(p, d)| (norm_path(&p), d)).collect();
             tracing::info!(
@@ -1043,16 +1141,14 @@ mod live {
                         .iter()
                         .map(|s| s.as_ref().map(|s| s.position_s))
                         .collect();
-                    let durations = &self.durations;
-                    let before: Vec<Option<PathBuf>> = (0..positions.len())
-                        .map(|i| deck_files.file_for(i).cloned())
-                        .collect();
-                    let after = deck_files.update(open_files, &positions, &|p| {
-                        durations.get(&norm_path(p)).copied()
-                    });
-                    if after != before.as_slice() {
-                        tracing::info!(decks = ?after, ?positions, "deck tracks");
-                    }
+                    attribute_files(
+                        deck_files,
+                        open_files,
+                        &states,
+                        &positions,
+                        &self.durations,
+                        &self.bpms,
+                    );
                     let master = reader.master_deck().map(usize::from);
                     note_master(&mut self.last_master, master);
                     if let Some(i) = chooser.choose(master, &playing)

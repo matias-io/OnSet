@@ -491,7 +491,7 @@ impl Engine {
     }
 }
 
-/// The rekordbox source, told how long each library file is.
+/// The rekordbox source, told how long each library file is and its BPM.
 fn live_source_for(cfg: &EngineConfig, library: &Library) -> Box<dyn TransportSource> {
     let mut live = live_source(cfg);
     live.set_file_durations(
@@ -499,6 +499,13 @@ fn live_source_for(cfg: &EngineConfig, library: &Library) -> Box<dyn TransportSo
             .tracks()
             .iter()
             .filter_map(|t| Some((t.file_path.clone()?, f64::from(t.duration_s?))))
+            .collect(),
+    );
+    live.set_file_bpms(
+        library
+            .tracks()
+            .iter()
+            .filter_map(|t| Some((t.file_path.clone()?, t.bpm.filter(|b| *b > 0.0)?)))
             .collect(),
     );
     live

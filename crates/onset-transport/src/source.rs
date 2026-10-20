@@ -31,4 +31,7 @@ pub trait TransportSource: Send {
     /// Lengths of the library's files in seconds, for sources that learn which files are
     /// loaded but have to work out which deck holds which. Default: ignored.
     fn set_file_durations(&mut self, _table: Vec<(std::path::PathBuf, f64)>) {}
+
+    /// The library's BPM for each file, for the same purpose. Default: ignored.
+    fn set_file_bpms(&mut self, _table: Vec<(std::path::PathBuf, f32)>) {}
 }

@@ -141,6 +141,12 @@ fn counters_in_batch(
         let n = a.len().min(b.len());
         let mut i = 0;
         while i + 4 <= n {
+            // Nearly all of the heap is unchanged between the copies, and a value whose bytes
+            // did not change did not advance: skip without decoding.
+            if a[i..(i + 8).min(n)] == b[i..(i + 8).min(n)] {
+                i += 4;
+                continue;
+            }
             let elapsed = elapsed_at(i as f64 / n as f64, *first_copy, second_copy);
             // Narrowest integer first: a 32-bit field read as i64 picks up its neighbour.
             for format in [CounterFormat::I32, CounterFormat::I64, CounterFormat::F64] {
@@ -379,7 +385,18 @@ fn find_sub(hay: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || hay.len() < needle.len() {
         return None;
     }
-    hay.windows(needle.len()).position(|w| w == needle)
+    // Jump between occurrences of the first byte rather than comparing at every offset.
+    let last = hay.len() - needle.len();
+    let mut i = 0;
+    while i <= last {
+        let skip = hay[i..=last].iter().position(|b| *b == needle[0])?;
+        i += skip;
+        if &hay[i..i + needle.len()] == needle {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
 }
 
 /// One level of the pointer scan: where in memory does an 8-byte value point into

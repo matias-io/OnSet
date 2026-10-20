@@ -22,9 +22,9 @@ use anyhow::{Context, bail};
 
 use super::REKORDBOX_EXE;
 use super::calibrate::{rarest_first, shared_signature};
-use super::offsets::{Anchor, DeckSignature, Offsets, PositionFormat};
+use super::offsets::{Anchor, DeckSignature, Offsets, PositionFormat, TempoFields};
 use super::process::Process;
-use super::reader::Mem;
+use super::reader::{Mem, track_bpm_from};
 use super::scan::{
     Counter, CounterFormat, confirm_counters, find_bytes, find_sample_counters, find_u64_values,
 };
@@ -241,10 +241,15 @@ fn paused_baseline(s: &mut Session<'_>, p: &Process) -> anyhow::Result<BTreeSet<
 /// One pass over rekordbox's memory for values advancing at an audio rate, confirmed twice.
 fn scan_counters(s: &mut Session<'_>, p: &Process) -> Vec<Counter> {
     s.say("  scanning for playback positions (two passes over rekordbox's memory)...");
+    let started = Instant::now();
     let candidates = find_sample_counters(p, Duration::from_millis(400), 0.2);
     let confirmed = confirm_counters(p, &candidates, Duration::from_millis(400), 0.2);
     let mut confirmed = confirm_counters(p, &confirmed, Duration::from_millis(700), 0.2);
     confirmed.retain(|c| c.nominal_hz >= 22_000.0 && c.seconds(c.second) < 30.0 * 60.0);
+    s.say(format!(
+        "    done in {:.0} s",
+        started.elapsed().as_secs_f64()
+    ));
     confirmed
 }
 
@@ -278,7 +283,11 @@ fn ranked_counters(
     // Play may have come mid-scan, after the pass read the deck while it was still paused:
     // a second scan, with the deck certainly playing, has its position.
     let again = started_with_play(&baseline, scan_counters(s, p));
-    let started = if again.len() >= MIN_STOPPED { again } else { started };
+    let started = if again.len() >= MIN_STOPPED {
+        again
+    } else {
+        started
+    };
     let best = rank(started);
     s.say(format!(
         "  {} counter(s) confirmed; the largest group reads {:.1} s",
@@ -425,13 +434,19 @@ fn best_signature(
         anchors.len(),
         members.len()
     ));
-    // The runtime scans for the first anchor's bytes: make that the rarest one.
-    let mut rarity: Vec<(usize, Anchor)> = anchors
+    // The runtime scans for the first anchor's bytes: make that the rarest one. One pass
+    // over the heap counts every anchor (a pass per anchor took minutes).
+    let candidates: Vec<Anchor> = anchors.iter().take(6).cloned().collect();
+    let values: Vec<u64> = candidates
         .iter()
-        .take(6)
-        .map(|a| {
-            let needle = (p.module_base + a.module_offset).to_le_bytes();
-            let hits = find_bytes(p, &needle, RARITY_CAP).len();
+        .map(|a| p.module_base + a.module_offset)
+        .collect();
+    let counts = find_u64_values(p, &values, RARITY_CAP);
+    let mut rarity: Vec<(usize, Anchor)> = candidates
+        .iter()
+        .zip(&counts)
+        .map(|(a, found)| {
+            let hits = found.len();
             let sign = if a.offset < 0 { "-" } else { "+" };
             s.say(format!(
                 "    module+{:#x} at {sign}{:#x}: {hits} occurrence(s)",
@@ -459,9 +474,33 @@ fn best_signature(
             anchors,
             max_decks: 4,
             master_flag: None,
+            tempo: None,
         },
         counter,
     ))
+}
+
+/// rekordbox 7.2.19 keeps the deck's tempo (f32 BPM) just below the position and its pitch
+/// (f32 fraction) just above it. Kept when the calibrated deck reads a plausible pair there.
+fn tempo_fields(p: &Process, pos: u64) -> Option<TempoFields> {
+    let fields = TempoFields {
+        bpm_offset: -4,
+        pitch_offset: 4,
+    };
+    let bpm = p
+        .read_f32(pos.checked_add_signed(fields.bpm_offset)?)
+        .ok()?;
+    let pitch = p
+        .read_f32(pos.checked_add_signed(fields.pitch_offset)?)
+        .ok()?;
+    track_bpm_from(bpm, pitch).map(|_| fields)
+}
+
+/// Deck objects the runtime keeps. The reader takes them in address order, which is not deck
+/// order, and rekordbox 7.2.19 has five objects with the deck layout (four decks and a
+/// player), so a cap of four can drop the deck that is playing.
+fn deck_limit(found: usize) -> usize {
+    found.clamp(4, 8)
 }
 
 /// Hits kept per anchor value when looking for sibling decks.
@@ -535,8 +574,13 @@ pub fn refine_existing(dir: &Path, s: &mut Session<'_>) -> anyhow::Result<PathBu
         "rekordbox {version}: the current signature finds {} deck(s)",
         found.len()
     ));
-    let (anchors, _) = refine(s, &p, primary, &sig.anchors)?;
-    offsets.signature = Some(DeckSignature { anchors, ..sig });
+    let (anchors, decks) = refine(s, &p, primary, &sig.anchors)?;
+    let max_decks = deck_limit(decks.len()).max(sig.max_decks);
+    offsets.signature = Some(DeckSignature {
+        anchors,
+        max_decks,
+        ..sig
+    });
     offsets.save(&path)?;
     s.say(format!("wrote {}", path.display()));
     Ok(path)
@@ -580,6 +624,12 @@ pub fn calibrate(out_dir: &Path, s: &mut Session<'_>) -> anyhow::Result<PathBuf>
     ));
     if !found.contains(&counter.addr) {
         bail!("the signature does not find the position it was derived from");
+    }
+    signature.max_decks = deck_limit(found.len());
+    signature.tempo = tempo_fields(&p, counter.addr);
+    match signature.tempo {
+        Some(_) => s.say("  tempo fields found beside the position (tells loaded tracks apart)"),
+        None => s.say("  no tempo fields beside the position; tracks are told apart by length"),
     }
 
     let offsets = Offsets {

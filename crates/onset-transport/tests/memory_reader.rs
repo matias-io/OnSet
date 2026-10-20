@@ -7,11 +7,11 @@ use onset_transport::memory::chain::Chain;
 use std::path::{Path, PathBuf};
 
 use onset_transport::memory::offsets::{
-    Anchor, DeckChains, DeckSignature, FlagField, Offsets, PositionFormat,
+    Anchor, DeckChains, DeckSignature, FlagField, Offsets, PositionFormat, TempoFields,
 };
 use onset_transport::memory::reader::{
     ChainReader, DeckChooser, DeckFiles, FakeMem, PlayTracker, decks_from_hits, parse_track_info,
-    signature_matches,
+    signature_matches, track_bpm_from,
 };
 
 const BASE: u64 = 0x1000_0000;
@@ -279,6 +279,7 @@ fn signature_rekordbox() -> (FakeMem, DeckSignature) {
             offset: -0x328,
             mask: 0x80,
         }),
+        tempo: None,
     };
     for (pos, samples) in [(0x9000u64, 44_100i32), (0x7000, 88_200)] {
         mem.put_u64(pos - 0x20, BASE + 0x1046);
@@ -385,6 +386,104 @@ fn deck_files_uses_lengths_when_both_decks_are_free() {
         )
         .to_vec();
     assert_eq!(got, vec![Some(p("long.flac")), Some(p("short.flac"))]);
+}
+
+#[test]
+fn deck_files_skips_open_files_whose_bpm_no_deck_plays() {
+    // rekordbox 7.2.19 kept two tracks from an earlier session open with no deck holding
+    // them; both decks are long into tracks every file is long enough for.
+    let mut files = DeckFiles::default();
+    let open = [
+        p("push it.mp3"),
+        p("diamonds.mp3"),
+        p("miami.mp3"),
+        p("lady.mp3"),
+    ];
+    let duration = |_: &Path| Some(400.0);
+    let bpm = |path: &Path| match path.to_str() {
+        Some("push it.mp3") => Some(129.0),
+        Some("diamonds.mp3") => Some(150.0),
+        Some("miami.mp3") => Some(125.0),
+        Some("lady.mp3") => Some(126.02),
+        _ => None,
+    };
+    // Deck 1 plays Miami at 0 %; deck 2 holds Lady synced down to 125.00 (-0.83 %); decks 3
+    // and 4 are empty and read no tempo.
+    let bpms = [
+        track_bpm_from(125.0, 0.0),
+        track_bpm_from(125.0, -0.008_33),
+        track_bpm_from(0.0, 0.0),
+        None,
+    ];
+    let got = files
+        .update_with_tempo(
+            &open,
+            &[Some(242.0), Some(0.2), Some(0.0), Some(0.0)],
+            &duration,
+            &bpms,
+            &bpm,
+        )
+        .to_vec();
+    assert_eq!(
+        got,
+        vec![Some(p("miami.mp3")), Some(p("lady.mp3")), None, None],
+        "the stale files stay unassigned"
+    );
+    // Without tempo the first open file goes to the one deck that has moved: the wrong
+    // title OnSet Live showed before.
+    let mut blind = DeckFiles::default();
+    assert_eq!(
+        blind
+            .update(
+                &open,
+                &[Some(242.0), Some(0.2), Some(0.0), Some(0.0)],
+                &duration
+            )
+            .first()
+            .cloned()
+            .flatten(),
+        Some(p("push it.mp3"))
+    );
+}
+
+#[test]
+fn track_bpm_needs_a_plausible_tempo_and_pitch() {
+    let lady = track_bpm_from(125.0, -0.008_33).unwrap();
+    assert!((lady - 126.05).abs() < 0.01, "{lady}");
+    assert_eq!(track_bpm_from(0.0, 0.0), None, "an empty deck");
+    assert_eq!(track_bpm_from(125.0, f32::NAN), None);
+    assert_eq!(track_bpm_from(1.0e20, 0.0), None, "noise");
+}
+
+#[test]
+fn reader_reads_the_track_bpm_beside_the_position() {
+    let (mut mem, mut sig) = signature_rekordbox();
+    sig.tempo = Some(TempoFields {
+        bpm_offset: -4,
+        pitch_offset: 4,
+    });
+    mem.put_bytes(0x9000 - 4, &125.0f32.to_le_bytes());
+    mem.put_bytes(0x9000 + 4, &(-0.008f32).to_le_bytes());
+    let offsets = Offsets {
+        rekordbox_version: "7.2.19".into(),
+        platform: "windows".into(),
+        position_format: PositionFormat::I32,
+        position_rate_hz: 44_100.0,
+        master_deck: None,
+        decks: Vec::new(),
+        signature: Some(sig),
+        provenance: None,
+    };
+    assert_eq!(
+        Offsets::from_toml(&offsets.to_toml().unwrap()).unwrap(),
+        offsets
+    );
+    let mut reader = ChainReader::new(mem, offsets);
+    reader.adopt_hits(&[0x9000 - 0x20, 0x7000 - 0x20]);
+    let with_tempo = reader.deck(1).expect("deck at 0x9000");
+    let bpm = with_tempo.track_bpm.expect("tempo read");
+    assert!((bpm - 126.0).abs() < 0.01, "{bpm}");
+    assert_eq!(reader.deck(0).expect("deck at 0x7000").track_bpm, None);
 }
 
 #[test]
