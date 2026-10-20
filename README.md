@@ -92,8 +92,9 @@ Fonts and default shaders are also embedded in the app.
 3. Check **Audio** if you need to choose the controller's recording input or a Windows
    output. The tab shows the device currently in use.
 4. Press **Start show** and play the track. Finding the decks can take about 20 seconds.
-5. For another rekordbox version, open **Setup → Calibrate** and follow the play, pause
-   and resume prompts. This takes about two minutes, once per version.
+5. For another rekordbox version, open **Setup → Calibrate** and follow the prompts: leave
+   a loaded track paused, then play, pause and play it when asked. This takes about two
+   minutes, once per version.
 
 On one display, press **F** to use a window or **Esc** to return to the launcher.
 Use a release build for a show. Debug builds compile faster but render much slower.
@@ -195,9 +196,18 @@ For a new rekordbox version, open **Setup → Calibrate** or run:
 .\target\release\onset-cli.exe calibrate
 ```
 
-The prompts ask you to play, pause and resume a loaded track. Calibration takes about
-two minutes and saves `offsets/<version>.toml`. If tracks appear one song behind,
-`onset-cli calibrate --refine` can save a repaired multi-deck signature.
+Start with a loaded track paused, at least a minute before any loop or the end of the
+track; where it sits otherwise does not matter. The calibrator first records the clocks
+rekordbox runs with every deck paused, then asks you to play, pause and play the track,
+and only keeps counters that started with play. Press play only when asked: playing
+before the paused scan finishes makes the deck look like one of those clocks. Calibration
+takes about two minutes and saves `offsets/<version>.toml`. If tracks appear one song
+behind, `onset-cli calibrate --refine` can save a repaired multi-deck signature.
+
+The OnSet desktop app's live view reads the same files from `offsets/` beside
+`onset-desktop.exe` (`%LOCALAPPDATA%\OnSet\offsets` for the installed app) or from
+`ONSET_OFFSETS`. It has no calibration screen of its own yet: calibrate with `onset.exe`
+or `onset-cli`, then copy the file there.
 
 OnSet does not write to rekordbox's database, analysis files or process memory. It
 creates its own config and caches, including a decrypted copy of the library database.
