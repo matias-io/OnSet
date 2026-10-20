@@ -3,6 +3,7 @@
 //!
 //! The transport is rekordbox's memory by default. The simulator is a developer tool: it
 //! only runs when asked for explicitly, and Onset never plays music on its own otherwise.
+pub mod priority;
 pub mod stream_match;
 
 use std::path::PathBuf;
@@ -419,6 +420,9 @@ impl Engine {
         let thread = std::thread::Builder::new()
             .name("onset-engine".into())
             .spawn(move || {
+                if !priority::raise_current_thread() {
+                    tracing::debug!("engine thread keeps normal priority");
+                }
                 let mut engine = Running {
                     cfg,
                     paths,

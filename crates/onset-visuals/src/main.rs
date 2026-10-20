@@ -153,6 +153,10 @@ fn main() -> anyhow::Result<()> {
         cache_dir: cache_dir(),
         engine,
     };
+    // The window and the render loop run on this thread.
+    if !onset_engine::priority::raise_current_thread() {
+        tracing::debug!("render thread keeps normal priority");
+    }
     let event_loop = EventLoop::new()?;
     let mut app = OnsetApp::new(opts);
     event_loop.run_app(&mut app)?;
