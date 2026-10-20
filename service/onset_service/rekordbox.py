@@ -187,11 +187,14 @@ def prepare(store, track_ids, path=None, plain=False, hot=False, comments=False)
 def apply(store, preview_id):
     from onset_service.cuewriter import make_uuid
     from pyrekordbox.db6 import tables
-    not_running()
     preview = store.artifact("write-preview", preview_id)
     if not preview or preview.get("stale"):
         raise ValueError("Write preview is missing or stale")
+    # Adoption only records ownership in the workspace and reads rekordbox, so it needs no
+    # closed rekordbox; every write below does.
     if preview.get("kind") == "cue-adoption":return apply_adoption(store,preview)
+    if preview.get("kind") == "cue-adoption-library":return apply_library_adoption(store,preview)
+    not_running()
     if preview.get("kind") == "playlist":
         return apply_playlist(store, preview)
     fresh = prepare(store, preview["track_ids"], preview["db_path"], preview["plain"], preview["hot"], preview["comments"])
@@ -349,6 +352,65 @@ def apply_adoption(store,preview):
     store.artifact('written',tid+(':hot' if preview['hot'] else ':memory'),{'track_id':tid,'content_id':preview['content_id'],'cues':preview['cues'],'adopted':utcnow()})
     preview['stale']=True;store.artifact('write-preview',preview['id'],preview)
     return {'adopted':len(preview['cues']),'track_id':tid,'database_modified':False}
+
+
+def prepare_library_adoption(store, path=None, plain=False):
+    """Every track's cues from earlier OnSet versions, hot and memory, in one preview. A track
+    matched to no rekordbox entry, or to several, is listed as skipped rather than guessed;
+    manual cues (no OnSet prefix) are never included."""
+    from onset_service.cues import UUID_PREFIX
+    from onset_service.cuewriter import is_hot_cue
+    db = open_db(path, plain)
+    try:
+        supported(db)
+        by_path = {}
+        for c in db.get_content():
+            by_path.setdefault(str(c.FolderPath or "").replace("\\", "/").casefold(), []).append(c)
+        generated = {}
+        for c in db.get_cue():
+            if (c.UUID or "").startswith(UUID_PREFIX):
+                generated.setdefault(str(c.ContentID), []).append(c)
+        tracks, skipped = [], []
+        for t in store.tracks():
+            matches = {c.ID: c for loc in t["locations"]
+                       for c in by_path.get(str(loc).replace("\\", "/").casefold(), [])}
+            if len(matches) != 1:
+                skipped.append({"track_id": t["id"], "title": t.get("title"),
+                                "reason": "several rekordbox entries" if matches else "not in rekordbox"})
+                continue
+            content = next(iter(matches.values()))
+            mine = generated.get(str(content.ID), [])
+            for hot in (False, True):
+                cues = [cue_record(c) for c in mine if is_hot_cue(c) == hot]
+                if cues:
+                    tracks.append({"track_id": t["id"], "title": t.get("title"), "content_id": content.ID,
+                                   "hot": hot, "cues": cues})
+        preview = {"schema_version": 1, "kind": "cue-adoption-library",
+                   "db_path": str(Path(db.engine.url.database).resolve()), "plain": plain,
+                   "tracks": tracks, "skipped": skipped, "stale": False}
+        preview["id"] = digest(preview)[:24]
+        store.artifact("write-preview", preview["id"], preview)
+        return preview
+    finally:
+        db.close(); db.engine.dispose()
+
+
+def apply_library_adoption(store, preview):
+    fresh = prepare_library_adoption(store, preview["db_path"], preview["plain"])
+    if fresh["id"] != preview["id"]:
+        raise ValueError("Cues in rekordbox changed; find earlier cues again")
+    if not preview["tracks"]:
+        raise ValueError("No generated cues to adopt")
+    adopted = utcnow()
+    for entry in preview["tracks"]:
+        store.artifact("written", entry["track_id"] + (":hot" if entry["hot"] else ":memory"),
+                       {"track_id": entry["track_id"], "content_id": entry["content_id"],
+                        "cues": entry["cues"], "adopted": adopted})
+    preview["stale"] = True
+    store.artifact("write-preview", preview["id"], preview)
+    return {"adopted": sum(len(e["cues"]) for e in preview["tracks"]),
+            "tracks": len({e["track_id"] for e in preview["tracks"]}),
+            "skipped": len(preview["skipped"]), "database_modified": False}
 
 
 def apply_playlist(store, preview):

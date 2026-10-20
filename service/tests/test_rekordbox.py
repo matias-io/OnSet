@@ -155,6 +155,27 @@ def test_adoption_is_reviewed_local_metadata_only(tmp_path,song,plain_db):
     store.close()
 
 
+def test_library_adoption_takes_every_generated_cue_and_leaves_manual_ones(tmp_path,song,plain_db):
+    from onset_service.rekordbox import prepare_library_adoption
+    store=Store(tmp_path/'app');p=store.import_track(song);p=store.apply_analysis(p['id'],analysis(song))
+    for cue in p['cues'][:2]:
+        store.review_cue(p['id'],cue['id'],'approved')
+    apply(store,prepare(store,[p['id']],plain_db,True)['id'])
+    # An earlier version wrote these cues; this workspace has no record of it.
+    store.db.execute("DELETE FROM artifacts WHERE kind='written'");store.db.commit()
+    assert prepare(store,[p['id']],plain_db,True)['conflicts']
+    preview=prepare_library_adoption(store,plain_db,True)
+    assert [(e['track_id'],e['hot'],len(e['cues'])) for e in preview['tracks']]==[(p['id'],False,2)]
+    assert 'My manual cue' not in [c['Comment'] for e in preview['tracks'] for c in e['cues']]
+    before=plain_db.read_bytes();result=apply(store,preview['id'])
+    assert result=={'adopted':2,'tracks':1,'skipped':0,'database_modified':False}
+    assert plain_db.read_bytes()==before
+    assert not prepare(store,[p['id']],plain_db,True)['conflicts']
+    with pytest.raises(ValueError):
+        apply(store,preview['id'])
+    store.close()
+
+
 def test_comments_only_commit_and_hot_d_colour(tmp_path,song,plain_db):
     from onset_service.cues import CUE_SCHEME,HOT_SLOT
     store=Store(tmp_path/'app');p=store.import_track(song);p=store.apply_analysis(p['id'],analysis(song))
