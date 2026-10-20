@@ -1,4 +1,5 @@
 import './devMock';
+import {upsertJob} from './jobs';
 import React,{useEffect,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import type {Track,Cue} from './types';
@@ -27,6 +28,7 @@ import {emptyFilters,matchesFilters,canonicalKey,analysisSelection,restoreBrief,
 
 const api=window.onset;
 const keyLabel=(k:any)=>typeof k==='string'?k:k?.name||'';
+
 function KeyBadge({value}:{value:any}){
   const camelot=canonicalKey(value),name=keyLabel(value);
   if(!camelot&&!name)return <span className="dim">—</span>;
@@ -122,7 +124,7 @@ function App(){
     api.account('status').then(a=>{setAccount(a);if(a?.selected_model)setModel(a.selected_model);}).catch(e=>setError(e.message));
     api.call('settings').then(s=>{if(s?.set_brief)setBrief(restoreBrief(s.set_brief));}).catch(e=>setError(e.message)).finally(()=>{briefLoaded.current=true;});
     return api.onEvent(event=>{
-      if(event.method==='job-progress'){setJobs(js=>[event.params,...js.filter(j=>j.id!==event.params.id)]);if(['complete','partial','failed'].includes(event.params.state))refresh().catch(e=>setError(e.message));
+      if(event.method==='job-progress'){setJobs(js=>upsertJob(js,event.params));if(['complete','partial','failed'].includes(event.params.state))refresh().catch(e=>setError(e.message));
         if(event.params.id===planJobRef.current&&['complete','failed','cancelled'].includes(event.params.state))finishPlanJob(event.params);}
       if(event.method==='import-progress')setMessage(event.params.total?`${event.params.stage}: ${event.params.completed}/${event.params.total} · ${event.params.imported} imported · ${event.params.skipped} skipped · ${event.params.failed} failed`:event.params.stage);
       if(event.method==='ai-progress')setStream(s=>s+event.params.delta);});},[]);
