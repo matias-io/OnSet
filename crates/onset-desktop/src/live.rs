@@ -1,17 +1,23 @@
 //! The live layer for the screens: OnSet's engine follows rekordbox's master deck (with the
-//! structure prepared in OnSet), and its state goes to the webviews as `onset:live` events
-//! about 30 times a second. Read-only: nothing here touches rekordbox or the workspace.
+//! structure prepared in OnSet), and its state goes to the webviews as `onset:live` events.
+//! An event goes out when something the screens show changes, and while a track plays at
+//! least every half second so they can keep the beat from the tempo and phase in between.
+//! Nothing is sent while every window is hidden or minimised. Read-only: nothing here
+//! touches rekordbox or the workspace.
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use onset_core::music_state::MusicState;
 use onset_core::phrase::PhraseKind;
 use onset_engine::{Engine, EngineCommand, EngineConfig, EngineStatus};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
+/// How often the engine's state is looked at.
 const PERIOD: Duration = Duration::from_millis(33);
+/// While playing, the screens get the tempo and phase at least this often.
+const RESYNC: Duration = Duration::from_millis(500);
 
 /// Set after a calibration: the engine reloads the offsets and finds the decks again.
 static RECONNECT: AtomicBool = AtomicBool::new(false);
@@ -21,7 +27,7 @@ pub fn reconnect() {
     RECONNECT.store(true, Ordering::Release);
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct LiveTrack {
     pub title: String,
     pub artist: String,
@@ -30,7 +36,7 @@ pub struct LiveTrack {
     pub rekordbox_id: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct LiveCue {
     /// 0 = memory cue, 1..=8 = hot cue A..H.
     pub slot: u8,
@@ -38,7 +44,7 @@ pub struct LiveCue {
 }
 
 /// One `onset:live` event.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct LiveState {
     /// `waiting`, `idle`, `unidentified`, `running` or `error`.
     pub state: &'static str,
@@ -111,6 +117,80 @@ fn snapshot(status: &EngineStatus, ms: &MusicState) -> LiveState {
     }
 }
 
+/// Whether the screens would show something different: everything except the playhead, the
+/// beat and bar phase and the cue countdown, which they carry forward from the tempo
+/// themselves. A cue is compared by where it is in the track, to a tenth of a second.
+fn shows_differently(a: &LiveState, b: &LiveState) -> bool {
+    let timeless = |s: &LiveState| LiveState {
+        playhead_s: 0.0,
+        beat_phase: 0.0,
+        bar_phase: 0.0,
+        next_cue: s.next_cue.as_ref().map(|c| LiveCue {
+            slot: c.slot,
+            #[allow(clippy::cast_possible_truncation)] // a track position in tenths
+            seconds: ((s.playhead_s + f64::from(c.seconds)) * 10.0).round() as f32,
+        }),
+        ..s.clone()
+    };
+    timeless(a) != timeless(b)
+}
+
+/// Decides when the next event goes out.
+#[derive(Default)]
+struct Pacer {
+    last: Option<(LiveState, Instant)>,
+}
+
+impl Pacer {
+    fn due(&mut self, state: &LiveState, now: Instant) -> bool {
+        let due = match &self.last {
+            None => true,
+            Some((last, at)) => {
+                shows_differently(last, state)
+                    || (state.playing && now.duration_since(*at) >= RESYNC)
+            }
+        };
+        if due {
+            self.last = Some((state.clone(), now));
+        }
+        due
+    }
+
+    /// After a pause in sending, the next state goes out whatever it is.
+    fn forget(&mut self) {
+        self.last = None;
+    }
+}
+
+/// Sending stops only after every window has been hidden or minimised this long, so a
+/// window state that flickers (while being dragged or restored) can't force a resend on
+/// every tick.
+const HIDDEN_GRACE: Duration = Duration::from_secs(1);
+
+#[derive(Default)]
+struct Watched {
+    hidden_since: Option<Instant>,
+}
+
+impl Watched {
+    /// Whether to keep sending, given whether a window shows the live state right now.
+    fn update(&mut self, visible: bool, now: Instant) -> bool {
+        if visible {
+            self.hidden_since = None;
+            return true;
+        }
+        let since = *self.hidden_since.get_or_insert(now);
+        now.duration_since(since) < HIDDEN_GRACE
+    }
+}
+
+/// Whether any window could show the live state.
+fn anyone_watching(app: &AppHandle) -> bool {
+    app.webview_windows()
+        .values()
+        .any(|w| w.is_visible().unwrap_or(true) && !w.is_minimized().unwrap_or(false))
+}
+
 /// `ONSET_OFFSETS`, else `offsets/` beside the executable, else the repository's `offsets/`.
 /// The live view reads calibrations here first, and the calibration panel saves them here.
 pub fn offsets_dir() -> PathBuf {
@@ -172,12 +252,21 @@ pub fn spawn(app: AppHandle) {
                     }
                 }
             };
+            let mut pacer = Pacer::default();
+            let mut watched = Watched::default();
             loop {
                 if RECONNECT.swap(false, Ordering::AcqRel) {
                     engine.command(EngineCommand::Reconnect);
                 }
-                let state = snapshot(&engine.status(), &engine.state());
-                let _ = app.emit("onset:live", &state);
+                let now = Instant::now();
+                if watched.update(anyone_watching(&app), now) {
+                    let state = snapshot(&engine.status(), &engine.state());
+                    if pacer.due(&state, now) {
+                        let _ = app.emit("onset:live", &state);
+                    }
+                } else {
+                    pacer.forget();
+                }
                 std::thread::sleep(PERIOD);
             }
         });
@@ -189,6 +278,89 @@ pub fn spawn(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn playing(bar_phase: f32) -> LiveState {
+        let mut s = snapshot(&EngineStatus::Idle, &MusicState::default());
+        s.playing = true;
+        s.bpm = 128.0;
+        s.bar_phase = bar_phase;
+        s.playhead_s = f64::from(bar_phase);
+        s
+    }
+
+    #[test]
+    fn sending_stops_only_after_a_second_hidden() {
+        let mut w = Watched::default();
+        let t0 = Instant::now();
+        assert!(w.update(true, t0));
+        assert!(w.update(false, t0), "just hidden");
+        assert!(w.update(true, t0 + PERIOD), "a flicker changes nothing");
+        assert!(w.update(false, t0 + PERIOD * 2));
+        assert!(w.update(false, t0 + PERIOD * 2 + HIDDEN_GRACE / 2));
+        assert!(
+            !w.update(false, t0 + PERIOD * 2 + HIDDEN_GRACE),
+            "hidden a second"
+        );
+        assert!(w.update(true, t0 + HIDDEN_GRACE * 3), "shown again");
+    }
+
+    #[test]
+    fn only_visible_changes_and_resyncs_are_sent() {
+        let mut pacer = Pacer::default();
+        let t0 = Instant::now();
+        assert!(
+            pacer.due(&playing(0.0), t0),
+            "the first state always goes out"
+        );
+        assert!(
+            !pacer.due(&playing(0.1), t0 + Duration::from_millis(33)),
+            "phase moved only"
+        );
+        let mut cue = playing(0.1);
+        cue.next_cue = Some(LiveCue {
+            slot: 1,
+            seconds: 10.0,
+        });
+        assert!(
+            pacer.due(&cue, t0 + Duration::from_millis(66)),
+            "a cue appeared"
+        );
+        let mut closer = cue.clone();
+        closer.playhead_s += 0.5;
+        closer.next_cue = Some(LiveCue {
+            slot: 1,
+            seconds: 9.5,
+        });
+        assert!(
+            !pacer.due(&closer, t0 + Duration::from_millis(99)),
+            "same cue, nearer"
+        );
+        assert!(
+            pacer.due(&playing(0.2), t0 + RESYNC),
+            "resync while playing"
+        );
+        let mut later = playing(0.3);
+        later.section = Some("Drop");
+        assert!(
+            pacer.due(&later, t0 + RESYNC + Duration::from_millis(33)),
+            "section changed"
+        );
+        let mut paused = later.clone();
+        paused.playing = false;
+        assert!(
+            pacer.due(&paused, t0 + RESYNC + Duration::from_millis(66)),
+            "paused"
+        );
+        assert!(
+            !pacer.due(&paused, t0 + RESYNC * 4),
+            "paused and unchanged: no resync"
+        );
+        pacer.forget();
+        assert!(
+            pacer.due(&paused, t0 + RESYNC * 4),
+            "after hiding, the state goes out again"
+        );
+    }
 
     #[test]
     fn a_waiting_engine_reports_no_track() {
