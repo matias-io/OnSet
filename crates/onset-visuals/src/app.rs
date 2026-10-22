@@ -60,7 +60,8 @@ pub struct AppOptions {
     pub offsets_dir: PathBuf,
     /// Onset's cache folder (decrypted library, lyrics).
     pub cache_dir: PathBuf,
-    pub engine: Option<Engine>,
+    /// Shared with the desktop app's live view when it hosts the show.
+    pub engine: Option<std::sync::Arc<Engine>>,
 }
 
 /// Launcher or show: what the one window is doing.
@@ -349,11 +350,11 @@ fn draw_overlay(
     let audio_device = opts
         .engine
         .as_ref()
-        .map_or_else(|| "none".to_string(), crate::engine::Engine::audio_device);
+        .map_or_else(|| "none".to_string(), |e| e.audio_device());
     let lyrics_progress = opts
         .engine
         .as_ref()
-        .map_or_else(String::new, crate::engine::Engine::lyrics_progress);
+        .map_or_else(String::new, |e| e.lyrics_progress());
     let overlay_view = OverlayView {
         monitors,
         scenes: &scenes,
@@ -633,7 +634,7 @@ impl OnsetApp {
             .opts
             .engine
             .as_ref()
-            .map_or_else(|| Arc::new(MusicState::default()), Engine::state);
+            .map_or_else(|| Arc::new(MusicState::default()), |e| e.state());
         self.lyrics.tend(
             &mut s.renderer,
             ms.track.as_ref(),

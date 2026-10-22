@@ -1,24 +1,13 @@
-//! Onset: real-time, structure-aware visuals for rekordbox DJs.
-mod app;
-mod bench;
-mod brand;
-mod config;
-mod launcher;
-mod lyrics;
-mod monitors;
-mod overlay;
-mod thumbs;
-
+//! Onset: real-time, structure-aware visuals for rekordbox DJs. The desktop app shows them in
+//! its projector window; this binary runs them on their own, for development and the bench.
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
-use onset_engine as engine;
-use winit::event_loop::EventLoop;
-
-use crate::app::{AppOptions, BenchPace, OnsetApp};
-use crate::config::{Config, MonitorChoice};
-use crate::engine::{Engine, EngineConfig};
+use onset_visuals::app::{AppOptions, BenchPace};
+use onset_visuals::config::{Config, MonitorChoice};
+use onset_visuals::engine::{Engine, EngineConfig};
 
 #[derive(Parser)]
 #[command(
@@ -139,7 +128,7 @@ fn main() -> anyhow::Result<()> {
     }) {
         Ok(e) => {
             tracing::info!(status = ?e.status(), "engine started");
-            Some(e)
+            Some(Arc::new(e))
         }
         Err(e) => {
             tracing::error!("engine did not start (visuals will idle): {e:#}");
@@ -161,12 +150,5 @@ fn main() -> anyhow::Result<()> {
         cache_dir: cache_dir(),
         engine,
     };
-    // The window and the render loop run on this thread.
-    if !onset_engine::priority::raise_current_thread() {
-        tracing::debug!("render thread keeps normal priority");
-    }
-    let event_loop = EventLoop::new()?;
-    let mut app = OnsetApp::new(opts);
-    event_loop.run_app(&mut app)?;
-    Ok(())
+    onset_visuals::run(opts)
 }
