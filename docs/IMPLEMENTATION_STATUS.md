@@ -177,6 +177,27 @@ These are not accuracy measurements, and genre still needs labels checked by ear
 
 Still open: learned local mood/danceability estimators and learned transition acceptability. Both need listening labels or model assets that have not been gathered. Real-library behaviour of every item above also still needs checking.
 
+## Live-show performance (2026-10-20 to 22)
+
+The goal is that preparation work cannot disturb a show, and that the app beside the visuals costs as little as possible. Changes, each with what was measured:
+
+- **Show mode (plan O4), `61f5da8`.** The service's `show-mode` pauses running and queued jobs at their next checkpoint and remembers them. It refuses to resume jobs and refuses rekordbox writes and restores until the show ends, then resumes exactly the jobs it paused. The desktop's `show_mode` command also drops the service to below-normal priority with Windows' efficiency mode, and restores both afterwards. Tested by `service/tests/test_show_mode.py` (4 tests) and a priority-class check on a real child process. It is not yet switched on automatically: today "Start show" happens inside the separate visuals program, which the app cannot see.
+- **Thread priority, `408c590`.** The engine's 120 Hz tick and the visuals' render loop run above normal priority; the audio callback was already time-critical.
+- **Live view, `99b0041`.** Updates go out only when something shown changes, plus a resync every half second while playing. Nothing is sent once every window has been hidden for a second. The screen carries the playhead, beat and cue countdown forward from the tempo. With the simulator at 124 BPM, updates fell from 28 to 2.1 a second.
+- **Saved sets, `7581d65`.** Listing saved sets loaded all 58,844 stored transitions once per set, so the call took 393 s on a copy of the real workspace. Because the service answers one request at a time, every refresh waited behind it. It now takes 3.3 s, with identical verdicts for all 18 saved sets.
+- **rekordbox scans, `93aa400`.** rekordbox builds the player objects that hold a track's content id only for playing decks. With decks loaded but paused, the reader repeated a full heap scan every 30 s and listed every handle in the system every 1.5 s. With rekordbox idle, the installed app spent about 40% of a core on this. Both now run only for decks that play without an id. Against the same idle rekordbox, the file watcher fell from 1,594 ms to 31 ms of CPU a minute, and no deck scans followed the ones at connect.
+- **Show bench, `100f64f`.** `onset --bench N --bench-pace show` keeps vsync as in a show, `--frame-latency 1|2` sets the queue depth, and the bench prints how old the music state was at each present.
+
+**Visuals, measured:** release builds of `1361190` (before this work) and current source, each with the bench patch, 60 s per run, scene `crystal`, simulator playing Stop It, on the laptop's 2256×1504 screen, alternating builds over two rounds:
+
+| Run | Mean frame | p99 | Over 20 ms | State age mean / p99 | CPU (all cores) |
+|---|---|---|---|---|---|
+| Before, 2 frames | 18.8 / 28.5 ms | 46 / 70 ms | 13% / 99% | 6.0 / 8.5 ms, 14 / 26 ms | 0.8–1.2% |
+| Current, 2 frames | 21.0 / 23.7 ms | 52 / 66 ms | 40% / 82% | 6.6 / 7.9 ms, 17 / 24 ms | 0.9–1.3% |
+| Current, 1 frame | 36.1 / 27.6 ms | 69 / 76 ms | 100% / 92% | 8.2 / 6.4 ms, 22 / 17 ms | 0.7–0.9% |
+
+The GPU is the limit at this resolution: frame times varied more between two runs of the same build than between builds, adaptive resolution kept changing the load, and an installer build was compiling at the same time. The CPU-side changes cannot show up here; they protect against stalls when other work competes. One queued frame made frames slower without fresher data, so two stays the default. A 1080p projector and a run under load (app open, analysis queued) are still to be measured.
+
 
 ## Evidence map
 
