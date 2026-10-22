@@ -184,6 +184,7 @@ def test_the_service_loads_the_audio_stack_before_serving(tmp_path):
     from onset_service.service import Service, WARM_MODULES
     service = Service(tmp_path / 'home')
     try:
+        assert service.imports_ready.wait(300), 'warm-up did not finish'
         missing = [m for m in WARM_MODULES if m not in sys.modules]
         assert not missing, missing
         import librosa
@@ -193,5 +194,25 @@ def test_the_service_loads_the_audio_stack_before_serving(tmp_path):
                 getattr(librosa, name)
         assert set(sys.modules) == before, sorted(set(sys.modules) - before)[:8]
         assert 'librosa.display' not in sys.modules, 'display needs matplotlib and is not used'
+    finally:
+        service.close()
+
+
+def test_light_requests_answer_while_the_warm_up_runs(tmp_path, monkeypatch):
+    import time
+    from onset_service import service as service_module
+    from onset_service.service import Service
+    monkeypatch.setattr(service_module, 'warm_imports', lambda: (time.sleep(1.0), 1.0)[1])
+    events = []
+    service = Service(tmp_path / 'home', notify=events.append)
+    try:
+        started = time.monotonic()
+        assert service.dispatch('tracks') == [] and service.dispatch('jobs') == []
+        assert time.monotonic() - started < 0.5, 'DB-only requests must not wait for the warm-up'
+        assert not service.imports_ready.is_set()
+        assert service.dispatch('sets') == []
+        assert service.imports_ready.is_set(), 'a request that may import the numeric stack waits'
+        stages = [e['params']['stage'] for e in events if e.get('method') == 'service-startup']
+        assert stages == ['loading audio tools', 'ready']
     finally:
         service.close()

@@ -63,6 +63,15 @@ WARM_MODULES = (
 )
 
 
+# Requests that read the database only and import nothing from the numeric stack: the
+# screens make these at startup, and they answer while the warm-up runs. Everything else
+# waits for `imports_ready` (a cold numba cache can take minutes to compile into).
+LIGHT_METHODS = frozenset({
+    "tracks", "jobs", "job-control", "settings", "catalogue", "review-queue",
+    "workspace-health", "workspace-backups", "workspace-restore-preview",
+})
+
+
 def warm_imports():
     """Imports WARM_MODULES and touches every name librosa attaches lazily (except `display`,
     which needs matplotlib), so no later attribute access imports a submodule from a job
@@ -121,12 +130,27 @@ class Service:
                 self.store.job(job)
         # WARM_UP: a job stuck at "loading audio tools" with no CPU, twice, was the job thread's
         # `import librosa` deadlocked against the RPC thread importing numpy for a UI refresh.
-        # Load it all here, before any request or job runs.
+        # One thread loads it all first; requests and jobs that could import any of it wait
+        # (`dispatch`, `run_job`), while LIGHT_METHODS answer at once, so the library shows
+        # straight away instead of a blank screen while numba compiles into a cold cache.
+        self.imports_ready = threading.Event()
         if warm:
-            print(f"audio tools loaded in {warm_imports():.1f} s", file=sys.stderr)
+            threading.Thread(target=self._warm_up, name="warm-up", daemon=True).start()
+        else:
+            self.imports_ready.set()
         # Should a job still stall, its threads' stacks go to a log in the workspace.
         self._stalls_logged = set()
         threading.Thread(target=self._watch_stalls, name="stall-watchdog", daemon=True).start()
+
+    def _warm_up(self):
+        self.notify({"method": "service-startup", "params": {"stage": "loading audio tools"}})
+        seconds = None
+        try:
+            seconds = warm_imports()
+        finally:
+            self.imports_ready.set()
+        print(f"audio tools loaded in {seconds or 0:.1f} s", file=sys.stderr)
+        self.notify({"method": "service-startup", "params": {"stage": "ready", "seconds": round(seconds or 0, 1)}})
 
     def _watch_stalls(self):
         while not self.shutting_down.wait(30):
@@ -172,6 +196,8 @@ class Service:
 
     def dispatch(self, method, p=None):
         p = p or {}
+        if method not in LIGHT_METHODS:
+            self.imports_ready.wait()
         if method not in {"doctor", "workspace-health", "workspace-backups", "workspace-restore-preview", "workspace-restore"}:
             workspace.guard(self.store)
         methods = {
@@ -361,6 +387,7 @@ class Service:
             self.notify({"method": "job-progress", "params": record.copy()})
         try:
             control["started"] = True
+            self.imports_ready.wait()
             checkpoint("loading native analysis", 0)
             if record["kind"] == "analyze":
                 from .analysis import analyse
