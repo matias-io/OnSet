@@ -12,7 +12,9 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import uuid
+from datetime import datetime, timezone
 from .store import Store
 from . import workspace
 from .util import atomic_json, utcnow, basename, digest, check_version
@@ -24,6 +26,74 @@ class Cancelled(Exception):
     pass
 
 
+# A running job that has not checkpointed for this long is stalled. Checkpoints come at least
+# every stage, and the longest stage (a cold import of the audio tools, or decoding a track)
+# takes well under a minute.
+STALL_S = 300
+STALL_LOG = "service-stalls.log"
+
+
+def job_age(job, now):
+    """Seconds since the job record was last saved; None when unknown."""
+    try:
+        updated = datetime.fromisoformat(str(job.get("updated")).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    return (now - updated).total_seconds()
+
+
+def stalled_jobs(jobs, now, limit=STALL_S):
+    """Running jobs whose record has not changed for `limit` seconds."""
+    return [j for j in jobs if j.get("state") == "running" and (job_age(j, now) or 0) > limit]
+
+
+# Everything a job or an RPC call imports lazily from the numeric and audio stack. Imported
+# once, on the thread that constructs the service, before it answers anything: later imports
+# are cache hits, so no two threads import these packages at the same time (see WARM_UP).
+WARM_MODULES = (
+    "numpy", "scipy.signal", "scipy.optimize", "scipy.stats", "scipy.interpolate", "scipy.fft",
+    "scipy.ndimage", "scipy.linalg", "scipy.sparse", "soundfile", "librosa", "librosa.feature",
+    "librosa.onset", "librosa.beat", "librosa.effects", "librosa.decompose", "librosa.segment",
+    "onset_service.tonal", "onset_service.cues", "onset_service.structure",
+    "onset_service.transitions", "onset_service.planning", "onset_service.evidence",
+    "onset_service.mixplan", "onset_service.analysis", "onset_service.preview",
+    "onset_service.genre",
+)
+
+
+def warm_imports():
+    """Imports WARM_MODULES and touches every name librosa attaches lazily (except `display`,
+    which needs matplotlib), so no later attribute access imports a submodule from a job
+    thread. A package that fails to import is reported on stderr and fails again, with its
+    own message, where it is first used. Returns the seconds taken."""
+    import importlib
+    started = time.monotonic()
+    for name in WARM_MODULES:
+        try:
+            importlib.import_module(name)
+        except Exception as exc:  # noqa: BLE001 - the real failure surfaces where it is used
+            print(f"warm-up: {name}: {exc}", file=sys.stderr)
+    librosa = sys.modules.get("librosa")
+    for name in getattr(librosa, "__all__", ()):
+        if name != "display":
+            try:
+                getattr(librosa, name)
+            except Exception as exc:  # noqa: BLE001
+                print(f"warm-up: librosa.{name}: {exc}", file=sys.stderr)
+    return time.monotonic() - started
+
+
+def thread_stacks():
+    """Every thread's stack, as text: what a stalled job is waiting on."""
+    names = {t.ident: t.name for t in threading.enumerate()}
+    parts = []
+    for ident, frame in sys._current_frames().items():
+        parts.append(f"--- thread {names.get(ident, ident)}\n" + "".join(traceback.format_stack(frame)))
+    return "\n".join(parts)
+
+
 class StorageFull(Exception):
     pass
 
@@ -33,7 +103,7 @@ def storage_full(exc):
 
 
 class Service:
-    def __init__(self, home=None, notify=lambda event: None):
+    def __init__(self, home=None, notify=lambda event: None, warm=True):
         self.store = Store(home)
         self.notify = notify
         self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=int(self.store.setting("light_jobs", 2)))
@@ -49,6 +119,37 @@ class Service:
             if job["state"] in {"running", "queued", "cancelling"}:
                 job.update(state="paused", error="Interrupted at application shutdown; resume to continue")
                 self.store.job(job)
+        # WARM_UP: a job stuck at "loading audio tools" with no CPU, twice, was the job thread's
+        # `import librosa` deadlocked against the RPC thread importing numpy for a UI refresh.
+        # Load it all here, before any request or job runs.
+        if warm:
+            print(f"audio tools loaded in {warm_imports():.1f} s", file=sys.stderr)
+        # Should a job still stall, its threads' stacks go to a log in the workspace.
+        self._stalls_logged = set()
+        threading.Thread(target=self._watch_stalls, name="stall-watchdog", daemon=True).start()
+
+    def _watch_stalls(self):
+        while not self.shutting_down.wait(30):
+            try:
+                self.log_stalls()
+            except Exception:
+                pass
+
+    def log_stalls(self, now=None):
+        """Appends the stacks of every thread to the stall log, once per stalled checkpoint."""
+        now = now or datetime.now(timezone.utc)
+        logged = []
+        for job in stalled_jobs(self.store.jobs(), now):
+            key = (job["id"], job.get("updated"))
+            if key in self._stalls_logged:
+                continue
+            self._stalls_logged.add(key)
+            with open(Path(self.store.home) / STALL_LOG, "a", encoding="utf-8") as log:
+                log.write(f"=== {utcnow()} job {job['id']} ({job.get('kind')}) stalled at "
+                          f"{job.get('stage')!r} {job.get('progress')} since {job.get('updated')}\n")
+                log.write(thread_stacks() + "\n\n")
+            logged.append(job["id"])
+        return logged
 
     def close(self):
         self.shutting_down.set()

@@ -10,6 +10,63 @@ import uuid
 from .util import atomic_json, digest, file_hash, utcnow
 
 TABLES = ("tracks", "aliases", "revisions", "edits", "jobs", "artifacts", "settings")
+PID_FILE = "service.pid"
+
+
+class WorkspaceInUse(RuntimeError):
+    """Another live OnSet service holds this workspace."""
+
+
+def command_line(pid):
+    """The command line of process `pid`, or None when it does not run or cannot be read."""
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+    if os.name == "nt":
+        import subprocess
+        try:
+            out = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
+                capture_output=True, text=True, timeout=30,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return out.stdout.strip() or None
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return None
+    return raw.replace(b"\0", b" ").decode(errors="replace").strip() or None
+
+
+def claim(home):
+    """Records this process as the workspace's service, and refuses when another live
+    onset_service process holds it. A second app on one workspace marked the first one's
+    running jobs "interrupted" on startup and competed for its database. A record whose
+    process is gone, or belongs to some other program now (the id was reused), is stale and
+    replaced. The same process may reopen its workspace."""
+    path = Path(home) / PID_FILE
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        record = {}
+    pid = record.get("pid") if isinstance(record, dict) else None
+    if isinstance(pid, int) and pid != os.getpid():
+        if "onset_service" in (command_line(pid) or ""):
+            raise WorkspaceInUse(
+                f"OnSet is already running on this workspace (process {pid}, since "
+                f"{record.get('started', 'an unknown time')}). Close it before starting another.")
+    atomic_json(path, {"pid": os.getpid(), "started": utcnow(), "home": str(Path(home))})
+
+
+def release(home):
+    """Removes this process's record; another process's record is left alone."""
+    path = Path(home) / PID_FILE
+    try:
+        if json.loads(path.read_text(encoding="utf-8")).get("pid") == os.getpid():
+            path.unlink()
+    except (OSError, ValueError, AttributeError):
+        pass
 
 
 def counts(db):

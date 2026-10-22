@@ -30,7 +30,7 @@ def main():
         from .rpc import serve
         serve(args.home)
         return
-    service = Service(args.home)
+    service = Service(args.home, warm=args.command == "analyze")
     try:
         params = json.loads(Path(args.params).read_text(encoding="utf-8")) if getattr(args, "params", None) else {}
         if args.command == "import":

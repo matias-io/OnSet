@@ -131,3 +131,67 @@ def test_a_workspace_opened_by_path_adopts_its_legacy_database(tmp_path, monkeyp
     store.close()
     (folder / 'autocue.db').write_text("stale copy")
     assert not adopt_legacy_database(folder) and (folder / 'autocue.db').read_text() == "stale copy"
+
+
+def test_a_live_service_keeps_a_second_one_off_its_workspace(tmp_path, monkeypatch):
+    import json, os
+    import pytest
+    from onset_service import workspace
+    from onset_service.store import Store
+    home = tmp_path / 'home'
+    first = Store(home)
+    assert json.loads((home / workspace.PID_FILE).read_text(encoding='utf-8'))['pid'] == os.getpid()
+    # The same process may reopen its workspace (the CLI and these tests do).
+    Store(home).close()
+    # Another process's live service on this workspace: refused, and its record kept.
+    (home / workspace.PID_FILE).write_text(json.dumps({'pid': 4242, 'started': 'earlier'}), encoding='utf-8')
+    monkeypatch.setattr(workspace, 'command_line', lambda pid: 'python -u -m onset_service --home x rpc' if pid == 4242 else None)
+    with pytest.raises(workspace.WorkspaceInUse):
+        Store(home)
+    assert json.loads((home / workspace.PID_FILE).read_text(encoding='utf-8'))['pid'] == 4242
+    # A record whose process is gone, or is some other program now, is stale and replaced.
+    monkeypatch.setattr(workspace, 'command_line', lambda pid: 'notepad.exe')
+    Store(home).close()
+    assert not (home / workspace.PID_FILE).exists()
+    first.close()
+
+
+def test_a_stalled_job_writes_every_threads_stack_to_the_workspace_once(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    from onset_service.service import Service, STALL_LOG, stalled_jobs
+    service = Service(tmp_path / 'home')
+    try:
+        job = {'id': 'j1', 'kind': 'analyze', 'state': 'running', 'stage': 'loading audio tools', 'progress': 0.01,
+               'params': {}, 'completed': []}
+        service.store.job(job)
+        saved = service.store.jobs()[0]
+        soon = datetime.now(timezone.utc) + timedelta(seconds=60)
+        later = datetime.now(timezone.utc) + timedelta(seconds=600)
+        assert stalled_jobs([saved], soon) == [] and [j['id'] for j in stalled_jobs([saved], later)] == ['j1']
+        assert service.log_stalls(soon) == []
+        assert service.log_stalls(later) == ['j1']
+        assert service.log_stalls(later) == [], 'one entry per stalled checkpoint'
+        text = (tmp_path / 'home' / STALL_LOG).read_text(encoding='utf-8')
+        assert "stalled at 'loading audio tools'" in text and 'thread MainThread' in text and 'test_workspace.py' in text
+        done = dict(saved, state='complete'); service.store.job(done)
+        assert stalled_jobs(service.store.jobs(), later) == []
+    finally:
+        service.close()
+
+
+def test_the_service_loads_the_audio_stack_before_serving(tmp_path):
+    import sys
+    from onset_service.service import Service, WARM_MODULES
+    service = Service(tmp_path / 'home')
+    try:
+        missing = [m for m in WARM_MODULES if m not in sys.modules]
+        assert not missing, missing
+        import librosa
+        before = set(sys.modules)
+        for name in librosa.__all__:
+            if name != 'display':
+                getattr(librosa, name)
+        assert set(sys.modules) == before, sorted(set(sys.modules) - before)[:8]
+        assert 'librosa.display' not in sys.modules, 'display needs matplotlib and is not used'
+    finally:
+        service.close()

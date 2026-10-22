@@ -14,6 +14,7 @@ class Store:
     def __init__(self, home=None):
         self.home = Path(home or app_home())
         self.home.mkdir(parents=True, exist_ok=True)
+        workspace.claim(self.home)
         adopt_legacy_database(self.home)
         self.lock = threading.RLock()
         self.db_path = self.home / DB_NAME
@@ -67,6 +68,7 @@ class Store:
                 workspace.backup(self, "shutdown")
         finally:
             self.db.close()
+            workspace.release(self.home)
 
     def setting(self, key, default=None, value=None):
         with self.lock:
