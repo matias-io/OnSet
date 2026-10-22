@@ -42,6 +42,8 @@
       showSettings: () => invoke('show_settings', {}),
       saveShowSettings: (settings) => invoke('show_settings_save', { settings }),
       showMonitors: () => invoke('show_monitors', {}),
+      showCatalogue: () => invoke('show_catalogue', {}),
+      showLogo: (clear) => invoke('show_logo', { clear }),
       providers: () => invoke('providers_status', {}),
       testProvider: (provider) => invoke('providers_test', { provider }),
       lookUpDetails: (providers, trackIds, web) =>

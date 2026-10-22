@@ -12,8 +12,12 @@ fn describe(config: &Config, path: &Path) -> Result<Value, String> {
     if let Some(map) = settings.as_object_mut() {
         map.remove("read_only");
     }
+    // What the effect sliders show: a named style's values, else the DJ's own.
+    let effective_fx = serde_json::to_value(config.preset.fx().unwrap_or(config.fx))
+        .map_err(|e| e.to_string())?;
     Ok(json!({
         "settings": settings,
+        "effective_fx": effective_fx,
         "read_only": config.read_only,
         "path": path.display().to_string(),
     }))
@@ -65,6 +69,70 @@ pub fn show_settings_save(
     Ok(saved)
 }
 
+/// What the show pages offer to choose from: the scenes (with the launcher's titles and
+/// descriptions), the graphics cards and the audio inputs.
+#[tauri::command]
+pub async fn show_catalogue() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let scenes: Vec<Value> = onset_render::scenes::SCENES
+            .iter()
+            .map(|s| {
+                json!({
+                    "name": s.name, "title": s.title, "blurb": s.blurb,
+                    "cost": s.cost, "auto": s.auto, "energy": s.energy,
+                })
+            })
+            .collect();
+        json!({
+            "scenes": scenes,
+            "gpus": onset_render::gpu::Gpu::adapter_names(),
+            "audio_inputs": onset_audio::capture::list_endpoints(),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Picks an image for the blackout screen (copied beside the settings, as the visuals did),
+/// or with `clear` removes it; a running show shows the change at once.
+#[tauri::command]
+pub async fn show_logo(
+    window: tauri::WebviewWindow,
+    visuals: tauri::State<'_, crate::visuals::Visuals>,
+    clear: bool,
+) -> Result<Value, String> {
+    use onset_visuals::config::ConfigExt;
+    let path = Config::path();
+    let mut config = Config::load_from(&path);
+    if config.read_only {
+        return Err(format!(
+            "{} could not be read, so it is not saved over; fix or remove it first",
+            path.display()
+        ));
+    }
+    if clear {
+        config.blackout_logo = None;
+    } else {
+        let Some(file) = rfd::AsyncFileDialog::new()
+            .set_parent(&window)
+            .add_filter("Image", &["png", "jpg", "jpeg", "webp", "bmp", "gif"])
+            .pick_file()
+            .await
+        else {
+            return describe(&config, &path);
+        };
+        let source = file.path().to_path_buf();
+        let adopted = tauri::async_runtime::spawn_blocking(move || Config::adopt_logo(&source))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| format!("Not an image OnSet can use: {e}"))?;
+        config.blackout_logo = Some(adopted);
+    }
+    config.save_to(&path).map_err(|e| e.to_string())?;
+    crate::visuals::update(&visuals, config.clone());
+    describe(&config, &path)
+}
+
 /// The screens the show can go to. The settings name a screen by its Windows name
 /// (`\\.\DISPLAY2`), which the visuals match, rather than by its place in the list.
 #[tauri::command]
@@ -103,6 +171,11 @@ mod tests {
         assert_eq!(first["read_only"], false);
         assert_eq!(first["settings"]["scene"], "tunnel");
         assert!(first["settings"].get("read_only").is_none());
+        // The default Club style's effects, not the stored custom ones.
+        assert_eq!(
+            first["effective_fx"],
+            serde_json::to_value(onset_core::show::FxSettings::CLUB).unwrap()
+        );
 
         let mut changed = first["settings"].clone();
         changed["scene"] = "warp".into();

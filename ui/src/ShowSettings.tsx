@@ -1,5 +1,6 @@
 import React,{useEffect,useState} from 'react';
-import {Button,Card,Field,Pill,Segmented} from './ui';
+import {Button,Card,Field,Pill,Segmented,Tabs} from './ui';
+import {type Catalogue,EffectsCard,LyricsCard,OnScreenCard,OutputCard,ScenesCard} from './ShowDetails';
 
 /** The visuals' settings file as the desktop app reads it (crates/onset-settings). */
 export type ShowConfig={
@@ -11,9 +12,12 @@ export type ShowConfig={
   [key:string]:unknown;
 };
 type Monitor={name:string|null;width:number;height:number;primary:boolean};
+type Loaded={settings:ShowConfig;effective_fx:{[key:string]:any};read_only:boolean;path:string};
 type Onset={
-  showSettings:()=>Promise<{settings:ShowConfig;read_only:boolean;path:string}>;
-  saveShowSettings:(s:ShowConfig)=>Promise<{settings:ShowConfig;read_only:boolean;path:string}>;
+  showSettings:()=>Promise<Loaded>;
+  saveShowSettings:(s:ShowConfig)=>Promise<Loaded>;
+  showCatalogue:()=>Promise<Catalogue>;
+  showLogo:(clear:boolean)=>Promise<Loaded>;
   showMonitors:()=>Promise<Monitor[]>;
   startVisuals:()=>Promise<'started'|'running'>;
   endVisuals:()=>Promise<void>;
@@ -55,10 +59,10 @@ export function sceneTitle(name:string){return name==='zerog'?'Zero-G':name[0].t
 /** Show setup in the desktop app: what the visuals' own launcher page used to hold. */
 export function ShowSettings(){
   const api=onset();
-  const [state,setState]=useState<{settings:ShowConfig;read_only:boolean;path:string}|null>(null);
+  const [state,setState]=useState<Loaded|null>(null),[tab,setTab]=useState('show'),[catalogue,setCatalogue]=useState<Catalogue|null>(null);
   const [monitors,setMonitors]=useState<Monitor[]>([]),[message,setMessage]=useState(''),[error,setError]=useState(''),[showOn,setShowOn]=useState(false);
   useEffect(()=>{if(!api)return;api.visualsRunning().then(setShowOn).catch(()=>{});return api.onShow(s=>setShowOn(s.running));},[]);
-  useEffect(()=>{if(!api)return;api.showSettings().then(setState).catch(e=>setError(String(e.message||e)));api.showMonitors().then(setMonitors).catch(()=>setMonitors([]));},[]);
+  useEffect(()=>{if(!api)return;api.showSettings().then(setState).catch(e=>setError(String(e.message||e)));api.showMonitors().then(setMonitors).catch(()=>setMonitors([]));api.showCatalogue().then(setCatalogue).catch(()=>setCatalogue(null));},[]);
   if(!api)return <Card title="Show"><p className="muted">Show settings need the OnSet desktop app.</p></Card>;
   if(!state)return <Card title="Show"><p className="muted">{error||'Loading the show settings…'}</p></Card>;
   const s=state.settings;
@@ -73,6 +77,13 @@ export function ShowSettings(){
   const preset=PRESETS.find(p=>p.id===s.preset);
   return <>
     {state.read_only&&<p className="bad">{state.path} could not be read, so changes are not saved over it. Fix or remove that file first.</p>}
+    <Tabs value={tab} onChange={setTab} options={[{id:'show',label:'Show'},{id:'effects',label:'Effects'},{id:'scenes',label:'Scenes'},{id:'screen',label:'On screen'},{id:'lyrics',label:'Lyrics'},{id:'output',label:'Output and audio'}]}/>
+    {tab==='effects'&&<EffectsCard fx={state.effective_fx} change={change}/>}
+    {tab==='scenes'&&<ScenesCard s={s} change={change} catalogue={catalogue}/>}
+    {tab==='screen'&&<OnScreenCard s={s} change={change} setLogo={clear=>api.showLogo(clear).then(setState).catch(e=>setError(String(e.message||e)))}/>}
+    {tab==='lyrics'&&<LyricsCard s={s} change={change}/>}
+    {tab==='output'&&<OutputCard s={s} change={change} catalogue={catalogue}/>}
+    {tab==='show'&&<>
     <Card title="Where the show goes">
       <div className="stack">
         <Field label="Screen" hint="Pick the projector or TV. The laptop screen stays free for rekordbox and OnSet.">
@@ -94,7 +105,7 @@ export function ShowSettings(){
         {s.auto?<Field label="Change scenes">
           <Segmented label="When scenes change" value={s.auto_change==='off'?'tracks':s.auto_change} options={CHANGES} onChange={id=>change({auto_change:id as ShowConfig['auto_change']})}/>
         </Field>:<Field label="Scene">
-          <select value={s.scene} onChange={e=>change({scene:e.target.value})}>{SCENES.map(n=><option key={n} value={n}>{sceneTitle(n)}</option>)}</select>
+          <select value={s.scene} onChange={e=>change({scene:e.target.value})}>{(catalogue?.scenes.map(c=>[c.name,c.title])||SCENES.map(n=>[n,sceneTitle(n)])).map(([n,t])=><option key={n} value={n}>{t}</option>)}</select>
         </Field>}
       </div>
     </Card>
@@ -111,7 +122,8 @@ export function ShowSettings(){
         <label className="check"><input type="checkbox" checked={s.adaptive_resolution} onChange={e=>change({adaptive_resolution:e.target.checked})}/>Render smaller for a while when frames fall behind</label>
       </div>
     </Card>
-    <div className="row">
+    </>}
+    <div className="row show-actions">
       {showOn
         ?<Button onClick={()=>api.endVisuals().then(()=>setMessage('Show ended.')).catch(e=>setError(String(e.message||e)))}>End show</Button>
         :<Button kind="primary" onClick={()=>api.startVisuals().then(r=>setMessage(r==='running'?'The show is already on.':'Show started. Esc on the projector also ends it.')).catch(e=>setError(String(e.message||e)))}>Start show</Button>}

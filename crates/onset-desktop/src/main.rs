@@ -949,6 +949,8 @@ fn main() {
             show_settings::show_settings,
             show_settings::show_settings_save,
             show_settings::show_monitors,
+            show_settings::show_catalogue,
+            show_settings::show_logo,
             calibration::calibration_status,
             calibration::calibration_start,
             calibration::calibration_cancel,

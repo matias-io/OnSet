@@ -371,3 +371,8 @@ kbd{display:inline-block;min-width:18px;padding:0 5px;border-radius:4px;border:1
 .calib-result strong{color:var(--text)}
 .calib-path{overflow-wrap:anywhere}
 .calib-log{margin:0;max-height:240px;overflow:auto;font-family:var(--mono);font-size:11.5px;color:var(--text-2);white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* Show page: room between a card's groups, and before the show controls */
+.show-sub{margin:18px 0 6px}
+.show-sub:first-of-type{margin-top:8px}
+.show-actions{margin-top:16px}
