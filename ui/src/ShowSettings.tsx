@@ -65,7 +65,7 @@ export function ShowSettings(){
   const change=(patch:Partial<ShowConfig>)=>{
     const next={...s,...patch};
     setState({...state,settings:next});setError('');
-    api.saveShowSettings(next).then(saved=>{setState(saved);setMessage(showOn?'Saved. It applies from the next show.':'Saved.');})
+    api.saveShowSettings(next).then(saved=>{setState(saved);setMessage(showOn?(patch.output_monitor?'Saved. The show moves to that screen next time it starts.':'Saved; the show uses it now.'):'Saved.');})
       .catch(e=>setError(String(e.message||e)));
   };
   const picked=chosenMonitor(s.output_monitor,monitors);

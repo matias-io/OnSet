@@ -43,10 +43,26 @@ pub fn show_settings() -> Result<Value, String> {
     load(&Config::path())
 }
 
+/// Saves the settings and hands them to a running show, which applies them at once; a new
+/// audio input goes to the engine.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)] // Tauri commands take owned arguments
-pub fn show_settings_save(settings: Value) -> Result<Value, String> {
-    save(&Config::path(), settings)
+pub fn show_settings_save(
+    settings: Value,
+    visuals: tauri::State<'_, crate::visuals::Visuals>,
+) -> Result<Value, String> {
+    let before = Config::load_from(&Config::path());
+    let saved = save(&Config::path(), settings)?;
+    let config = Config::load_from(&Config::path());
+    if config.audio_device != before.audio_device
+        && let Some(engine) = crate::live::engine()
+    {
+        engine.command(onset_engine::EngineCommand::SetAudioDevice(
+            config.audio_device.clone(),
+        ));
+    }
+    crate::visuals::update(&visuals, config);
+    Ok(saved)
 }
 
 /// The screens the show can go to. The settings name a screen by its Windows name
@@ -115,6 +131,10 @@ mod tests {
         std::fs::write(&path, "scene = 'ring'\nthis is = not [ toml").unwrap();
         assert_eq!(load(&path).unwrap()["read_only"], true);
         assert!(save(&path, json!({})).is_err());
-        assert!(std::fs::read_to_string(&path).unwrap().contains("not [ toml"));
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("not [ toml")
+        );
     }
 }

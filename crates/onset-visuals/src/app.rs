@@ -396,6 +396,41 @@ fn draw_overlay(
 pub enum ShowMessage {
     /// Close the show window; the run returns.
     End,
+    /// The settings changed in the app: apply what differs, now.
+    Settings(Box<Config>),
+}
+
+/// What to redo when the settings change under a running show. The output screen is not
+/// in it: moving a running show between screens waits for the next show.
+#[derive(Debug, Default, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)] // independent things to redo
+struct SettingsChange {
+    scene: bool,
+    present_mode: bool,
+    internal_scale: bool,
+    hud: bool,
+    card: bool,
+    look: bool,
+    logo: bool,
+    fullscreen: bool,
+}
+
+#[allow(clippy::float_cmp)] // a setting changed or it did not
+fn settings_change(old: &Config, new: &Config) -> SettingsChange {
+    SettingsChange {
+        scene: !new.auto && old.scene != new.scene,
+        present_mode: old.present_mode != new.present_mode,
+        internal_scale: old.internal_scale != new.internal_scale,
+        hud: old.show_hud != new.show_hud,
+        card: old.show_card != new.show_card,
+        look: old.render_settings() != new.render_settings()
+            || old.hud != new.hud
+            || old.card != new.card
+            || old.lyrics != new.lyrics
+            || old.blackout_logo_size != new.blackout_logo_size,
+        logo: old.blackout_logo != new.blackout_logo,
+        fullscreen: old.fullscreen != new.fullscreen,
+    }
 }
 
 impl OnsetApp {
@@ -853,6 +888,39 @@ impl OnsetApp {
     }
 
     /// Loads the configured blackout logo into the renderer.
+    /// Takes the app's new settings and applies what changed to the running show.
+    fn adopt_settings(&mut self, config: Config) {
+        let change = settings_change(&self.opts.config, &config);
+        let scene = config.scene.clone();
+        let (hud, card, scale) = (config.show_hud, config.show_card, config.internal_scale);
+        self.opts.config = config;
+        tracing::info!(?change, "settings from the app");
+        if change.scene {
+            self.apply(OverlayAction::Scene(scene));
+        }
+        if change.present_mode {
+            self.apply(OverlayAction::PresentMode(self.opts.config.present_mode));
+        }
+        if change.internal_scale {
+            self.apply(OverlayAction::InternalScale(scale));
+        }
+        if change.hud {
+            self.apply(OverlayAction::ShowHud(hud));
+        }
+        if change.card {
+            self.apply(OverlayAction::ShowCard(card));
+        }
+        if change.look {
+            self.apply(OverlayAction::Look);
+        }
+        if change.logo {
+            self.apply_logo();
+        }
+        if change.fullscreen && self.fullscreen != self.opts.config.fullscreen {
+            self.toggle_fullscreen();
+        }
+    }
+
     fn apply_logo(&mut self) {
         let image = self
             .opts
@@ -1147,6 +1215,7 @@ impl ApplicationHandler<ShowMessage> for OnsetApp {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, message: ShowMessage) {
         match message {
             ShowMessage::End => self.exiting = true,
+            ShowMessage::Settings(config) => self.adopt_settings(*config),
         }
     }
 
@@ -1209,5 +1278,65 @@ mod placement_tests {
         assert_eq!(fit_launcher((3840.0, 2160.0)), LAUNCHER_SIZE);
         let (w, _) = fit_launcher((1280.0, 800.0));
         assert!(w < 1280.0);
+    }
+}
+
+#[cfg(test)]
+mod settings_change_tests {
+    use super::*;
+    use crate::config::{Config, PresentModeChoice, Preset, Quality};
+
+    #[test]
+    fn nothing_changed_redoes_nothing() {
+        let c = Config::default();
+        assert_eq!(settings_change(&c, &c.clone()), SettingsChange::default());
+    }
+
+    #[test]
+    fn each_setting_redoes_only_its_own_part() {
+        let old = Config::default();
+        let look = Config {
+            preset: Preset::Chill,
+            quality: Quality::Low,
+            ..old.clone()
+        };
+        assert_eq!(
+            settings_change(&old, &look),
+            SettingsChange {
+                look: true,
+                ..SettingsChange::default()
+            }
+        );
+        let toggles = Config {
+            show_hud: !old.show_hud,
+            show_card: !old.show_card,
+            present_mode: PresentModeChoice::Mailbox,
+            fullscreen: !old.fullscreen,
+            ..old.clone()
+        };
+        let change = settings_change(&old, &toggles);
+        assert!(change.hud && change.card && change.present_mode && change.fullscreen);
+        assert!(!change.look && !change.scene);
+    }
+
+    #[test]
+    fn a_new_scene_is_shown_only_when_auto_is_off() {
+        let auto = Config {
+            auto: true,
+            ..Config::default()
+        };
+        let other = Config {
+            scene: "warp".into(),
+            ..auto.clone()
+        };
+        assert!(
+            !settings_change(&auto, &other).scene,
+            "Auto picks scenes itself"
+        );
+        let fixed = Config {
+            auto: false,
+            ..other
+        };
+        assert!(settings_change(&auto, &fixed).scene);
     }
 }

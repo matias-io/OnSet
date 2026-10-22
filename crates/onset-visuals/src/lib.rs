@@ -117,6 +117,13 @@ impl Projector {
         self.send(ShowMessage::End);
     }
 
+    /// Hands the running show new settings; it applies what changed.
+    pub fn update(&self, config: crate::config::Config) {
+        if self.is_running() {
+            self.send(ShowMessage::Settings(Box::new(config)));
+        }
+    }
+
     fn send(&self, message: ShowMessage) {
         if let Ok(proxy) = self.proxy.lock()
             && let Some(p) = proxy.as_ref()

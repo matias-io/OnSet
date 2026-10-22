@@ -43,9 +43,8 @@ fn projector(app: &AppHandle, visuals: &Visuals) -> Result<Arc<Projector>, Strin
         return Ok(p.clone());
     }
     let handle = app.clone();
-    let projector = Arc::new(
-        Projector::spawn(move || ended(&handle)).map_err(|e| format!("{e:#}"))?,
-    );
+    let projector =
+        Arc::new(Projector::spawn(move || ended(&handle)).map_err(|e| format!("{e:#}"))?);
     *slot = Some(projector.clone());
     Ok(projector)
 }
@@ -93,6 +92,15 @@ pub async fn visuals_start(
     Ok("started")
 }
 
+/// Hands a running show the settings just saved.
+pub fn update(visuals: &Visuals, config: Config) {
+    if let Ok(slot) = visuals.0.lock()
+        && let Some(p) = slot.as_ref()
+    {
+        p.update(config);
+    }
+}
+
 /// Ends the running show, if any.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)] // Tauri commands take owned arguments
@@ -122,7 +130,10 @@ mod tests {
     #[test]
     fn a_show_goes_straight_to_the_screen_and_leaves_the_settings_file_to_the_app() {
         let opts = show_options(Config::default());
-        assert!(!opts.launcher, "no launcher page: the app holds the settings");
+        assert!(
+            !opts.launcher,
+            "no launcher page: the app holds the settings"
+        );
         assert!(!opts.save_settings, "the app owns config.toml");
         assert!(opts.bench.is_none() && opts.exit_after.is_none());
     }
