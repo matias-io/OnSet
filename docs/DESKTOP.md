@@ -70,12 +70,13 @@ cargo build --locked --release -p onset-desktop
 
 **Interface preview without the desktop app.** Run `npm run dev` in `ui/` (or the `ui-preview` entry in `.claude/launch.json`) and open `http://127.0.0.1:5173`. Without the desktop bridge, `ui/src/devMock.ts` supplies a sample library so you can review layout and styling. It never touches real data, and Vite removes it from production builds. The dev server strips the page Content-Security-Policy only while serving, because React refresh needs an inline script. `ui/dist/index.html` keeps the strict policy.
 
-**Interface layout.** The interface has five pages in the sidebar:
+**Interface layout.** The interface has six pages in the sidebar:
 
 - **Library:** search, a view switch, a filter panel and an analysis selection bar.
 - **Track review:** waveform and transport, plus Cues / Profile / Evidence / Stems / Corrections tabs. Writing to rekordbox lives under Cues.
 - **Transitions.**
 - **Set planner:** brief, AI adviser and plan options.
+- **Show:** everything the visuals use (screen, style, scenes, effects, overlays, lyrics, output and audio), Start show / End show, and buttons that try show moments without music. The show runs in a projector window of the app (`onset-visuals`), on the same engine as the live view; changes apply to a running show at once.
 - **Settings:** Jobs, ChatGPT, Analysis engine, Energy calibration, and Data & backups (workspace snapshots, rekordbox write history and exports).
 
 Colours, spacing and radii come from tokens at the top of `ui/src/style.css` and `ui/src/brand.css`; the Inter font files are shared from `assets/fonts`. Shared controls live in `ui/src/ui.tsx`.

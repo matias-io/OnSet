@@ -40,7 +40,7 @@ setup before using OnSet at a show.
   light trails and effects respond to phrases, drops and hot cues.
 - Show track details and artwork in a now-playing card. Add synced lyrics in Clean,
   Glow or Karaoke style when lyrics are available.
-- Choose your output display, audio input, quality and effects in the launcher.
+- Choose your output display, audio input, quality and effects on the app's **Show** page.
   Add your own blackout logo or edit the scene shaders.
 - Prepare before the show: analyse tracks, review and approve cues, compare
   transitions and plan sets, then write approved cues to rekordbox after an exact
@@ -88,22 +88,27 @@ Fonts and default shaders are also embedded in the app.
 ### Start your first show
 
 1. Start rekordbox in Performance mode and load a track.
-2. Open `onset.exe`. In **Show**, choose the output screen and a style.
-3. Check **Audio** if you need to choose the controller's recording input or a Windows
-   output. The tab shows the device currently in use.
-4. Press **Start show** and play the track. Finding the decks can take about 20 seconds.
-5. For another rekordbox version, open **Setup → Calibrate** and follow the prompts: leave
-   a loaded track paused, then play, pause and play it when asked. This takes about two
-   minutes, once per version.
+2. Open OnSet and go to **Show**. Choose the output screen and a style.
+3. Check **Output and audio** if you need to choose the controller's recording input or a
+   Windows output. It shows the device in use while a show runs.
+4. Press **Start show** (also in the OnSet Live window) and play the track. Finding the
+   decks can take about 20 seconds. Settings you change while the show runs apply at once.
+5. For another rekordbox version, open **Settings → rekordbox link** and follow the
+   calibration prompts: leave a loaded track paused, then play, pause and play it when
+   asked. This takes about two minutes, once per version.
 
-On one display, press **F** to use a window or **Esc** to return to the launcher.
+The show runs in its own window of the app. On one display, untick **Fullscreen** to
+preview it in a window. **Esc** on the show, or **End show** in the app, ends it.
 Use a release build for a show. Debug builds compile faster but render much slower.
+
+`onset.exe` still opens the show on its own, straight to the configured screen, for
+development and the frame bench (`--bench`).
 
 ## Scenes
 
 Auto chooses a scene to suit the music and can change it between tracks, at drops or
-after a few phrases. Turn Auto off to keep a favourite scene. Each scene has speed and
-colour controls in the launcher.
+after a few phrases. Turn Auto off to keep a favourite scene. Each scene has speed,
+audio response and colour controls on the Show page's **Scenes** tab.
 
 | Scene | What you see |
 | --- | --- |
@@ -124,19 +129,19 @@ the rendering size when the GPU falls behind and restores it when frames are smo
 
 ## Make it your show
 
-The **Show** tab holds the essentials for a set. The other tabs let you adjust the
-details without hunting through configuration files.
+The app's **Show** page holds the essentials for a set on its first tab. The other
+tabs let you adjust the details without hunting through configuration files.
 
 | Tab | What you can change |
 | --- | --- |
-| Show | Output screen, Chill / Club / Festival style, Auto scenes and overlays |
-| Scenes | Scene previews, Auto rotation, speed and colour |
-| Effects | Effect strengths, live meters and preview buttons |
-| On screen | Now-playing card, stats placement and a custom blackout logo |
+| Show | Output screen, fullscreen, Chill / Club / Festival style, Auto scenes, overlays and quality; while a show runs, buttons that try a build-up, drop, phrase, breakdown or track change without music |
+| Effects | Effect strengths |
+| Scenes | Auto rotation, and speed, audio response and colour per scene |
+| On screen | Now-playing card and stats placement, size and fields, and a custom blackout logo |
 | Lyrics | Enable lyrics, choose a style, control online lookup and look up the library |
-| Output | Graphics adapter, quality and adaptive resolution |
-| Audio | Recording input or loopback output; rescan devices |
-| Setup | rekordbox calibration |
+| Output and audio | Graphics adapter, frame timing, render scale, and the recording input or loopback output |
+
+rekordbox calibration is under **Settings → rekordbox link**.
 
 Synced lyrics follow the playhead line by line. OnSet looks them up on LRCLIB, uses
 MusicBrainz for ISRC matching when needed, and caches the results. Availability depends
@@ -152,27 +157,26 @@ Clean lyrics and artwork over Mandala, captured from rekordbox 7.2.19 with no
 controller attached. Music, artwork and the short lyric excerpt belong to their
 respective rights holders.
 
-During the show:
+On the show window during a show (click it first), even if the app is busy:
 
 | Key | Action |
 | --- | --- |
-| Tab | Open or close settings |
 | H / C | Toggle stats / now-playing card |
 | Left / Right | Previous / next scene |
 | B | Toggle blackout |
 | F | Toggle fullscreen |
-| Esc | Close settings or return to the launcher |
+| Esc | End the show |
 
 ## If something is not following the music
 
 | Symptom | What to check |
 | --- | --- |
 | Waiting for rekordbox | Open Performance mode, load a track and allow about 20 seconds for deck discovery |
-| Version is not calibrated | Run **Setup → Calibrate** (or **Settings → rekordbox link** in the desktop app) with rekordbox open |
-| Motion does not respond to audio | Check the device shown in **Audio**; select the controller's recording input or the output carrying the mix |
+| Version is not calibrated | Run the calibration in **Settings → rekordbox link** with rekordbox open |
+| Motion does not respond to audio | Check the device shown in **Show → Output and audio**; select the controller's recording input or the output carrying the mix |
 | Track details are one song behind | Run `onset-cli calibrate --refine` from the OnSet folder |
 | A streamed track takes time to appear | Matching uses the stored waveform and can take a few seconds |
-| The show stutters | Lower quality in **Output** and enable adaptive resolution |
+| The show stutters | Lower quality on the **Show** tab and keep adaptive resolution on |
 
 OnSet does not yet track sampler pads or rekordbox FX state. Performance depends on
 the scene, GPU and resolution. The scene grid uses synthetic music input;
