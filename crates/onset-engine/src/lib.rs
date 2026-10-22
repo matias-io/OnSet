@@ -423,7 +423,7 @@ impl Engine {
         let thread = std::thread::Builder::new()
             .name("onset-engine".into())
             .spawn(move || {
-                if !priority::raise_current_thread() {
+                if !priority::join_audio_class() {
                     tracing::debug!("engine thread keeps normal priority");
                 }
                 let mut engine = Running {
