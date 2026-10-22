@@ -10,7 +10,8 @@ pub mod headless;
 pub mod hot_reload;
 pub mod hud;
 pub mod lyrics;
-pub mod overlay_options;
+/// How the HUD, track card and lyrics look; plain settings, kept in `onset-core`.
+pub use onset_core::overlay_options;
 pub mod quad;
 pub mod renderer;
 pub mod scene;

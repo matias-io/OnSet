@@ -1,8 +1,10 @@
-//! User configuration, persisted as TOML under `%APPDATA%\Onset\config.toml`.
+//! The show settings: the TOML file under `%APPDATA%\Onset\Onset\config\config.toml` that
+//! the visuals and the desktop app's show screens share.
 use std::path::{Path, PathBuf};
 
+pub use onset_core::overlay_options;
+pub use onset_core::quality::Quality;
 use onset_core::show::{AutoChange, FxSettings};
-use onset_render::renderer::{Quality, RenderSettings};
 use serde::{Deserialize, Serialize};
 
 /// A named starting point for the effect settings; editing any slider makes it Custom.
@@ -102,9 +104,9 @@ pub struct Config {
     pub gpu: Option<String>,
     /// Per-scene speed, intensity and colour shift, by scene name.
     pub tweaks: std::collections::BTreeMap<String, onset_core::show::SceneTweak>,
-    pub hud: onset_render::overlay_options::HudOptions,
-    pub card: onset_render::overlay_options::CardOptions,
-    pub lyrics: onset_render::overlay_options::LyricsOptions,
+    pub hud: overlay_options::HudOptions,
+    pub card: overlay_options::CardOptions,
+    pub lyrics: overlay_options::LyricsOptions,
     /// An image shown in the middle of the blackout screen (Onset's own copy).
     pub blackout_logo: Option<PathBuf>,
     /// Share of the screen the logo may fill.
@@ -137,9 +139,9 @@ impl Default for Config {
             quality: Quality::default(),
             gpu: None,
             tweaks: std::collections::BTreeMap::new(),
-            hud: onset_render::overlay_options::HudOptions::default(),
-            card: onset_render::overlay_options::CardOptions::default(),
-            lyrics: onset_render::overlay_options::LyricsOptions::default(),
+            hud: overlay_options::HudOptions::default(),
+            card: overlay_options::CardOptions::default(),
+            lyrics: overlay_options::LyricsOptions::default(),
             blackout_logo: None,
             blackout_logo_size: 0.5,
             adaptive_resolution: true,
@@ -149,35 +151,8 @@ impl Default for Config {
 }
 
 impl Config {
-    /// What the renderer needs from the settings.
-    pub fn render_settings(&self) -> RenderSettings {
-        RenderSettings {
-            fx: self.preset.fx().unwrap_or(self.fx),
-            quality: self.quality,
-            auto: self.auto,
-            auto_change: self.auto_change,
-            rotation: self.rotation.clone(),
-            tweaks: self.tweaks.clone(),
-            adaptive: self.adaptive_resolution,
-        }
-    }
-}
-
-impl Config {
-    /// Copies `source` beside the config as the blackout logo, after checking it is an
-    /// image, and returns the copy's path.
-    pub fn adopt_logo(source: &Path) -> anyhow::Result<PathBuf> {
-        let img = image::open(source)?;
-        let dir = Self::path()
-            .parent()
-            .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-        std::fs::create_dir_all(&dir)?;
-        let dest = dir.join("blackout-logo.png");
-        img.save(&dest)?;
-        Ok(dest)
-    }
-
-    /// `%APPDATA%\Onset\config.toml`, or a relative fallback when no profile dir exists.
+    /// `%APPDATA%\Onset\Onset\config\config.toml`, or a relative fallback when no profile
+    /// dir exists.
     pub fn path() -> PathBuf {
         directories::ProjectDirs::from("", "Onset", "Onset").map_or_else(
             || PathBuf::from("onset-config.toml"),
@@ -281,18 +256,18 @@ mod tests {
             )]
             .into_iter()
             .collect(),
-            hud: onset_render::overlay_options::HudOptions {
+            hud: overlay_options::HudOptions {
                 size: 1.4,
                 key: true,
                 ..Default::default()
             },
-            card: onset_render::overlay_options::CardOptions {
-                corner: onset_render::overlay_options::Corner::TopRight,
+            card: overlay_options::CardOptions {
+                corner: overlay_options::Corner::TopRight,
                 rating: true,
                 ..Default::default()
             },
-            lyrics: onset_render::overlay_options::LyricsOptions {
-                style: onset_render::overlay_options::LyricStyle::Karaoke,
+            lyrics: overlay_options::LyricsOptions {
+                style: overlay_options::LyricStyle::Karaoke,
                 offset_s: -0.5,
                 ..Default::default()
             },

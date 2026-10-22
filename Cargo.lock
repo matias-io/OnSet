@@ -4233,6 +4233,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "onset-settings"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "directories",
+ "onset-core",
+ "serde",
+ "tempfile",
+ "toml 1.1.6+spec-1.1.0",
+ "tracing",
+]
+
+[[package]]
 name = "onset-transport"
 version = "0.0.1"
 dependencies = [
@@ -4269,6 +4282,7 @@ dependencies = [
  "onset-lyrics",
  "onset-rekordbox",
  "onset-render",
+ "onset-settings",
  "onset-transport",
  "onset-workspace",
  "parking_lot",

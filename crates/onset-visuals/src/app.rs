@@ -23,7 +23,7 @@ use winit::monitor::MonitorHandle;
 use winit::window::{Fullscreen, Window, WindowAttributes, WindowId, WindowLevel};
 
 use crate::bench::BenchStats;
-use crate::config::{Config, MonitorChoice, PresentModeChoice};
+use crate::config::{Config, ConfigExt, MonitorChoice, PresentModeChoice};
 use crate::engine::{Engine, EngineCommand, EngineStatus};
 use crate::launcher::{CalibrationView, LAUNCHER_SIZE, all_calibrated_versions};
 use crate::monitors::{MonitorInfo, choose};

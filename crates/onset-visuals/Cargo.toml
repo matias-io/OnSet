@@ -21,6 +21,7 @@ onset-transport.workspace = true
 onset-audio.workspace = true
 onset-lyrics.workspace = true
 onset-render.workspace = true
+onset-settings.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 directories.workspace = true

@@ -16,6 +16,7 @@ onset-rekordbox = { path = "crates/onset-rekordbox" }
 onset-transport = { path = "crates/onset-transport" }
 onset-audio = { path = "crates/onset-audio" }
 onset-render = { path = "crates/onset-render" }
+onset-settings = { path = "crates/onset-settings" }
 onset-visuals = { path = "crates/onset-visuals" }
 onset-lyrics = { path = "crates/onset-lyrics" }
 onset-workspace = { path = "crates/onset-workspace" }
