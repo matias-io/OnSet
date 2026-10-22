@@ -37,6 +37,7 @@
       startVisuals: () => invoke('visuals_start', {}),
       endVisuals: () => invoke('visuals_end', {}),
       visualsRunning: () => invoke('visuals_running', {}),
+      previewShow: (name) => invoke('visuals_preview', { name }),
       onShow: (callback) => subscribe('onset:show', callback),
       showMode: (on) => invoke('show_mode', { on }),
       showSettings: () => invoke('show_settings', {}),

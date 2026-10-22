@@ -5,11 +5,8 @@ pub mod app;
 mod bench;
 mod brand;
 pub mod config;
-mod launcher;
 mod lyrics;
 mod monitors;
-mod overlay;
-mod thumbs;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -41,6 +38,14 @@ pub fn run(opts: AppOptions) -> anyhow::Result<()> {
     let mut app = OnsetApp::new(opts);
     event_loop.run_app(&mut app)?;
     Ok(())
+}
+
+/// A show moment to try without music.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Moment {
+    /// A four-second build-up ending in a drop.
+    BuildUp,
+    Event(onset_core::show::ShowEvent),
 }
 
 /// The desktop app's projector: one thread holding the window loop, which runs a show when
@@ -115,6 +120,14 @@ impl Projector {
     /// Closes the running show, if any.
     pub fn end(&self) {
         self.send(ShowMessage::End);
+    }
+
+    /// Plays a show moment on the running show without music.
+    pub fn preview(&self, moment: Moment) {
+        self.send(match moment {
+            Moment::BuildUp => ShowMessage::PreviewBuild,
+            Moment::Event(event) => ShowMessage::Preview(event),
+        });
     }
 
     /// Hands the running show new settings; it applies what changed.

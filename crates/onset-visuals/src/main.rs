@@ -51,15 +51,9 @@ struct Cli {
     /// Frames the GPU may queue ahead of the display (1 or 2); fewer means less delay
     #[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u32).range(1..=2))]
     frame_latency: u32,
-    /// Start with the settings panel open (Tab toggles it)
-    #[arg(long)]
-    settings: bool,
     /// Save one frame as PNG here, a second before exit (or 3 s in without --exit-after)
     #[arg(long, value_name = "PNG")]
     screenshot: Option<PathBuf>,
-    /// Skip the launcher and put the show on the configured monitor at once
-    #[arg(long)]
-    show: bool,
 }
 
 fn parse_monitor(s: &str) -> MonitorChoice {
@@ -107,13 +101,6 @@ fn main() -> anyhow::Result<()> {
     }
     let config = Config::load();
     let offsets_dir = offsets_dir();
-    // Unattended runs and the developer simulator go straight to the show.
-    let launcher = !(cli.show
-        || cli.sim.is_some()
-        || cli.exit_after.is_some()
-        || cli.bench.is_some()
-        || cli.screenshot.is_some()
-        || cli.settings);
 
     // Onset is a visualiser: rekordbox is the source. The simulator runs only when asked.
     let engine = match Engine::start(EngineConfig {
@@ -143,11 +130,8 @@ fn main() -> anyhow::Result<()> {
         exit_after: cli.exit_after.or(cli.bench).map(Duration::from_secs_f64),
         bench: cli.bench.map(|_| cli.bench_pace),
         frame_latency: cli.frame_latency,
-        settings_open: cli.settings,
         hosted: false,
         screenshot: cli.screenshot.clone(),
-        launcher,
-        offsets_dir,
         cache_dir: cache_dir(),
         engine,
     };

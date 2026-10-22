@@ -1,13 +1,12 @@
-//! The window: the launcher page first (a plain window on the primary monitor), then the
-//! show as borderless fullscreen on the chosen monitor; one wgpu surface and the frame loop
-//! that renders the engine's latest `MusicState` through the active scene.
+//! The show window: borderless fullscreen on the chosen monitor (or a window, as a preview),
+//! one wgpu surface and the frame loop that renders the engine's latest `MusicState` through
+//! the active scene. Nothing but the show is drawn; the desktop app holds the controls.
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use onset_core::music_state::MusicState;
+use onset_core::show::ShowEvent;
 use onset_render::assets::shader_dir;
 use onset_render::gpu::Gpu;
 use onset_render::headless::read_texture;
@@ -15,7 +14,7 @@ use onset_render::hot_reload::ShaderWatcher;
 use onset_render::renderer::Renderer;
 use onset_render::scenes::builtin_scenes;
 use winit::application::ApplicationHandler;
-use winit::dpi::{LogicalSize, PhysicalSize};
+use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -24,10 +23,8 @@ use winit::window::{Fullscreen, Window, WindowAttributes, WindowId, WindowLevel}
 
 use crate::bench::BenchStats;
 use crate::config::{Config, ConfigExt, MonitorChoice, PresentModeChoice};
-use crate::engine::{Engine, EngineCommand, EngineStatus};
-use crate::launcher::{CalibrationView, LAUNCHER_SIZE, all_calibrated_versions};
+use crate::engine::{Engine, EngineCommand};
 use crate::monitors::{MonitorInfo, choose};
-use crate::overlay::{DrawResult, DrawTarget, Overlay, OverlayAction, OverlayView, Page};
 
 /// How a bench presents frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -50,35 +47,15 @@ pub struct AppOptions {
     pub bench: Option<BenchPace>,
     /// Frames the GPU may queue ahead of the display.
     pub frame_latency: u32,
-    /// Start with the settings panel open.
-    pub settings_open: bool,
-    /// The desktop app hosts the show: it owns the settings file and the controls. The
-    /// show saves nothing (key toggles last for that show) and opens no settings panel
-    /// on the projector; its emergency keys still work.
+    /// The desktop app hosts the show: it owns the settings file and the controls, so the
+    /// show saves nothing (key toggles last for that show).
     pub hosted: bool,
     /// Save one frame here shortly before exit.
     pub screenshot: Option<PathBuf>,
-    /// Open on the launcher page rather than straight into the show.
-    pub launcher: bool,
-    /// Where `<version>.toml` offsets live; the launcher lists and writes them.
-    pub offsets_dir: PathBuf,
     /// Onset's cache folder (decrypted library, lyrics).
     pub cache_dir: PathBuf,
     /// Shared with the desktop app's live view when it hosts the show.
     pub engine: Option<std::sync::Arc<Engine>>,
-}
-
-/// Launcher or show: what the one window is doing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Mode {
-    Launcher,
-    Show,
-}
-
-/// A calibration session running on its own thread, reporting through a channel.
-struct CalibrationRun {
-    rx: mpsc::Receiver<String>,
-    cancel: Arc<AtomicBool>,
 }
 
 struct Surface {
@@ -88,7 +65,6 @@ struct Surface {
     config: wgpu::SurfaceConfiguration,
     renderer: Renderer,
     watcher: Option<ShaderWatcher>,
-    overlay: Overlay,
 }
 
 pub struct OnsetApp {
@@ -97,17 +73,9 @@ pub struct OnsetApp {
     started: Instant,
     frames: u64,
     fullscreen: bool,
-    mode: Mode,
     paused: bool,
     rate: f32,
     monitor: Option<MonitorHandle>,
-    monitor_handles: Vec<MonitorHandle>,
-    monitor_infos: Vec<MonitorInfo>,
-    /// Graphics adapters found at startup, for the launcher's picker.
-    adapters: Vec<String>,
-    calibration: Option<CalibrationRun>,
-    calibration_lines: Vec<String>,
-    versions: Vec<String>,
     last_scene_log: Instant,
     last_frame: Option<Instant>,
     /// Frame intervals in ms, kept only in bench mode.
@@ -240,7 +208,6 @@ fn key_code(event: &KeyEvent) -> Option<KeyCode> {
     }
     match &event.logical_key {
         Key::Named(NamedKey::Escape) => Some(KeyCode::Escape),
-        Key::Named(NamedKey::Tab) => Some(KeyCode::Tab),
         Key::Named(NamedKey::Space) => Some(KeyCode::Space),
         Key::Named(NamedKey::Home) => Some(KeyCode::Home),
         Key::Named(NamedKey::ArrowLeft) => Some(KeyCode::ArrowLeft),
@@ -259,57 +226,9 @@ fn key_code(event: &KeyEvent) -> Option<KeyCode> {
     }
 }
 
-/// The launcher's size in logical pixels on a screen of `screen` logical pixels: the
-/// design size, shrunk to leave room for the taskbar and title bar on smaller screens.
-fn fit_launcher(screen: (f64, f64)) -> (f64, f64) {
-    (
-        LAUNCHER_SIZE.0.min(screen.0 * 0.94),
-        LAUNCHER_SIZE.1.min(screen.1 * 0.86),
-    )
-}
-
-/// Size and centred position of the launcher on monitor `m`.
-fn launcher_placement(
-    monitor: &MonitorHandle,
-) -> (LogicalSize<f64>, winit::dpi::PhysicalPosition<i32>) {
-    let scale = monitor.scale_factor();
-    let phys = monitor.size();
-    let (width, height) = fit_launcher((
-        f64::from(phys.width) / scale,
-        f64::from(phys.height) / scale,
-    ));
-    let origin = monitor.position();
-    // Centred horizontally; a little above centre, so the title bar clears the top.
-    let left = origin.x + ((f64::from(phys.width) - width * scale) / 2.0) as i32;
-    let top = origin.y + ((f64::from(phys.height) - height * scale) / 2.5).max(0.0) as i32;
-    (
-        LogicalSize::new(width, height),
-        winit::dpi::PhysicalPosition::new(left, top),
-    )
-}
-
-/// The launcher's plain window, or borderless fullscreen on `monitor` (always on top, so
-/// nothing covers the projector), or a plain 1280x720 window when the output is not going
-/// to a dedicated display.
-fn window_attributes(
-    launcher: bool,
-    fullscreen: bool,
-    monitor: Option<&MonitorHandle>,
-    home: Option<&MonitorHandle>,
-) -> WindowAttributes {
-    if launcher {
-        let attrs = WindowAttributes::default()
-            .with_title("OnSet")
-            .with_window_icon(crate::brand::window_icon())
-            .with_decorations(true);
-        return match home {
-            Some(m) => {
-                let (size, pos) = launcher_placement(m);
-                attrs.with_inner_size(size).with_position(pos)
-            }
-            None => attrs.with_inner_size(LogicalSize::new(LAUNCHER_SIZE.0, LAUNCHER_SIZE.1)),
-        };
-    }
+/// Borderless fullscreen on `monitor` (always on top, so nothing covers the projector), or a
+/// 1280x720 window when the show is a preview on the DJ's own screen.
+fn window_attributes(fullscreen: bool, monitor: Option<&MonitorHandle>) -> WindowAttributes {
     // A windowed show is a preview on the DJ's own screen, with a title bar to move it.
     let attrs = WindowAttributes::default()
         .with_title("OnSet")
@@ -324,75 +243,6 @@ fn window_attributes(
     }
 }
 
-/// Runs the settings panel for this frame when it is open.
-#[allow(clippy::too_many_arguments)]
-fn draw_overlay(
-    s: &mut Surface,
-    opts: &mut AppOptions,
-    monitors: &[MonitorInfo],
-    adapters: &[String],
-    calibration: CalibrationView<'_>,
-    enc: &mut wgpu::CommandEncoder,
-    view: &wgpu::TextureView,
-    ms: &MusicState,
-) -> DrawResult {
-    if !s.overlay.is_open() {
-        return DrawResult {
-            buffers: Vec::new(),
-            actions: Vec::new(),
-            changed: false,
-        };
-    }
-    let idle = EngineStatus::Idle;
-    let (engine_status, tracks, simulator): (EngineStatus, &[crate::engine::TrackEntry], bool) =
-        match opts.engine.as_ref() {
-            Some(e) => (e.status(), e.tracks(), e.is_simulator()),
-            None => (idle, &[], false),
-        };
-    let scenes = s.renderer.scene_names();
-    let adapter = s.gpu.adapter_name();
-    let lyrics_status = s.renderer.lyrics_status().to_string();
-    let audio_device = opts
-        .engine
-        .as_ref()
-        .map_or_else(|| "none".to_string(), |e| e.audio_device());
-    let lyrics_progress = opts
-        .engine
-        .as_ref()
-        .map_or_else(String::new, |e| e.lyrics_progress());
-    let overlay_view = OverlayView {
-        monitors,
-        scenes: &scenes,
-        active_scene: s.renderer.active_scene().unwrap_or("-"),
-        tracks,
-        status: &engine_status,
-        simulator,
-        playhead_s: ms.playhead_s,
-        duration_s: ms.track.as_ref().and_then(|t| t.duration_s),
-        playing: ms.playing,
-        frame_ms: s.renderer.hud().last_frame_ms(),
-        calibration,
-        fx: s.renderer.fx(),
-        audio: ms.audio,
-        vibe: s.renderer.vibe(),
-        track: ms.track.as_ref(),
-        adapters,
-        adapter: &adapter,
-        audio_device: &audio_device,
-        analysis: ms.analysis,
-        lyrics_status: &lyrics_status,
-        lyrics_progress: &lyrics_progress,
-    };
-    let target = DrawTarget {
-        window: &s.window,
-        gpu: &s.gpu,
-        view,
-        size: (s.config.width, s.config.height),
-    };
-    s.overlay
-        .draw(&target, enc, &mut opts.config, &overlay_view)
-}
-
 /// What the desktop app tells a running show.
 #[derive(Debug, Clone)]
 pub enum ShowMessage {
@@ -400,6 +250,21 @@ pub enum ShowMessage {
     End,
     /// The settings changed in the app: apply what differs, now.
     Settings(Box<Config>),
+    /// Play a show moment without music: the effects of a drop, a phrase change and so on.
+    Preview(ShowEvent),
+    /// Play a four-second build-up ending in a drop.
+    PreviewBuild,
+}
+
+/// A change to the running show, from a key or from the app.
+enum Action {
+    Scene(String),
+    PresentMode,
+    InternalScale(f32),
+    ShowHud(bool),
+    ShowCard(bool),
+    /// The look settings changed (style, effects, quality, Auto, rotation, overlay options).
+    Look,
 }
 
 /// What to redo when the settings change under a running show. The output screen is not
@@ -447,16 +312,8 @@ impl OnsetApp {
     pub fn new(opts: AppOptions) -> Self {
         let screenshot_pending = opts.screenshot.clone();
         let opts_cache_dir = opts.cache_dir.clone();
-        let versions = all_calibrated_versions(&opts.offsets_dir);
-        let mode = if opts.launcher {
-            Mode::Launcher
-        } else {
-            Mode::Show
-        };
         Self {
-            // The launcher is a window; a show follows the "Fullscreen" setting.
-            fullscreen: !opts.launcher && opts.config.fullscreen,
-            mode,
+            fullscreen: opts.config.fullscreen,
             opts,
             surface: None,
             started: Instant::now(),
@@ -464,12 +321,6 @@ impl OnsetApp {
             paused: false,
             rate: 1.0,
             monitor: None,
-            monitor_handles: Vec::new(),
-            monitor_infos: Vec::new(),
-            adapters: Gpu::adapter_names(),
-            calibration: None,
-            calibration_lines: Vec::new(),
-            versions,
             last_scene_log: Instant::now(),
             last_frame: None,
             frame_log: Vec::new(),
@@ -480,8 +331,8 @@ impl OnsetApp {
         }
     }
 
-    /// Picks the output monitor and opens the window: the launcher's plain one, or the
-    /// show's. Falls back to a window on the primary when the chosen monitor is missing.
+    /// Picks the output monitor and opens the show's window. Falls back to a window on the
+    /// primary when the chosen monitor is missing.
     fn create_window(&mut self, event_loop: &ActiveEventLoop) -> anyhow::Result<Arc<Window>> {
         let (handles, infos) = monitor_infos(event_loop);
         let choice = self
@@ -510,24 +361,16 @@ impl OnsetApp {
             );
         }
 
-        let launcher = self.mode == Mode::Launcher;
-        let home = event_loop.primary_monitor();
-        let window = Arc::new(event_loop.create_window(window_attributes(
-            launcher,
-            self.fullscreen,
-            monitor.as_ref(),
-            home.as_ref(),
-        ))?);
-        window.set_cursor_visible(launcher);
+        let window = Arc::new(
+            event_loop.create_window(window_attributes(self.fullscreen, monitor.as_ref()))?,
+        );
+        window.set_cursor_visible(false);
         self.monitor = monitor;
-        self.monitor_handles = handles;
-        self.monitor_infos = infos;
         Ok(window)
     }
 
     fn create_surface(&mut self, event_loop: &ActiveEventLoop) -> anyhow::Result<()> {
         let window = self.create_window(event_loop)?;
-        let launcher = self.mode == Mode::Launcher;
         let instance = Gpu::new_instance();
         let surface = instance.create_surface(window.clone())?;
         let gpu =
@@ -558,8 +401,7 @@ impl OnsetApp {
             height: size.height.max(1),
             present_mode,
             alpha_mode: caps.alpha_modes[0],
-            // egui blends in gamma space, so it draws through a linear view of the surface.
-            view_formats: vec![format.remove_srgb_suffix()],
+            view_formats: Vec::new(),
             desired_maximum_frame_latency: self.opts.frame_latency,
         };
         surface.configure(&gpu.device, &config);
@@ -573,7 +415,6 @@ impl OnsetApp {
 
         let mut renderer = Renderer::new(&gpu, (config.width, config.height), format);
         renderer.set_scale(window.scale_factor() as f32);
-        // The launcher's preview shows the card and HUD exactly as the show will.
         renderer.set_show_card(self.opts.config.show_card);
         renderer.set_show_hud(self.opts.config.show_hud);
         renderer.set_settings(&gpu, self.render_settings());
@@ -599,12 +440,6 @@ impl OnsetApp {
             }
         };
 
-        let mut overlay = Overlay::new(&window, &gpu, format.remove_srgb_suffix());
-        if launcher {
-            overlay.set_page(&window, Page::Launcher);
-        } else if self.opts.settings_open {
-            overlay.set_open(&window, true);
-        }
         self.surface = Some(Surface {
             window,
             target: surface,
@@ -612,7 +447,6 @@ impl OnsetApp {
             config,
             renderer,
             watcher,
-            overlay,
         });
         self.apply_logo();
         Ok(())
@@ -635,24 +469,6 @@ impl OnsetApp {
         }
     }
 
-    /// Collects calibration progress; a closed channel means the run ended.
-    fn poll_calibration(&mut self) {
-        let Some(run) = self.calibration.as_ref() else {
-            return;
-        };
-        loop {
-            match run.rx.try_recv() {
-                Ok(line) => self.calibration_lines.push(line),
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.calibration = None;
-                    self.versions = all_calibrated_versions(&self.opts.offsets_dir);
-                    break;
-                }
-            }
-        }
-    }
-
     /// Bench bookkeeping after a present: the frame interval and how old the music state was.
     fn record_frame(&mut self, ms: &MusicState) {
         let now = Instant::now();
@@ -669,7 +485,6 @@ impl OnsetApp {
     }
 
     fn render(&mut self) {
-        self.poll_calibration();
         let Some(s) = self.surface.as_mut() else {
             return;
         };
@@ -682,10 +497,6 @@ impl OnsetApp {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let ui_view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
-            format: Some(s.config.format.remove_srgb_suffix()),
-            ..wgpu::TextureViewDescriptor::default()
-        });
         let ms: Arc<MusicState> = self
             .opts
             .engine
@@ -707,29 +518,9 @@ impl OnsetApp {
             s.renderer.set_source_line(e.status().line());
         }
         let stats = s.renderer.render(&s.gpu, &mut enc, &view, &ms, time_s);
+        s.gpu.queue.submit(std::iter::once(enc.finish()));
 
-        let calibration = CalibrationView {
-            running: self.calibration.is_some(),
-            lines: &self.calibration_lines,
-            versions: &self.versions,
-        };
-        let DrawResult {
-            buffers,
-            actions: pending,
-            changed: save,
-        } = draw_overlay(
-            s,
-            &mut self.opts,
-            &self.monitor_infos,
-            &self.adapters,
-            calibration,
-            &mut enc,
-            &ui_view,
-            &ms,
-        );
-        s.gpu
-            .queue
-            .submit(buffers.into_iter().chain(std::iter::once(enc.finish())));
+
         if self.screenshot_due()
             && let Some(path) = self.screenshot_pending.take()
         {
@@ -755,13 +546,6 @@ impl OnsetApp {
             );
         }
         self.record_frame(&ms);
-
-        for action in pending {
-            self.apply(action);
-        }
-        if save {
-            self.save_config();
-        }
     }
 
     /// A second before exit, or three seconds in when the run is open-ended.
@@ -776,120 +560,43 @@ impl OnsetApp {
         self.started.elapsed().as_secs_f32() >= at
     }
 
-    /// Applies one settings-panel edit to the running app.
-    fn apply(&mut self, action: OverlayAction) {
+    /// Applies one change to the running show.
+    fn apply(&mut self, action: Action) {
+        let Some(s) = self.surface.as_mut() else {
+            return;
+        };
         match action {
-            OverlayAction::Scene(name) => {
-                if let Some(s) = self.surface.as_mut()
-                    && s.renderer.set_scene(&name)
-                {
+            Action::Scene(name) => {
+                if s.renderer.set_scene(&name) {
                     tracing::info!(scene = %name, "switched");
                 }
             }
-            OverlayAction::PresentMode(_) => {
-                let (bench, choice) = (
-                    self.opts.bench == Some(BenchPace::Uncapped),
-                    self.opts.config.present_mode,
-                );
-                if let Some(s) = self.surface.as_mut() {
-                    let caps = s.target.get_capabilities(&s.gpu.adapter);
-                    s.config.present_mode = pick_present_mode(bench, choice, &caps);
-                    s.target.configure(&s.gpu.device, &s.config);
-                    tracing::info!(mode = ?s.config.present_mode, "present mode");
-                }
+            Action::PresentMode => {
+                let bench = self.opts.bench == Some(BenchPace::Uncapped);
+                let caps = s.target.get_capabilities(&s.gpu.adapter);
+                s.config.present_mode =
+                    pick_present_mode(bench, self.opts.config.present_mode, &caps);
+                s.target.configure(&s.gpu.device, &s.config);
+                tracing::info!(mode = ?s.config.present_mode, "present mode");
             }
-            OverlayAction::InternalScale(scale) => {
-                if let Some(s) = self.surface.as_mut() {
-                    s.renderer.set_internal_scale(&s.gpu, scale);
+            Action::InternalScale(scale) => s.renderer.set_internal_scale(&s.gpu, scale),
+            Action::ShowHud(on) => s.renderer.set_show_hud(on),
+            Action::ShowCard(on) => s.renderer.set_show_card(on),
+            Action::Look => {
+                let mut settings = self.opts.config.render_settings();
+                if self.opts.scene.is_some() {
+                    settings.auto = false;
                 }
-            }
-            OverlayAction::ShowHud(on) => {
-                if let Some(s) = self.surface.as_mut() {
-                    s.renderer.set_show_hud(on);
-                }
-            }
-            OverlayAction::ShowCard(on) => {
-                if let Some(s) = self.surface.as_mut() {
-                    s.renderer.set_show_card(on);
-                }
-            }
-            OverlayAction::Engine(cmd) => {
-                if let EngineCommand::Pause = cmd {
-                    self.paused = true;
-                }
-                if let EngineCommand::Resume = cmd {
-                    self.paused = false;
-                }
-                if let EngineCommand::SetRate(r) = cmd {
-                    self.rate = r;
-                }
-                if let Some(e) = &self.opts.engine {
-                    e.command(cmd);
-                }
-            }
-            OverlayAction::StartShow => self.enter_show(),
-            OverlayAction::Calibrate => self.start_calibration(),
-            OverlayAction::CancelCalibration => {
-                if let Some(run) = &self.calibration {
-                    run.cancel.store(true, Ordering::Relaxed);
-                }
-            }
-            OverlayAction::Quit => self.exiting = true,
-            OverlayAction::Look => {
-                let settings = self.render_settings();
-                let (hud, card) = (self.opts.config.hud.clone(), self.opts.config.card.clone());
-                if let Some(s) = self.surface.as_mut() {
-                    s.renderer.set_settings(&s.gpu, settings);
-                    s.renderer.set_overlay_options(hud, card);
-                    s.renderer
-                        .set_lyrics_options(self.opts.config.lyrics.clone());
-                    s.renderer
-                        .set_blackout_logo_size(self.opts.config.blackout_logo_size);
-                }
-            }
-            OverlayAction::Preview(event) => {
-                if let Some(s) = self.surface.as_mut() {
-                    s.renderer.preview_event(event);
-                }
-            }
-            OverlayAction::ToggleBlackout => {
-                if let Some(s) = self.surface.as_mut() {
-                    let on = !s.renderer.blackout();
-                    s.renderer.set_blackout(on);
-                }
-            }
-            OverlayAction::BlackoutLogo(source) => self.set_logo(source.as_deref()),
-            OverlayAction::PreviewBuild => {
-                if let Some(s) = self.surface.as_mut() {
-                    s.renderer.preview_build();
-                }
-            }
-            OverlayAction::NextScene => {
-                if let Some(s) = self.surface.as_mut() {
-                    s.renderer.next_scene();
-                }
+                s.renderer.set_settings(&s.gpu, settings);
+                s.renderer
+                    .set_overlay_options(self.opts.config.hud.clone(), self.opts.config.card.clone());
+                s.renderer.set_lyrics_options(self.opts.config.lyrics.clone());
+                s.renderer
+                    .set_blackout_logo_size(self.opts.config.blackout_logo_size);
             }
         }
     }
 
-    /// Makes `source` the blackout logo (Onset keeps its own copy), or removes the logo.
-    fn set_logo(&mut self, source: Option<&std::path::Path>) {
-        let adopted = match source {
-            Some(p) => match Config::adopt_logo(p) {
-                Ok(dest) => Some(dest),
-                Err(e) => {
-                    tracing::warn!(path = %p.display(), "not an image OnSet can show: {e:#}");
-                    return;
-                }
-            },
-            None => None,
-        };
-        self.opts.config.blackout_logo = adopted;
-        self.save_config();
-        self.apply_logo();
-    }
-
-    /// Loads the configured blackout logo into the renderer.
     /// Takes the app's new settings and applies what changed to the running show.
     fn adopt_settings(&mut self, config: Config) {
         let change = settings_change(&self.opts.config, &config);
@@ -898,22 +605,22 @@ impl OnsetApp {
         self.opts.config = config;
         tracing::info!(?change, "settings from the app");
         if change.scene {
-            self.apply(OverlayAction::Scene(scene));
+            self.apply(Action::Scene(scene));
         }
         if change.present_mode {
-            self.apply(OverlayAction::PresentMode(self.opts.config.present_mode));
+            self.apply(Action::PresentMode);
         }
         if change.internal_scale {
-            self.apply(OverlayAction::InternalScale(scale));
+            self.apply(Action::InternalScale(scale));
         }
         if change.hud {
-            self.apply(OverlayAction::ShowHud(hud));
+            self.apply(Action::ShowHud(hud));
         }
         if change.card {
-            self.apply(OverlayAction::ShowCard(card));
+            self.apply(Action::ShowCard(card));
         }
         if change.look {
-            self.apply(OverlayAction::Look);
+            self.apply(Action::Look);
         }
         if change.logo {
             self.apply_logo();
@@ -923,6 +630,7 @@ impl OnsetApp {
         }
     }
 
+    /// Loads the configured blackout logo into the renderer.
     fn apply_logo(&mut self) {
         let image = self
             .opts
@@ -935,95 +643,6 @@ impl OnsetApp {
         if let Some(s) = self.surface.as_mut() {
             s.renderer.set_blackout_logo(&s.gpu, image.as_ref(), size);
         }
-    }
-
-    /// Leaves the launcher: the window goes to the chosen monitor, fullscreen when asked.
-    fn enter_show(&mut self) {
-        self.mode = Mode::Show;
-        let (index, fell_back) = choose(&self.monitor_infos, &self.opts.config.output_monitor);
-        if fell_back {
-            tracing::warn!("chosen monitor not found; showing on the primary");
-        }
-        self.monitor = self.monitor_handles.get(index).cloned();
-        self.fullscreen = self.opts.config.fullscreen;
-        if let Some(s) = self.surface.as_mut() {
-            s.overlay.set_page(&s.window, Page::Hidden);
-            s.renderer.set_show_card(self.opts.config.show_card);
-            s.renderer.set_show_hud(self.opts.config.show_hud);
-            s.renderer.show_hint();
-            s.window.set_decorations(false);
-            if self.fullscreen {
-                s.window
-                    .set_fullscreen(Some(Fullscreen::Borderless(self.monitor.clone())));
-                s.window.set_window_level(WindowLevel::AlwaysOnTop);
-            }
-            s.window.set_cursor_visible(false);
-        }
-        tracing::info!(
-            monitor = index,
-            fullscreen = self.fullscreen,
-            "show started"
-        );
-    }
-
-    /// Back to the launcher: a plain window again, wherever it was.
-    fn leave_show(&mut self) {
-        self.mode = Mode::Launcher;
-        self.fullscreen = false;
-        if let Some(s) = self.surface.as_mut() {
-            s.window.set_fullscreen(None);
-            s.window.set_window_level(WindowLevel::Normal);
-            s.window.set_decorations(true);
-            match s.window.current_monitor() {
-                Some(m) => {
-                    let (size, pos) = launcher_placement(&m);
-                    let _ = s.window.request_inner_size(size);
-                    s.window.set_outer_position(pos);
-                }
-                None => {
-                    let _ = s
-                        .window
-                        .request_inner_size(LogicalSize::new(LAUNCHER_SIZE.0, LAUNCHER_SIZE.1));
-                }
-            }
-            s.overlay.set_page(&s.window, Page::Launcher);
-        }
-        tracing::info!("back to the launcher");
-    }
-
-    #[cfg(windows)]
-    fn start_calibration(&mut self) {
-        use onset_transport::memory::calibrator::{self, Session};
-        if self.calibration.is_some() {
-            return;
-        }
-        self.calibration_lines.clear();
-        let (tx, rx) = mpsc::channel();
-        let cancel = Arc::new(AtomicBool::new(false));
-        let flag = Arc::clone(&cancel);
-        let dir = self.opts.offsets_dir.clone();
-        std::thread::spawn(move || {
-            let mut report = |line: &str| {
-                let _ = tx.send(line.to_string());
-            };
-            let mut session = Session {
-                step_limit: Duration::from_secs(180),
-                report: &mut report,
-                cancel: &flag,
-            };
-            let outcome = calibrator::calibrate(&dir, &mut session);
-            let _ = match outcome {
-                Ok(path) => tx.send(format!("done: {}", path.display())),
-                Err(e) => tx.send(format!("failed: {e:#}")),
-            };
-        });
-        self.calibration = Some(CalibrationRun { rx, cancel });
-    }
-
-    #[cfg(not(windows))]
-    fn start_calibration(&mut self) {
-        self.calibration_lines
-            .push("calibration reads rekordbox's memory and needs Windows".to_string());
     }
 
     /// The renderer's settings from the config; a scene named on the command line turns
@@ -1055,23 +674,8 @@ impl OnsetApp {
 
     fn on_key(&mut self, event_loop: &ActiveEventLoop, key: KeyCode) {
         match key {
-            KeyCode::Escape => {
-                // With the settings panel open, Esc closes it; otherwise it leaves the show
-                // for the launcher, or quits when there is no launcher to go back to.
-                let settings_open = self
-                    .surface
-                    .as_ref()
-                    .is_some_and(|s| s.overlay.page() == Page::Settings);
-                if settings_open {
-                    if let Some(s) = self.surface.as_mut() {
-                        s.overlay.set_open(&s.window, false);
-                    }
-                } else if self.mode == Mode::Show && self.opts.launcher {
-                    self.leave_show();
-                } else if self.mode == Mode::Show {
-                    event_loop.exit();
-                }
-            }
+            // Ends the show: the window closes and the app hears about it.
+            KeyCode::Escape => event_loop.exit(),
             KeyCode::KeyF => self.toggle_fullscreen(),
             KeyCode::KeyB => {
                 if let Some(s) = self.surface.as_mut() {
@@ -1173,19 +777,7 @@ impl ApplicationHandler<ShowMessage> for OnsetApp {
             },
             _ => None,
         };
-        if pressed_key == Some(KeyCode::Tab) && !self.opts.hosted {
-            if let Some(s) = self.surface.as_mut() {
-                s.overlay.toggle(&s.window);
-            }
-            return;
-        }
-        let consumed = self
-            .surface
-            .as_mut()
-            .is_some_and(|s| s.overlay.on_event(&s.window, &event));
-        if let Some(code) = pressed_key
-            && !consumed
-        {
+        if let Some(code) = pressed_key {
             self.on_key(event_loop, code);
             return;
         }
@@ -1198,9 +790,6 @@ impl ApplicationHandler<ShowMessage> for OnsetApp {
                     let size = s.window.inner_size();
                     self.resize(size);
                 }
-            }
-            WindowEvent::DroppedFile(path) if self.mode == Mode::Launcher => {
-                self.set_logo(Some(&path));
             }
             WindowEvent::RedrawRequested => {
                 self.render();
@@ -1220,12 +809,22 @@ impl ApplicationHandler<ShowMessage> for OnsetApp {
         match message {
             ShowMessage::End => self.exiting = true,
             ShowMessage::Settings(config) => self.adopt_settings(*config),
+            ShowMessage::Preview(event) => {
+                if let Some(s) = self.surface.as_mut() {
+                    s.renderer.preview_event(event);
+                }
+            }
+            ShowMessage::PreviewBuild => {
+                if let Some(s) = self.surface.as_mut() {
+                    s.renderer.preview_build();
+                }
+            }
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if self.exiting {
-            // The launcher's Quit button, or an exit already under way.
+            // "End show" from the app, or an exit already under way.
             event_loop.exit();
             return;
         }
@@ -1267,23 +866,6 @@ impl ApplicationHandler<ShowMessage> for OnsetApp {
     }
 }
 
-#[cfg(test)]
-mod placement_tests {
-    use super::*;
-
-    #[test]
-    fn the_launcher_fits_a_small_screen_and_keeps_its_size_on_a_big_one() {
-        // A 2400x1600 laptop at 150 % is 1600x1067 logical: too short for 820 + chrome.
-        let (w, h) = fit_launcher((1600.0, 1066.7));
-        assert!(
-            (w - LAUNCHER_SIZE.0).abs() < 1e-6 && h < 1066.7 * 0.87 && h > 800.0,
-            "{w} {h}"
-        );
-        assert_eq!(fit_launcher((3840.0, 2160.0)), LAUNCHER_SIZE);
-        let (w, _) = fit_launcher((1280.0, 800.0));
-        assert!(w < 1280.0);
-    }
-}
 
 #[cfg(test)]
 mod settings_change_tests {

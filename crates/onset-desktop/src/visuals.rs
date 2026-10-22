@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use onset_engine::EngineCommand;
 use onset_settings::Config;
-use onset_visuals::Projector;
+use onset_visuals::{Moment, Projector};
 use onset_visuals::app::AppOptions;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -27,11 +27,8 @@ fn show_options(config: Config) -> AppOptions {
         exit_after: None,
         bench: None,
         frame_latency: 2,
-        settings_open: false,
         hosted: true,
         screenshot: None,
-        launcher: false,
-        offsets_dir: live::offsets_dir(),
         cache_dir: live::cache_dir(),
         engine: live::engine(),
     }
@@ -101,6 +98,34 @@ pub fn update(visuals: &Visuals, config: Config) {
     }
 }
 
+/// The show moment a "Try it" button names.
+fn moment(name: &str) -> Option<Moment> {
+    use onset_core::show::ShowEvent;
+    match name {
+        "buildup" => Some(Moment::BuildUp),
+        "drop" => Some(Moment::Event(ShowEvent::Drop)),
+        "phrase" => Some(Moment::Event(ShowEvent::Phrase(None))),
+        "breakdown" => Some(Moment::Event(ShowEvent::Breakdown)),
+        "track" => Some(Moment::Event(ShowEvent::Track)),
+        _ => None,
+    }
+}
+
+/// Plays a show moment on the running show without music, to try the effects.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // Tauri commands take owned arguments
+pub fn visuals_preview(visuals: State<'_, Visuals>, name: String) -> Result<(), String> {
+    let event = moment(&name).ok_or_else(|| format!("Unknown show moment: {name}"))?;
+    let slot = visuals.0.lock().map_err(|e| e.to_string())?;
+    match slot.as_ref() {
+        Some(p) if p.is_running() => {
+            p.preview(event);
+            Ok(())
+        }
+        _ => Err("Start the show to try its effects".into()),
+    }
+}
+
 /// Ends the running show, if any.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)] // Tauri commands take owned arguments
@@ -128,12 +153,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn try_it_names_the_launchers_moments() {
+        use onset_core::show::ShowEvent;
+        assert_eq!(moment("buildup"), Some(Moment::BuildUp));
+        assert_eq!(moment("drop"), Some(Moment::Event(ShowEvent::Drop)));
+        assert_eq!(moment("track"), Some(Moment::Event(ShowEvent::Track)));
+        assert_eq!(moment("fireworks"), None);
+    }
+
+    #[test]
     fn a_show_goes_straight_to_the_screen_and_leaves_the_settings_file_to_the_app() {
         let opts = show_options(Config::default());
-        assert!(
-            !opts.launcher,
-            "no launcher page: the app holds the settings"
-        );
         assert!(opts.hosted, "the app owns config.toml and the controls");
         assert!(opts.bench.is_none() && opts.exit_after.is_none());
     }

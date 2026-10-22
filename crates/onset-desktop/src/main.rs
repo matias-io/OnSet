@@ -945,6 +945,7 @@ fn main() {
             visuals::visuals_start,
             visuals::visuals_end,
             visuals::visuals_running,
+            visuals::visuals_preview,
             show::show_mode,
             show_settings::show_settings,
             show_settings::show_settings_save,
