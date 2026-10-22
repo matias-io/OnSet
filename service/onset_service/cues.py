@@ -42,8 +42,10 @@ CUE_SCHEME = {
     "L": ("L end loop",  5, (0, 200, 200)),     # optional (--end-loop N), a memory loop
     "I": ("I intro loop", 4, (40, 226, 20)),    # optional (--intro-loop N), a loop on the first N bars
 }
-# --hot-cues: cue letter -> hot cue slot (djmdCue.Kind 1..8 = hot cue A..H); the end loop takes slot H
-HOT_SLOT = {"A": 1, "B": 2, "C": 3, "D": 4, "E": 5, "F": 6, "G": 7, "L": 8}
+# --hot-cues: cue letter -> hot cue slot. rekordbox numbers pads A..H as djmdCue.Kind 1, 2, 3, 5, 6,
+# 7, 8, 9; Kind 4 is a memory loop. Until 2026-10-22 OnSet wrote D..L to Kind 4..8, which put hot D
+# where rekordbox shows no pad and every later cue one pad late. The end loop takes slot H.
+HOT_SLOT = {"A": 1, "B": 2, "C": 3, "D": 5, "E": 6, "F": 7, "G": 8, "L": 9}
 UUID_PREFIX = "a0c0e5e5-a070-4cfe-"   # marks cues OnSet writes (so re-runs can replace them); unchanged since Autocue
 
 

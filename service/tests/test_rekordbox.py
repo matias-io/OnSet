@@ -334,3 +334,67 @@ def test_missing_backup_file_or_future_manifest_refuses_restore_clearly(tmp_path
     with pytest.raises(ValueError,match='Backup missing'):restore(store,manifest['id'])
     assert plain_db.read_bytes()==before
     store.close()
+
+
+def test_stale_beats_naming_the_real_cause_not_the_cue(tmp_path,song,plain_db):
+    # Cues sit on the imported bar grid; a leftover detector beats array must not read as
+    # though the DJ misplaced the loop.
+    import numpy as np
+    data=analysis(song)
+    bars=[.049+1.92*i for i in range(12)]
+    data['downbeats']=bars;data['bpm']=125.
+    data['beats']=[.209+.4876*i for i in range(48)]
+    data['cues']=[['L','L end loop',bars[4],bars[8]]]
+    store=Store(tmp_path/'app');p=store.import_track(song);p=store.apply_analysis(p['id'],data)
+    store.review_cue(p['id'],p['cues'][0]['id'],'approved')
+    preview=prepare(store,[p['id']],plain_db,True)
+    assert any(c.get('role')=='L' and 'Stored beats disagree' in c['reason'] for c in preview['conflicts'])
+    assert not preview['changes']
+    store.close()
+
+
+@pytest.mark.parametrize('hot',[False,True])
+def test_restore_returns_cue_ownership_so_the_write_can_be_repeated(tmp_path,song,plain_db,hot):
+    # A real rehearsal restored the cues but left OnSet owning the undone ones, so the restored
+    # cues read as manual and the next write was refused.
+    data=analysis(song);data['cues']=[['A','A intro',1.],['D','D drop',4.]]
+    store=Store(tmp_path/'app');p=store.import_track(song);p=store.apply_analysis(p['id'],data)
+    for cue in p['cues']:store.review_cue(p['id'],cue['id'],'approved')
+    first=prepare(store,[p['id']],plain_db,True,hot=hot)
+    apply(store,first['id'])
+    p=store.get(p['id']);p['cues'][1]['time']=8.;store.save(p)
+    manifest=apply(store,prepare(store,[p['id']],plain_db,True,hot=hot)['id'])
+    restore(store,manifest['id'])
+    again=prepare(store,[p['id']],plain_db,True,hot=hot)
+    assert not again['conflicts'] and {o['role'] for o in again['changes'][0]['operations']}=={'D'}
+    store.close()
+
+
+def test_hot_cues_from_the_old_slot_numbering_move_to_their_pads(tmp_path,song,plain_db,monkeypatch):
+    import onset_service.cues as cues
+    data=analysis(song);data['cues']=[['A','A intro',1.],['D','D drop',4.],['E','E breakdown',8.]]
+    store=Store(tmp_path/'app');p=store.import_track(song);p=store.apply_analysis(p['id'],data)
+    for cue in p['cues']:store.review_cue(p['id'],cue['id'],'approved')
+    monkeypatch.setattr(cues,'HOT_SLOT',{'A':1,'B':2,'C':3,'D':4,'E':5,'F':6,'G':7,'L':8})
+    apply(store,prepare(store,[p['id']],plain_db,True,hot=True)['id'])
+    monkeypatch.undo()
+    preview=prepare(store,[p['id']],plain_db,True,hot=True)
+    assert not preview['conflicts']
+    apply(store,preview['id'])
+    db=open_db(plain_db,True);hot=sorted((c.Comment,c.Kind) for c in db.get_cue(ContentID='42') if c.Comment!='My manual cue')
+    assert hot==[('A intro',1),('D drop',5),('E breakdown',6)]
+    db.close();db.engine.dispose();store.close()
+
+
+def test_a_manual_cue_on_the_new_pad_is_preserved(tmp_path,song,plain_db):
+    import uuid,datetime as dt
+    from pyrekordbox.db6 import tables
+    db=open_db(plain_db,True);now=dt.datetime.now()
+    db.add(tables.DjmdCue(ID='8',ContentID='42',InMsec=2000,OutMsec=-1,Kind=5,Comment='My pad D',UUID=str(uuid.uuid4()),created_at=now,updated_at=now))
+    db.commit();db.close();db.engine.dispose()
+    data=analysis(song);data['cues']=[['D','D drop',4.]]
+    store=Store(tmp_path/'app');p=store.import_track(song);p=store.apply_analysis(p['id'],data)
+    store.review_cue(p['id'],p['cues'][0]['id'],'approved')
+    preview=prepare(store,[p['id']],plain_db,True,hot=True)
+    assert any(c.get('role')=='D' and 'preserved' in c['reason'] for c in preview['conflicts'])
+    store.close()

@@ -120,8 +120,11 @@ def prepare(store, track_ids, path=None, plain=False, hot=False, comments=False)
                 if hot and role not in HOT_SLOT:
                     continue
                 kind = HOT_SLOT[role] if hot else (4 if proposal.get("end") is not None else 0)
+                # A hot rewrite replaces the cue on the target pad and OnSet's own cue of that name on
+                # any other pad, so cues from the old off-by-one slot numbering move instead of doubling.
                 old = [c for c in existing if is_hot_cue(c) == hot and
-                       ((hot and c.Kind == kind) or (not hot and c.Comment == CUE_SCHEME[role][0]))]
+                       ((hot and (c.Kind == kind or ((c.UUID or "").startswith(UUID_PREFIX) and c.Comment == CUE_SCHEME[role][0])))
+                        or (not hot and c.Comment == CUE_SCHEME[role][0]))]
                 if any(not (c.UUID or "").startswith(UUID_PREFIX) or previous.get(c.UUID) != cue_record(c) for c in old):
                     conflicts.append({"track_id": track_id, "role": role, "reason": "Manual, changed, or untracked existing cue preserved"})
                     continue
@@ -130,14 +133,19 @@ def prepare(store, track_ids, path=None, plain=False, hot=False, comments=False)
                     continue
                 loop_beats = 0
                 if proposal.get("end") is not None:
-                    beats = (p.get("analysis") or {}).get("beats", [])
+                    analysis = p.get("analysis") or {}
+                    beats = analysis.get("beats", [])
                     if not beats:
                         conflicts.append({"track_id": track_id, "role": role, "reason": "Loop requires the actual beat grid"})
                         continue
                     import numpy as np
                     indices = [int(np.argmin(abs(np.asarray(beats) - t))) for t in (proposal["time"], proposal["end"])]
                     if any(abs(beats[i] - t) > .05 for i, t in zip(indices, (proposal["time"], proposal["end"]))) or indices[1] <= indices[0]:
-                        conflicts.append({"track_id": track_id, "role": role, "reason": "Loop endpoints must align with the beat grid"})
+                        bars = np.asarray(analysis.get("downbeats") or [])
+                        stale = len(bars) > 1 and all(min(abs(bars - t)) <= .05 for t in (proposal["time"], proposal["end"]))
+                        conflicts.append({"track_id": track_id, "role": role,
+                                          "reason": "Stored beats disagree with the bar grid the cue sits on; reanalyse before writing loops"
+                                          if stale else "Loop endpoints must align with the beat grid"})
                         continue
                     loop_beats = indices[1] - indices[0]
                 target = {"Kind": kind, "InMsec": round(proposal["time"] * 1000),
@@ -242,17 +250,21 @@ def apply(store, preview_id):
                 failed.append({"track_id": change["track_id"], "error": str(exc)})
         not_running()
         db.commit()
+        owned_before = {}
         for row in written:
             actual = [cue_record(x) for x in db.get_cue(ContentID=row["content_id"])]
             if sorted(actual, key=lambda c: c["UUID"]) != sorted(row["cues"], key=lambda c: c["UUID"]):
                 raise RuntimeError("Post-commit verification failed; backup retained")
-            store.artifact("written", row["track_id"] + (":hot" if preview["hot"] else ":memory"), row)
+            key = row["track_id"] + (":hot" if preview["hot"] else ":memory")
+            owned_before[key] = store.artifact("written", key) or {"cues": []}
+            store.artifact("written", key, row)
             p = store.get(row["track_id"])
             p["write_state"] = "written"
             store.save(p)
         manifest = {"schema_version": 1, "id": uuid.uuid4().hex, "preview_id": preview_id,
                     "backup": str(backup), "backup_hash": file_hash(backup), "db_path": preview["db_path"],
-                    "plain": preview["plain"], "written": written, "failed": failed, "created": utcnow()}
+                    "plain": preview["plain"], "written": written, "failed": failed, "created": utcnow(),
+                    "owned_before": owned_before}
         manifest["auxiliary"] = auxiliary
         atomic_json(backup.with_suffix(".json"), manifest)
         store.artifact("write-manifest", manifest["id"], manifest)
@@ -299,6 +311,10 @@ def restore(store, manifest_id):
     os.replace(temporary, target)
     if auxiliary:
         shutil.copy2(auxiliary["backup"], auxiliary["source"])
+    # The restored cues are the ones OnSet owned before that write; without this they would read as
+    # manual and every later write to those tracks would be refused. Older manifests lack the record.
+    for key, record in (manifest.get("owned_before") or {}).items():
+        store.artifact("written", key, record)
     for row in manifest["written"]:
         p = store.get(row["track_id"])
         p["write_state"] = "stale"

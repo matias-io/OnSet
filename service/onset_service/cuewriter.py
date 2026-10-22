@@ -141,8 +141,10 @@ def make_uuid():
 
 
 def is_hot_cue(c):
-    """djmdCue.Kind: 0 = memory cue, 1..8 = hot cue A..H, 4 = memory loop (has an out point)."""
-    return 1 <= (c.Kind or 0) <= 8 and not (c.Kind == 4 and c.OutMsec is not None and c.OutMsec >= 0)
+    """djmdCue.Kind: 0 = memory cue, 4 = memory loop (has an out point), 1-3 and 5-9 = hot cue A..H.
+    A Kind 4 cue without an out point is the hot D that OnSet wrote before 2026-10-22; it stays a hot
+    cue here so hot rewrites move it and memory limits do not count it."""
+    return 1 <= (c.Kind or 0) <= 9 and not (c.Kind == 4 and c.OutMsec is not None and c.OutMsec >= 0)
 
 
 def write_cues(db, content, cues, replace_all=False, dry_run=False, bpm=128.0, hot_cues=False, beat_times=None):
