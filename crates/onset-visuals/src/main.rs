@@ -16,7 +16,7 @@ use clap::Parser;
 use onset_engine as engine;
 use winit::event_loop::EventLoop;
 
-use crate::app::{AppOptions, OnsetApp};
+use crate::app::{AppOptions, BenchPace, OnsetApp};
 use crate::config::{Config, MonitorChoice};
 use crate::engine::{Engine, EngineConfig};
 
@@ -55,6 +55,13 @@ struct Cli {
     /// Run for this many seconds without vsync, then print frame statistics and exit
     #[arg(long, value_name = "SECONDS")]
     bench: Option<f64>,
+    /// With --bench: `uncapped` presents without vsync; `show` keeps the configured present
+    /// mode, as in a show
+    #[arg(long, value_enum, default_value_t = BenchPace::Uncapped)]
+    bench_pace: BenchPace,
+    /// Frames the GPU may queue ahead of the display (1 or 2); fewer means less delay
+    #[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u32).range(1..=2))]
+    frame_latency: u32,
     /// Start with the settings panel open (Tab toggles it)
     #[arg(long)]
     settings: bool,
@@ -145,7 +152,8 @@ fn main() -> anyhow::Result<()> {
         monitor: cli.monitor.as_deref().map(parse_monitor),
         scene: cli.scene.clone(),
         exit_after: cli.exit_after.or(cli.bench).map(Duration::from_secs_f64),
-        bench: cli.bench.is_some(),
+        bench: cli.bench.map(|_| cli.bench_pace),
+        frame_latency: cli.frame_latency,
         settings_open: cli.settings,
         screenshot: cli.screenshot.clone(),
         launcher,

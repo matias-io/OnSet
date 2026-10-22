@@ -29,6 +29,15 @@ use crate::launcher::{CalibrationView, LAUNCHER_SIZE, all_calibrated_versions};
 use crate::monitors::{MonitorInfo, choose};
 use crate::overlay::{DrawResult, DrawTarget, Overlay, OverlayAction, OverlayView, Page};
 
+/// How a bench presents frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum BenchPace {
+    /// No `VSync`: the GPU's own pace.
+    Uncapped,
+    /// The configured present mode, as a show runs.
+    Show,
+}
+
 pub struct AppOptions {
     pub config: Config,
     /// Command-line override of the configured monitor.
@@ -37,8 +46,10 @@ pub struct AppOptions {
     pub scene: Option<String>,
     /// Close automatically after this long (for unattended checks).
     pub exit_after: Option<Duration>,
-    /// Present without `VSync` and print frame statistics on exit.
-    pub bench: bool,
+    /// Print frame statistics on exit, presenting as `BenchPace` says.
+    pub bench: Option<BenchPace>,
+    /// Frames the GPU may queue ahead of the display.
+    pub frame_latency: u32,
     /// Start with the settings panel open.
     pub settings_open: bool,
     /// Save one frame here shortly before exit.
@@ -96,6 +107,8 @@ pub struct OnsetApp {
     last_frame: Option<Instant>,
     /// Frame intervals in ms, kept only in bench mode.
     frame_log: Vec<f32>,
+    /// How old the engine's state was when each frame was presented, in ms (bench only).
+    age_log: Vec<f32>,
     /// `exit()` was requested; `about_to_wait` can run again before the loop stops.
     exiting: bool,
     /// Where the one requested screenshot goes; taken out once it is written.
@@ -403,6 +416,7 @@ impl OnsetApp {
             last_scene_log: Instant::now(),
             last_frame: None,
             frame_log: Vec::new(),
+            age_log: Vec::new(),
             exiting: false,
             screenshot_pending,
             lyrics: crate::lyrics::LyricsWorker::spawn(&opts_cache_dir.join("lyrics")),
@@ -469,7 +483,11 @@ impl OnsetApp {
             .find(wgpu::TextureFormat::is_srgb)
             .unwrap_or(caps.formats[0]);
         let size = window.inner_size();
-        let present_mode = pick_present_mode(self.opts.bench, self.opts.config.present_mode, &caps);
+        let present_mode = pick_present_mode(
+            self.opts.bench == Some(BenchPace::Uncapped),
+            self.opts.config.present_mode,
+            &caps,
+        );
         // Screenshots copy the presented frame; ask for COPY_SRC only where it is offered.
         let mut usage = wgpu::TextureUsages::RENDER_ATTACHMENT;
         if self.opts.screenshot.is_some() && caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
@@ -485,7 +503,7 @@ impl OnsetApp {
             alpha_mode: caps.alpha_modes[0],
             // egui blends in gamma space, so it draws through a linear view of the surface.
             view_formats: vec![format.remove_srgb_suffix()],
-            desired_maximum_frame_latency: 2,
+            desired_maximum_frame_latency: self.opts.frame_latency,
         };
         surface.configure(&gpu.device, &config);
         tracing::info!(
@@ -578,6 +596,21 @@ impl OnsetApp {
         }
     }
 
+    /// Bench bookkeeping after a present: the frame interval and how old the music state was.
+    fn record_frame(&mut self, ms: &MusicState) {
+        let now = Instant::now();
+        if self.opts.bench.is_some() {
+            if let Some(engine) = self.opts.engine.as_ref() {
+                self.age_log.push(engine.age(ms).as_secs_f32() * 1000.0);
+            }
+            if let Some(last) = self.last_frame {
+                self.frame_log
+                    .push(now.duration_since(last).as_secs_f32() * 1000.0);
+            }
+        }
+        self.last_frame = Some(now);
+    }
+
     fn render(&mut self) {
         self.poll_calibration();
         let Some(s) = self.surface.as_mut() else {
@@ -652,15 +685,6 @@ impl OnsetApp {
         self.frames += 1;
         tracing::trace!(cpu_ms = stats.cpu_ms, "frame recorded");
 
-        let now = Instant::now();
-        if let Some(last) = self.last_frame
-            && self.opts.bench
-        {
-            self.frame_log
-                .push(now.duration_since(last).as_secs_f32() * 1000.0);
-        }
-        self.last_frame = Some(now);
-
         // A once-a-second line so an unattended run leaves a trace of what it showed.
         if self.last_scene_log.elapsed() >= Duration::from_secs(1) {
             self.last_scene_log = Instant::now();
@@ -673,6 +697,7 @@ impl OnsetApp {
                 "frame"
             );
         }
+        self.record_frame(&ms);
 
         for action in pending {
             self.apply(action);
@@ -705,7 +730,10 @@ impl OnsetApp {
                 }
             }
             OverlayAction::PresentMode(_) => {
-                let (bench, choice) = (self.opts.bench, self.opts.config.present_mode);
+                let (bench, choice) = (
+                    self.opts.bench == Some(BenchPace::Uncapped),
+                    self.opts.config.present_mode,
+                );
                 if let Some(s) = self.surface.as_mut() {
                     let caps = s.target.get_capabilities(&s.gpu.adapter);
                     s.config.present_mode = pick_present_mode(bench, choice, &caps);
@@ -1117,7 +1145,15 @@ impl ApplicationHandler for OnsetApp {
                 fps = self.frames as f64 / secs,
                 "exit-after reached"
             );
-            if self.opts.bench {
+            if self.opts.bench.is_some() {
+                let age = BenchStats::from_intervals(&self.age_log);
+                println!(
+                    "bench-age frame_latency={} vsync={} mean_ms={:.2} p99_ms={:.2}",
+                    self.opts.frame_latency,
+                    self.opts.bench == Some(BenchPace::Show),
+                    age.mean_ms,
+                    age.p99_ms
+                );
                 let stats = BenchStats::from_intervals(&self.frame_log);
                 let (scene, size) = self
                     .surface

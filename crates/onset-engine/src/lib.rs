@@ -122,6 +122,8 @@ pub struct Engine {
     audio_device: Arc<ArcSwap<String>>,
     /// Progress of the whole-library lyrics look-up, empty when none has run.
     lyrics_progress: Arc<ArcSwap<String>>,
+    /// The clock `MusicState::time_s` counts from.
+    started: Instant,
     _thread: std::thread::JoinHandle<()>,
 }
 
@@ -417,6 +419,7 @@ impl Engine {
         let audio_choice = Arc::new(parking_lot::Mutex::new(cfg.audio_device.clone()));
 
         let (state_w, status_w) = (state.clone(), status.clone());
+        let started = Instant::now();
         let thread = std::thread::Builder::new()
             .name("onset-engine".into())
             .spawn(move || {
@@ -433,7 +436,7 @@ impl Engine {
                     capture,
                     clock: Clock::new(),
                     director: Director::new(),
-                    started: Instant::now(),
+                    started,
                     last_tick: Instant::now(),
                     last_status: None,
                     unresolved: None,
@@ -457,8 +460,15 @@ impl Engine {
             simulator,
             audio_device,
             lyrics_progress,
+            started,
             _thread: thread,
         })
+    }
+
+    /// How old `state` is: the time since the engine assembled it.
+    pub fn age(&self, state: &MusicState) -> Duration {
+        let now = self.started.elapsed().as_secs_f64();
+        Duration::from_secs_f64((now - state.time_s).max(0.0))
     }
 
     /// The latest assembled state; cheap to call every frame.
@@ -712,8 +722,7 @@ impl Running {
         if let Some(meta) = resolve_track(&self.library, &snapshot.track) {
             tracing::info!(title = %meta.title, artist = %meta.artist, "master deck track");
             if let Source::Live(s) = &mut self.source {
-                s.set_track_sample_rate(meta.sample_rate);
-                s.set_track_bpm(meta.bpm);
+                s.set_deck_track(snapshot.deck, meta.sample_rate, meta.bpm);
             }
             let mut current = load_current(
                 &self.library,
@@ -777,9 +786,8 @@ impl Running {
         );
         if let Some(meta) = matcher.best().cloned() {
             tracing::info!(title = %meta.title, artist = %meta.artist, "streamed track recognised by ear");
-            if let Source::Live(s) = &mut self.source {
-                s.set_track_sample_rate(meta.sample_rate);
-                s.set_track_bpm(meta.bpm);
+            if let (Source::Live(s), Some(deck)) = (&mut self.source, self.deck) {
+                s.set_deck_track(deck, meta.sample_rate, meta.bpm);
             }
             let mut current = load_current(
                 &self.library,
