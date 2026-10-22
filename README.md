@@ -75,6 +75,10 @@ cargo build --locked --release -p onset-visuals -p onset-cli
 .\target\release\onset.exe
 ```
 
+That builds the show on its own. The full OnSet app, with preparation, the live view and
+the Show page, is `onset-desktop`; [docs/DESKTOP.md](docs/DESKTOP.md) explains how to
+build it.
+
 To make a portable Windows zip you can move to another machine:
 
 ```powershell
