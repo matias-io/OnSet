@@ -55,6 +55,9 @@ pub enum EngineCommand {
     LoadTrack(String),
     /// Capture this device (name fragment), or pick automatically with `None`; applies now.
     SetAudioDevice(Option<String>),
+    /// Listen to the room's sound, or stop: the app's live view needs only the decks, its
+    /// projector the audio as well.
+    SetCapture(bool),
     /// Look up and cache the lyrics of every track in the collection, in the background.
     PrefetchLyrics,
     /// Reload the rekordbox calibration and find the decks again, after a new calibration.
@@ -667,6 +670,18 @@ impl Running {
                 self.cfg.audio_device.clone_from(choice);
                 self.audio_choice.lock().clone_from(choice);
                 self.tend_audio(true);
+            }
+            (EngineCommand::SetCapture(on), _) => {
+                if self.cfg.capture_audio != *on {
+                    tracing::info!(on, "audio capture");
+                    self.cfg.capture_audio = *on;
+                    if *on {
+                        self.tend_audio(true);
+                    } else {
+                        self.capture = None;
+                        self.audio_device.store(Arc::new("none".to_string()));
+                    }
+                }
             }
             (EngineCommand::Reconnect, Source::Live(_)) => {
                 tracing::info!("reloading the rekordbox calibration");
