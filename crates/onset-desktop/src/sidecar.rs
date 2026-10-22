@@ -18,6 +18,8 @@ type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>;
 pub struct Service {
     child: Mutex<Child>,
     stdin: Mutex<Option<ChildStdin>>,
+    /// The service's last line of error output: why it stopped, when it did.
+    last_error: Arc<Mutex<String>>,
     next: AtomicU64,
     pending: Pending,
 }
@@ -99,8 +101,13 @@ impl Service {
         let stdout = child.stdout.take().expect("piped stdout");
         let stderr = child.stderr.take().expect("piped stderr");
         let pending: Pending = Arc::default();
+        let last_error: Arc<Mutex<String>> = Arc::default();
+        // The service writes why it stops and then exits; the reply thread waits for that
+        // line before failing the calls still waiting.
+        let (err_done, err_finished) = std::sync::mpsc::channel::<()>();
 
         let replies = pending.clone();
+        let reason = last_error.clone();
         std::thread::Builder::new()
             .name("service-out".into())
             .spawn(move || {
@@ -129,23 +136,31 @@ impl Service {
                         let _ = tx.send(outcome);
                     }
                 }
-                // The service stopped: fail every call still waiting.
+                // The service stopped: fail every call still waiting, with its reason.
+                let _ = err_finished.recv_timeout(Duration::from_millis(500));
+                let message = stopped_message(&reason.lock());
                 for (_, tx) in replies.lock().drain() {
-                    let _ = tx.send(Err("Analysis service stopped".into()));
+                    let _ = tx.send(Err(message.clone()));
                 }
             })?;
         // Library logs stay out of the screens; keep them at debug.
+        let latest = last_error.clone();
         std::thread::Builder::new()
             .name("service-err".into())
             .spawn(move || {
                 for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                     tracing::debug!(target: "onset_service", "{line}");
+                    if !line.trim().is_empty() {
+                        line.trim().clone_into(&mut latest.lock());
+                    }
                 }
+                let _ = err_done.send(());
             })?;
 
         Ok(Self {
             child: Mutex::new(child),
             stdin: Mutex::new(stdin),
+            last_error,
             next: AtomicU64::new(1),
             pending,
         })
@@ -165,7 +180,7 @@ impl Service {
         };
         if !sent {
             self.pending.lock().remove(&id);
-            return Err("Analysis service stopped".into());
+            return Err(stopped_message(&self.last_error.lock()));
         }
         rx.await
             .unwrap_or_else(|_| Err("Analysis service stopped".into()))
@@ -189,6 +204,19 @@ impl Service {
             std::thread::sleep(Duration::from_millis(100));
         }
         let _ = child.kill();
+    }
+}
+
+/// "Analysis service stopped", with the service's own last words when it left any.
+fn stopped_message(last_error: &str) -> String {
+    let reason = last_error
+        .rsplit_once(": ")
+        .filter(|(kind, _)| kind.ends_with("Error") || kind.ends_with("Exception"))
+        .map_or(last_error, |(_, message)| message);
+    if reason.is_empty() {
+        "Analysis service stopped".into()
+    } else {
+        format!("Analysis service stopped: {reason}")
     }
 }
 
@@ -245,6 +273,19 @@ pub fn set_background(child: &Child, on: bool) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::Runtime;
+
+    #[test]
+    fn a_stopped_service_says_why() {
+        assert_eq!(super::stopped_message(""), "Analysis service stopped");
+        assert_eq!(
+            super::stopped_message("RuntimeError: OnSet is already running on this workspace"),
+            "Analysis service stopped: OnSet is already running on this workspace"
+        );
+        assert_eq!(
+            super::stopped_message("some library note: details"),
+            "Analysis service stopped: some library note: details"
+        );
+    }
 
     #[cfg(windows)]
     #[test]
