@@ -505,11 +505,11 @@ fn deck_limit(found: usize) -> usize {
 }
 
 /// Among the layouts the position candidates sit in, the deck layout. Each layout is cut down
-/// to the pointers its objects share (as `refine` does), then scored by how many objects that
-/// finds. rekordbox 7.2.19 also keeps the playhead in its player objects, twice in each, and
-/// those are more numerous than the decks; a layout holding two candidates in one object is
-/// therefore ranked after every layout that holds one. Before this, the layout with the most
-/// candidates won, and on one deck that was the player object, whose signature found only it.
+/// to the pointers its objects share (as `refine` does) and ranked by `layout_rank`: not the
+/// most objects, which on 7.2.19 chose a generic structure found 15 times with three shared
+/// pointers and no tempo beside the position, over the deck layout found 5 times with eight.
+/// rekordbox also keeps the playhead in its player objects, twice in each; a layout holding
+/// two candidates in one object is the player, ranked last.
 fn pick_layout(
     s: &mut Session<'_>,
     p: &Process,
@@ -526,7 +526,7 @@ fn pick_layout(
         .into_iter()
         .collect();
     let hits = find_u64_values(p, &values, SIBLING_HITS);
-    let objects = |key: &[(i64, u64)], primary: u64| -> usize {
+    let objects = |key: &[(i64, u64)], primary: u64| -> (usize, usize) {
         let anchors: Vec<Anchor> = key
             .iter()
             .map(|(offset, module_offset)| Anchor {
@@ -546,30 +546,85 @@ fn pick_layout(
             .collect();
         let shared = shared_signature(p, primary, &anchors, &found);
         if shared.anchors.len() < MIN_ANCHORS {
-            0
+            (0, 0)
         } else {
-            shared.decks.len()
+            (shared.decks.len(), shared.anchors.len())
         }
     };
-    let scored: Vec<(bool, usize, LayoutKey, Vec<Counter>)> = by_set
+    let scored: Vec<(LayoutRank, LayoutKey, Vec<Counter>)> = by_set
         .into_iter()
         .map(|(k, v)| {
-            let single = !holds_twice(&v);
-            (single, objects(&k, v[0].addr), k, v)
+            let (found, shared) = objects(&k, v[0].addr);
+            let rank = layout_rank(
+                !holds_twice(&v),
+                found,
+                shared,
+                tempo_fields(p, v[0].addr).is_some(),
+                v.len(),
+            );
+            (rank, k, v)
         })
         .collect();
-    for (single, n, k, v) in &scored {
+    for (rank, k, v) in &scored {
         s.say(format!(
-            "  layout with {} anchor(s) around {} candidate(s){}: finds {n} object(s)",
+            "  layout with {} anchor(s) around {} candidate(s){}: finds {} object(s) sharing {}, tempo beside the position: {}",
             k.len(),
             v.len(),
-            if *single { "" } else { " in one object" }
+            if rank.single { "" } else { " in one object" },
+            rank.objects,
+            rank.shared,
+            if rank.tempo { "yes" } else { "no" }
         ));
     }
     scored
         .into_iter()
-        .max_by_key(|(single, n, k, v)| (*single, *n, v.len(), k.len()))
-        .map(|(_, _, k, v)| (k, v))
+        .max_by_key(|(rank, _, _)| rank.key())
+        .map(|(_, k, v)| (k, v))
+}
+
+/// Deck objects a layout can plausibly be found as: rekordbox keeps one object per deck and a
+/// few more of the same class, never dozens.
+const PLAUSIBLE_OBJECTS: std::ops::RangeInclusive<usize> = 2..=8;
+
+/// What decides between layouts, best first: one candidate per object (not the player), a
+/// plausible object count, tempo fields beside the position, more shared pointers, then more
+/// objects and more candidates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LayoutRank {
+    single: bool,
+    objects: usize,
+    shared: usize,
+    tempo: bool,
+    candidates: usize,
+}
+
+impl LayoutRank {
+    fn key(&self) -> (bool, bool, bool, usize, usize, usize) {
+        (
+            self.single,
+            PLAUSIBLE_OBJECTS.contains(&self.objects),
+            self.tempo,
+            self.shared,
+            self.objects,
+            self.candidates,
+        )
+    }
+}
+
+fn layout_rank(
+    single: bool,
+    objects: usize,
+    shared: usize,
+    tempo: bool,
+    candidates: usize,
+) -> LayoutRank {
+    LayoutRank {
+        single,
+        objects,
+        shared,
+        tempo,
+        candidates,
+    }
 }
 
 /// A layout: the (offset, module offset) of each module pointer around a position field.
@@ -832,6 +887,21 @@ mod tests {
             counter(0x26f_6374_f104, CounterFormat::I32, 38.4),
         ];
         assert!(!holds_twice(&decks));
+    }
+
+    #[test]
+    fn the_deck_layout_outranks_a_generic_structure_found_more_often() {
+        // 7.2.19, calibrated from the panel: the deck layout was found 5 times sharing 8
+        // pointers with tempo beside the position; a generic structure 15 times sharing 3,
+        // with none; the player object 8 times, holding the playhead twice.
+        let deck = layout_rank(true, 5, 8, true, 1);
+        let generic = layout_rank(true, 15, 3, false, 1);
+        let player = layout_rank(false, 8, 4, false, 2);
+        assert!(deck.key() > generic.key());
+        assert!(deck.key() > player.key());
+        assert!(generic.key() > player.key());
+        // Without tempo fields, a plausible count with more shared pointers still wins.
+        assert!(layout_rank(true, 5, 8, false, 1).key() > generic.key());
     }
 
     #[test]
