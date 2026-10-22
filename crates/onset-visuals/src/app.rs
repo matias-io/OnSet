@@ -152,20 +152,23 @@ fn pick_present_mode(
 
 /// The next swapchain texture, reconfiguring the surface when it says so; `None` means skip
 /// this frame.
-fn acquire_frame(s: &mut Surface) -> Option<wgpu::SurfaceTexture> {
+///
+/// A suboptimal frame is still shown, and the surface is reconfigured only after it is
+/// presented: wgpu refuses `configure` while a frame is held, and that refusal leaves the
+/// surface unconfigured, so every later frame failed until the window happened to resize.
+fn acquire_frame(s: &mut Surface) -> Option<(wgpu::SurfaceTexture, bool)> {
     match s.target.get_current_texture() {
-        wgpu::CurrentSurfaceTexture::Success(f) => Some(f),
-        wgpu::CurrentSurfaceTexture::Suboptimal(f) => {
-            s.target.configure(&s.gpu.device, &s.config);
-            Some(f)
-        }
+        wgpu::CurrentSurfaceTexture::Success(f) => Some((f, false)),
+        wgpu::CurrentSurfaceTexture::Suboptimal(f) => Some((f, true)),
         wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => None,
         wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
             s.target.configure(&s.gpu.device, &s.config);
             None
         }
         wgpu::CurrentSurfaceTexture::Validation => {
-            tracing::error!("surface acquisition failed validation");
+            // Configure again so the next frame can recover instead of failing forever.
+            tracing::warn!("surface acquisition failed validation; reconfiguring");
+            s.target.configure(&s.gpu.device, &s.config);
             None
         }
     }
@@ -491,7 +494,7 @@ impl OnsetApp {
         if let Some(w) = s.watcher.as_mut() {
             s.renderer.poll_hot_reload(&s.gpu, w, &shader_dir());
         }
-        let Some(frame) = acquire_frame(s) else {
+        let Some((frame, reconfigure)) = acquire_frame(s) else {
             return;
         };
         let view = frame
@@ -530,6 +533,9 @@ impl OnsetApp {
         let s = self.surface.as_mut().expect("surface exists");
         s.window.pre_present_notify();
         s.gpu.queue.present(frame);
+        if reconfigure {
+            s.target.configure(&s.gpu.device, &s.config);
+        }
         self.frames += 1;
         tracing::trace!(cpu_ms = stats.cpu_ms, "frame recorded");
 
