@@ -10,6 +10,11 @@ import uuid
 from .util import atomic_json, digest, file_hash, utcnow
 
 TABLES = ("tracks", "aliases", "revisions", "edits", "jobs", "artifacts", "settings")
+# Backups OnSet takes on its own at every start, quit and shutdown. Each is a full copy of the
+# workspace, so without a limit they filled the disk (14 GB in 162 copies by 2026-10-22). Backups
+# taken for any other reason (manual, portable-export, before-restore) are never pruned.
+AUTOMATIC = {"startup", "shutdown", "quit-checkpoint"}
+KEEP_NEWEST, KEEP_DAYS = 10, 14
 PID_FILE = "service.pid"
 
 
@@ -132,7 +137,38 @@ def backup(store, reason="manual", allow_unhealthy=False):
                   "created": utcnow(), "reason": reason, "counts": snapshot_counts,
                   "sha256": file_hash(destination), "bytes": destination.stat().st_size}
         atomic_json(folder / (backup_id + ".json"), record)
+        if reason in AUTOMATIC:
+            try:
+                prune(store)
+            except OSError:
+                pass
         return record
+
+
+def prune(store, now=None):
+    """Keeps every non-automatic backup, the newest KEEP_NEWEST automatic ones and the newest
+    automatic one of each of the last KEEP_DAYS days; removes the other automatic ones. The record
+    goes first, so a backup is never listed without its file."""
+    from datetime import datetime, timedelta, timezone
+    now = now or datetime.now(timezone.utc)
+    automatic = [r for r in backups(store) if r.get("reason") in AUTOMATIC]
+    keep, days = {r["id"] for r in automatic[:KEEP_NEWEST]}, set()
+    for r in automatic:
+        created = datetime.fromisoformat(r["created"])
+        if now - created <= timedelta(days=KEEP_DAYS) and created.date() not in days:
+            days.add(created.date())
+            keep.add(r["id"])
+    removed = []
+    folder = store.home / "workspace-backups"
+    for r in automatic:
+        if r["id"] in keep:
+            continue
+        for suffix in (".json", ".db"):
+            path = folder / (r["id"] + suffix)
+            if path.exists():
+                path.unlink()
+        removed.append(r["id"])
+    return removed
 
 
 def backups(store):

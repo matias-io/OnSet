@@ -216,3 +216,27 @@ def test_light_requests_answer_while_the_warm_up_runs(tmp_path, monkeypatch):
         assert stages == ['loading audio tools', 'ready']
     finally:
         service.close()
+
+
+def test_automatic_backups_are_pruned_to_the_newest_and_one_per_day(tmp_path,song):
+    from datetime import datetime,timedelta,timezone
+    from onset_service.util import atomic_json
+    s=Store(tmp_path/'app');s.import_track(song)
+    folder=s.home/'workspace-backups';now=datetime(2026,10,22,12,tzinfo=timezone.utc)
+    folder.mkdir(parents=True,exist_ok=True)
+    for f in folder.glob('*'):f.unlink()
+    def fake(i,reason,created):
+        bid=f'{i:032x}';(folder/(bid+'.db')).write_bytes(b'x')
+        atomic_json(folder/(bid+'.json'),{'schema_version':1,'id':bid,'reason':reason,'created':created.isoformat()})
+        return bid
+    # 12 automatic today, then two a day for 20 days, plus kept kinds older than everything.
+    today=[fake(i,'startup',now-timedelta(minutes=i)) for i in range(12)]
+    daily=[[fake(100+2*d+k,'shutdown',now-timedelta(days=d,hours=k+1)) for k in range(2)] for d in range(1,21)]
+    kept=[fake(500+i,reason,now-timedelta(days=60)) for i,reason in enumerate(['manual','portable-export','before-restore'])]
+    removed=set(workspace.prune(s,now))
+    left={r['id'] for r in workspace.backups(s)}
+    assert set(today[:10])<=left and set(kept)<=left
+    assert {d[0] for d in daily[:13]}<=left            # newest of each of days 1..13 (within 14 days)
+    assert not {d[1] for d in daily}&left and not {d[0] for d in daily[14:]}&left
+    assert set(today[10:])<=removed and all(not (folder/(b+'.db')).exists() for b in removed)
+    s.close()
