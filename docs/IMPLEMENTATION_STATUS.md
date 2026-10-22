@@ -196,7 +196,18 @@ The goal is that preparation work cannot disturb a show, and that the app beside
 | Current, 2 frames | 21.0 / 23.7 ms | 52 / 66 ms | 40% / 82% | 6.6 / 7.9 ms, 17 / 24 ms | 0.9–1.3% |
 | Current, 1 frame | 36.1 / 27.6 ms | 69 / 76 ms | 100% / 92% | 8.2 / 6.4 ms, 22 / 17 ms | 0.7–0.9% |
 
-The GPU is the limit at this resolution: frame times varied more between two runs of the same build than between builds, adaptive resolution kept changing the load, and an installer build was compiling at the same time. The CPU-side changes cannot show up here; they protect against stalls when other work competes. One queued frame made frames slower without fresher data, so two stays the default. A 1080p projector and a run under load (app open, analysis queued) are still to be measured.
+The GPU is the limit at this resolution: frame times varied more between two runs of the same build than between builds, adaptive resolution kept changing the load, and an installer build was compiling at the same time. The CPU-side changes cannot show up here; they protect against stalls when other work competes. One queued frame made frames slower without fresher data, so two stays the default.
+
+**Under load (2026-10-22):** the same comparison with competing work. The current build here also has the engine tick in Windows' multimedia scheduler (`7184ac8`). The desktop app ran on a test workspace with the simulator, and a separate service on another test copy analysed tracks on two workers throughout, keeping the CPU about 86% busy. Two alternating pairs, two queued frames:
+
+| Run | Mean frame | p99 | State age mean | State age p99 |
+|---|---|---|---|---|
+| Before, pair 1 | 40.0 ms | 171 ms | 17.0 ms | 101 ms |
+| Current, pair 1 | 36.1 ms | 128 ms | 9.2 ms | 40 ms |
+| Before, pair 2 | 27.5 ms | 66 ms | 8.3 ms | 28 ms |
+| Current, pair 2 | 24.7 ms | 57 ms | 7.1 ms | 21 ms |
+
+The current build led in both pairs on every timing measure. The clearest gain is in the tail: the worst state age fell from 101 to 40 ms in the heavier first pair, so the engine keeps up when analysis competes for the CPU. The visuals' own CPU (about 1%) and memory (698 MB) were unchanged. Two pairs is a small sample, so this is consistent, not proven. Still unmeasured: a 1080p projector as the only output, and true kick-to-picture latency, which needs a camera; state age covers only the part inside OnSet.
 
 
 ## Evidence map
