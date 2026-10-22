@@ -131,6 +131,7 @@ fn main() -> anyhow::Result<()> {
         bench: cli.bench.map(|_| cli.bench_pace),
         frame_latency: cli.frame_latency,
         hosted: false,
+        keep_clear: None,
         screenshot: cli.screenshot.clone(),
         cache_dir: cache_dir(),
         engine,

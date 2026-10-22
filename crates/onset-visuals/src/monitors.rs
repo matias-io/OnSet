@@ -10,6 +10,12 @@ pub struct MonitorInfo {
     pub scale: f64,
 }
 
+/// Whether a fullscreen show on `chosen` would cover the screen the DJ works on (where
+/// OnSet's own window is, usually beside rekordbox). Monitors are compared by name.
+pub fn covers(chosen: &MonitorInfo, keep_clear: Option<&str>) -> bool {
+    keep_clear.is_some_and(|name| name.eq_ignore_ascii_case(&chosen.name))
+}
+
 /// Index of the monitor to use and whether we had to fall back to the primary because the
 /// requested one is missing (unplugged, renamed, out of range). Never panics; with no
 /// monitors at all it returns `(0, true)` and the caller decides.
@@ -48,6 +54,17 @@ mod tests {
                 scale: 1.0,
             },
         ]
+    }
+
+    #[test]
+    fn a_show_covers_only_the_screen_onset_is_on() {
+        let m = monitors();
+        assert!(covers(&m[0], Some(r"\\.\DISPLAY1")));
+        assert!(!covers(&m[1], Some(r"\\.\DISPLAY1")));
+        assert!(
+            !covers(&m[0], None),
+            "the standalone show has no app window"
+        );
     }
 
     #[test]

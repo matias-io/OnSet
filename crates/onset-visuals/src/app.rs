@@ -24,7 +24,7 @@ use winit::window::{Fullscreen, Window, WindowAttributes, WindowId, WindowLevel}
 use crate::bench::BenchStats;
 use crate::config::{Config, ConfigExt, MonitorChoice, PresentModeChoice};
 use crate::engine::{Engine, EngineCommand};
-use crate::monitors::{MonitorInfo, choose};
+use crate::monitors::{MonitorInfo, choose, covers};
 
 /// How a bench presents frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -50,6 +50,9 @@ pub struct AppOptions {
     /// The desktop app hosts the show: it owns the settings file and the controls, so the
     /// show saves nothing (key toggles last for that show).
     pub hosted: bool,
+    /// The screen OnSet's window is on. A show never goes fullscreen there: it would cover
+    /// the app and, usually, rekordbox beside it. It opens as a window instead.
+    pub keep_clear: Option<String>,
     /// Save one frame here shortly before exit.
     pub screenshot: Option<PathBuf>,
     /// Onset's cache folder (decrypted library, lyrics).
@@ -353,6 +356,16 @@ impl OnsetApp {
             );
             self.fullscreen = false;
         }
+        if self.fullscreen
+            && infos
+                .get(index)
+                .is_some_and(|i| covers(i, self.opts.keep_clear.as_deref()))
+        {
+            tracing::warn!(
+                "the show's screen is the one OnSet is on; opening a window instead of covering it"
+            );
+            self.fullscreen = false;
+        }
         let monitor = handles.get(index).cloned();
         if let Some(info) = infos.get(index) {
             tracing::info!(
@@ -523,7 +536,6 @@ impl OnsetApp {
         let stats = s.renderer.render(&s.gpu, &mut enc, &view, &ms, time_s);
         s.gpu.queue.submit(std::iter::once(enc.finish()));
 
-
         if self.screenshot_due()
             && let Some(path) = self.screenshot_pending.take()
         {
@@ -594,9 +606,12 @@ impl OnsetApp {
                     settings.auto = false;
                 }
                 s.renderer.set_settings(&s.gpu, settings);
+                s.renderer.set_overlay_options(
+                    self.opts.config.hud.clone(),
+                    self.opts.config.card.clone(),
+                );
                 s.renderer
-                    .set_overlay_options(self.opts.config.hud.clone(), self.opts.config.card.clone());
-                s.renderer.set_lyrics_options(self.opts.config.lyrics.clone());
+                    .set_lyrics_options(self.opts.config.lyrics.clone());
                 s.renderer
                     .set_blackout_logo_size(self.opts.config.blackout_logo_size);
             }
@@ -632,7 +647,22 @@ impl OnsetApp {
             self.apply_logo();
         }
         if change.fullscreen && self.fullscreen != self.opts.config.fullscreen {
-            self.toggle_fullscreen();
+            let on_onsets_screen = self.surface.as_ref().is_some_and(|s| {
+                s.window
+                    .current_monitor()
+                    .and_then(|m| m.name())
+                    .is_some_and(|name| {
+                        self.opts
+                            .keep_clear
+                            .as_deref()
+                            .is_some_and(|keep| keep.eq_ignore_ascii_case(&name))
+                    })
+            });
+            if self.opts.config.fullscreen && on_onsets_screen {
+                tracing::warn!("not going fullscreen on the screen OnSet is on");
+            } else {
+                self.toggle_fullscreen();
+            }
         }
     }
 
@@ -809,6 +839,14 @@ impl ApplicationHandler<ShowMessage> for OnsetApp {
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.save_config();
+        // One line per show, so a real show leaves a trace of how smoothly it ran.
+        let seconds = self.started.elapsed().as_secs_f64();
+        tracing::info!(
+            frames = self.frames,
+            seconds = format!("{seconds:.1}"),
+            fps = format!("{:.1}", self.frames as f64 / seconds.max(0.001)),
+            "show frames"
+        );
     }
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, message: ShowMessage) {
@@ -871,7 +909,6 @@ impl ApplicationHandler<ShowMessage> for OnsetApp {
         event_loop.set_control_flow(ControlFlow::Poll);
     }
 }
-
 
 #[cfg(test)]
 mod settings_change_tests {

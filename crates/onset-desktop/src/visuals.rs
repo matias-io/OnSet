@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 
 use onset_engine::EngineCommand;
 use onset_settings::Config;
-use onset_visuals::{Moment, Projector};
 use onset_visuals::app::AppOptions;
+use onset_visuals::{Moment, Projector};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -18,8 +18,8 @@ use crate::{AppState, live, show};
 pub struct Visuals(Mutex<Option<Arc<Projector>>>);
 
 /// The options a show starts with: the saved settings, straight into the show, with this
-/// app owning the settings file.
-fn show_options(config: Config) -> AppOptions {
+/// app owning the settings file and its window's screen kept clear.
+fn show_options(config: Config, keep_clear: Option<String>) -> AppOptions {
     AppOptions {
         config,
         monitor: None,
@@ -28,6 +28,7 @@ fn show_options(config: Config) -> AppOptions {
         bench: None,
         frame_latency: 2,
         hosted: true,
+        keep_clear,
         screenshot: None,
         cache_dir: live::cache_dir(),
         engine: live::engine(),
@@ -83,7 +84,12 @@ pub async fn visuals_start(
     if let Err(e) = show::set(&state.service, true).await {
         tracing::warn!("show mode did not start: {e}");
     }
-    projector.start(show_options(config))?;
+    // The screen the app's main window is on: a fullscreen show never covers it.
+    let keep_clear = app
+        .get_webview_window("main")
+        .and_then(|w| w.current_monitor().ok().flatten())
+        .and_then(|m| m.name().cloned());
+    projector.start(show_options(config, keep_clear))?;
     tracing::info!("show started");
     let _ = app.emit("onset:show", json!({ "running": true }));
     Ok("started")
@@ -163,8 +169,9 @@ mod tests {
 
     #[test]
     fn a_show_goes_straight_to_the_screen_and_leaves_the_settings_file_to_the_app() {
-        let opts = show_options(Config::default());
+        let opts = show_options(Config::default(), Some(r"\\.\DISPLAY2".into()));
         assert!(opts.hosted, "the app owns config.toml and the controls");
+        assert_eq!(opts.keep_clear.as_deref(), Some(r"\\.\DISPLAY2"));
         assert!(opts.bench.is_none() && opts.exit_after.is_none());
     }
 }

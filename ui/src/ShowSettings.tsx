@@ -94,6 +94,7 @@ export function ShowSettings(){
           </select>
         </Field>
         <label className="check"><input type="checkbox" checked={s.fullscreen} onChange={e=>change({fullscreen:e.target.checked})}/>Fullscreen on that screen</label>
+        <p className="hint">On the screen this window is on, the show opens as a window instead, so it never covers OnSet or rekordbox.</p>
       </div>
     </Card>
     <Card title="Style">
