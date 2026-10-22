@@ -375,9 +375,9 @@ def test_hot_cues_from_the_old_slot_numbering_move_to_their_pads(tmp_path,song,p
     data=analysis(song);data['cues']=[['A','A intro',1.],['D','D drop',4.],['E','E breakdown',8.]]
     store=Store(tmp_path/'app');p=store.import_track(song);p=store.apply_analysis(p['id'],data)
     for cue in p['cues']:store.review_cue(p['id'],cue['id'],'approved')
-    monkeypatch.setattr(cues,'HOT_SLOT',{'A':1,'B':2,'C':3,'D':4,'E':5,'F':6,'G':7,'L':8})
-    apply(store,prepare(store,[p['id']],plain_db,True,hot=True)['id'])
-    monkeypatch.undo()
+    with monkeypatch.context() as m:   # undo() would also drop the fixture's rekordbox patches
+        m.setattr(cues,'HOT_SLOT',{'A':1,'B':2,'C':3,'D':4,'E':5,'F':6,'G':7,'L':8})
+        apply(store,prepare(store,[p['id']],plain_db,True,hot=True)['id'])
     preview=prepare(store,[p['id']],plain_db,True,hot=True)
     assert not preview['conflicts']
     apply(store,preview['id'])
@@ -406,9 +406,9 @@ def _legacy_hot_write(tmp_path,song,plain_db,monkeypatch,roles):
     data=analysis(song);data['cues']=[[r,cues.CUE_SCHEME[r][0],times[r]] for r in roles]
     store=Store(tmp_path/'app');p=store.import_track(song);p=store.apply_analysis(p['id'],data)
     for cue in p['cues']:store.review_cue(p['id'],cue['id'],'approved')
-    monkeypatch.setattr(cues,'HOT_SLOT',{'A':1,'B':2,'C':3,'D':4,'E':5,'F':6,'G':7,'L':8})
-    apply(store,prepare(store,[p['id']],plain_db,True,hot=True)['id'])
-    monkeypatch.undo()
+    with monkeypatch.context() as m:   # undo() would also drop the fixture's rekordbox patches
+        m.setattr(cues,'HOT_SLOT',{'A':1,'B':2,'C':3,'D':4,'E':5,'F':6,'G':7,'L':8})
+        apply(store,prepare(store,[p['id']],plain_db,True,hot=True)['id'])
     return store,p
 
 
