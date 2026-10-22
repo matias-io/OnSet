@@ -36,6 +36,9 @@
       setLiveOnTop: (onTop) => invoke('set_live_on_top', { onTop }),
       startVisuals: () => invoke('visuals_start', {}),
       showMode: (on) => invoke('show_mode', { on }),
+      showSettings: () => invoke('show_settings', {}),
+      saveShowSettings: (settings) => invoke('show_settings_save', { settings }),
+      showMonitors: () => invoke('show_monitors', {}),
       providers: () => invoke('providers_status', {}),
       testProvider: (provider) => invoke('providers_test', { provider }),
       lookUpDetails: (providers, trackIds, web) =>

@@ -20,6 +20,7 @@ import {LibraryFilters,activeFilterCount} from './LibraryFilters';
 import {WorkspaceRecovery} from './WorkspaceRecovery';
 import {PortableImport,CacheRelocation} from './Portable';
 import {AiAdviser} from './AiAdviser';
+import {ShowSettings} from './ShowSettings';
 import {GenreEvidence} from './GenreEvidence';
 import {RekordboxLink} from './RekordboxLink';
 import {Logo} from './Logo';
@@ -40,10 +41,10 @@ function EnergyMeter({value}:{value:number|null|undefined}){
 }
 const energyOf=(t:Track)=>t.energy??t.analysis?.energy_profile?.rating??null;
 
-type Page='library'|'track'|'transitions'|'planner'|'settings';
+type Page='library'|'track'|'transitions'|'planner'|'show'|'settings';
 const pages:{id:Page;label:string;icon:string}[]=[
   {id:'library',label:'Library',icon:'library'},{id:'track',label:'Track review',icon:'wave'},
-  {id:'transitions',label:'Transitions',icon:'transition'},{id:'planner',label:'Set planner',icon:'set'},{id:'settings',label:'Settings',icon:'settings'}];
+  {id:'transitions',label:'Transitions',icon:'transition'},{id:'planner',label:'Set planner',icon:'set'},{id:'show',label:'Show',icon:'spark'},{id:'settings',label:'Settings',icon:'settings'}];
 
 function Timeline({track,position,onSeek,onMove,onSection,snap}:{track:Track;position:number;onSeek:(n:number)=>void;onMove:(c:Cue,n:number)=>void;onSection:(sections:any[])=>void;snap:boolean}){
   const ref=useRef<HTMLCanvasElement>(null),drag=useRef<Cue|null>(null),sectionDrag=useRef<number|null>(null),markers=useRef<{cue:Cue;x:number;y:number}[]>([]);
@@ -395,6 +396,11 @@ function App(){
           onReplan={(keep:number)=>replan(plan,keep)} transpose={brief.transpose}
           onTranspose={(id:string,value:number)=>{const next={...brief.transpose};if(value)next[id]=value;else delete next[id];setField('transpose',next);setMessage('Key shift saved; rebuild or replan to apply it');}}
           onUseBrief={()=>{setBrief(pruneBriefTracks(restoreBrief(plan.brief),tracks.map(t=>t.id)));setMessage('Brief restored from this plan');}}/>)}</div>}
+      </>}
+
+      {page==='show'&&<>
+        {head('Show')}
+        <ShowSettings/>
       </>}
 
       {page==='settings'&&<>

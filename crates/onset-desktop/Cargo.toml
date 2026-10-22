@@ -23,6 +23,7 @@ onset-core.workspace = true
 onset-engine.workspace = true
 onset-transport.workspace = true
 onset-workspace.workspace = true
+onset-settings.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -13,6 +13,7 @@ mod chatgpt;
 mod live;
 mod providers;
 mod show;
+mod show_settings;
 mod sidecar;
 mod visuals;
 
@@ -943,6 +944,9 @@ fn main() {
             set_live_on_top,
             visuals::visuals_start,
             show::show_mode,
+            show_settings::show_settings,
+            show_settings::show_settings_save,
+            show_settings::show_monitors,
             calibration::calibration_status,
             calibration::calibration_start,
             calibration::calibration_cancel,
