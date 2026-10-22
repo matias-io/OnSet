@@ -5,7 +5,7 @@ import time
 import shutil
 from pathlib import Path
 import numpy as np
-from .models import validate_grid
+from .models import beats_from_grid, validate_grid
 from .util import digest, file_hash, atomic_json
 from .tonal import estimate_key
 from .structure import infer, scale
@@ -41,6 +41,11 @@ def deep_outputs_exist(deep):
     return all(path and Path(path).is_file() for path in paths)
 
 
+def bars_on_beats(result):
+    beats, bars = np.asarray(result.get("beats") or []), np.asarray(result.get("downbeats") or [])
+    return len(beats) > 0 and (not len(bars) or float(np.abs(beats[None, :] - bars[:, None]).min(1).max()) <= .001)
+
+
 @measure_resources
 def analyse(profile, home, deep=False, checkpoint=lambda *a: None, experimental=(), settings=None):
     checkpoint("loading audio tools", .01)
@@ -68,7 +73,10 @@ def analyse(profile, home, deep=False, checkpoint=lambda *a: None, experimental=
     cached = cache / "result.json"
     if cached.exists():
         saved = json.loads(cached.read_text(encoding="utf-8"))
-        if saved.get("state") == "complete" and saved.get('resolution_version') == RESOLUTION_VERSION and cached_outputs_exist(saved):
+        # Results cached before beats followed the grid in force still carry the detector's
+        # beats; recompute those rather than return beats that contradict the grid.
+        stale_beats = requested_grid and not bars_on_beats(saved)
+        if saved.get("state") == "complete" and saved.get('resolution_version') == RESOLUTION_VERSION and cached_outputs_exist(saved) and not stale_beats:
             checkpoint("cached", 1.)
             return saved
     cache.mkdir(parents=True, exist_ok=True)
@@ -94,6 +102,8 @@ def analyse(profile, home, deep=False, checkpoint=lambda *a: None, experimental=
             waveform = data["waveform"].tolist()
             spectrogram = {"values":data["spectrogram"].tolist(),"frequencies":data["frequencies"].tolist(),"duration":duration}
         validate_grid(downbeats,duration)
+        if requested_grid:
+            beats = np.asarray(beats_from_grid(downbeats, duration))
         native_hit = True
         checkpoint("native features cached", .35)
     except (OSError,ValueError,KeyError,TypeError):
@@ -122,7 +132,9 @@ def analyse(profile, home, deep=False, checkpoint=lambda *a: None, experimental=
         source = "manual" if profile.get("overrides", {}).get("grid") else previous.get("grid_source", "imported")
         if grid:
             downbeats = np.array(validate_grid(grid, duration))
-            beats = np.asarray(previous.get("beats", detected_beats))
+            # The grid in force dictates the beats too; the detector's own estimate stays in
+            # grid_observation, so beats can no longer contradict downbeats and bpm.
+            beats = np.asarray(beats_from_grid(downbeats, duration))
             bpm = float(profile.get("overrides", {}).get("bpm") or previous.get("bpm") or 240 / np.median(np.diff(downbeats)))
         else:
             if len(detected_beats) < 8:

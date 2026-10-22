@@ -16,6 +16,21 @@ def validate_grid(times, duration=None):
     return values
 
 
+def beats_from_grid(downbeats, duration=None, per_bar=4):
+    """Subdivide the downbeat grid that is in force, so beats, downbeats and bpm agree."""
+    bars = validate_grid(downbeats, duration)
+    beats = []
+    for start, end in zip(bars, bars[1:]):
+        step = (end - start) / per_bar
+        beats.extend(start + i * step for i in range(per_bar))
+    step = (bars[-1] - bars[-2]) / per_bar
+    position, limit = bars[-1], bars[-1] if duration is None else duration
+    while position <= limit + 1e-9:
+        beats.append(position)
+        position += step
+    return beats
+
+
 @dataclass
 class SetBrief:
     track_ids: list[str] = field(default_factory=list)
