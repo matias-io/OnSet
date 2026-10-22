@@ -450,3 +450,29 @@ def test_pad_repair_leaves_a_cue_whose_new_pad_is_taken(tmp_path,song,plain_db,m
     assert not preview['moves'] and {c['cue'] for c in preview['conflicts']}=={'D drop','E breakdown'}
     with pytest.raises(ValueError,match='No hot cues'):apply(store,preview['id'])
     store.close()
+
+
+def test_pad_repair_drops_a_blocked_hot_cue_that_is_also_a_memory_cue(tmp_path,song,plain_db,monkeypatch):
+    # Stardust on the real library: the DJ's own cue on pad E kept OnSet's E breakdown on pad D,
+    # which in turn kept D drop on Kind 4, where rekordbox shows no pad.
+    import uuid,datetime as dt
+    from pyrekordbox.db6 import tables
+    from onset_service.rekordbox import prepare_hot_slot_repair
+    store,p=_legacy_hot_write(tmp_path,song,plain_db,monkeypatch,'ADE')
+    apply(store,prepare(store,[p['id']],plain_db,True)['id'])   # the same cues as memory cues
+    db=open_db(plain_db,True);now=dt.datetime.now()
+    db.add(tables.DjmdCue(ID='9',ContentID='42',InMsec=2000,OutMsec=-1,Kind=6,Comment='My pad E',UUID=str(uuid.uuid4()),created_at=now,updated_at=now))
+    db.commit();db.close();db.engine.dispose()
+    preview=prepare_hot_slot_repair(store,plain_db,True)
+    assert [d['before']['Comment'] for d in preview['drops']]==['E breakdown'] and not preview['conflicts']
+    assert [(m['before']['Comment'],m['kind']) for m in preview['moves']]==[('D drop',5)]
+    manifest=apply(store,preview['id'])
+    db=open_db(plain_db,True)
+    try:
+        cues=sorted((c.Comment,c.Kind) for c in db.get_cue(ContentID='42'))
+    finally:db.close();db.engine.dispose()
+    assert ('D drop',5) in cues and ('My pad E',6) in cues and ('E breakdown',0) in cues and ('E breakdown',5) not in cues
+    assert not prepare(store,[p['id']],plain_db,True)['changes']
+    restore(store,manifest['id'])
+    assert prepare_hot_slot_repair(store,plain_db,True)['id']==preview['id']
+    store.close()
