@@ -20,13 +20,11 @@ pub trait TransportSource: Send {
     /// Called at up to 120 Hz. `None` when nothing new can be reported.
     fn poll(&mut self) -> Option<TransportSnapshot>;
 
-    /// The sample rate of the track the engine believes is loaded, for sources whose
-    /// position counts in samples of the file (rekordbox). Default: ignored.
-    fn set_track_sample_rate(&mut self, _hz: Option<u32>) {}
-
-    /// The analysed tempo of the track the engine believes is loaded, for sources without
-    /// a readable tempo field. Default: ignored.
-    fn set_track_bpm(&mut self, _bpm: Option<f32>) {}
+    /// What the library knows about the track the engine believes deck `deck` holds: its
+    /// sample rate, for sources whose position counts in samples of the file (rekordbox),
+    /// and its analysed tempo, for sources without a readable tempo field. Kept per deck
+    /// until that deck takes another track. Default: ignored.
+    fn set_deck_track(&mut self, _deck: u8, _sample_rate: Option<u32>, _bpm: Option<f32>) {}
 
     /// Lengths of the library's files in seconds, for sources that learn which files are
     /// loaded but have to work out which deck holds which. Default: ignored.

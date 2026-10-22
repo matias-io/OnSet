@@ -9,6 +9,7 @@ use onset_core::transport::{TrackRef, TransportSnapshot};
 use std::path::{Path, PathBuf};
 
 use super::chain::Chain;
+use super::deck_track::DeckTrack;
 use super::offsets::{DeckSignature, Offsets, PositionFormat};
 
 /// Longest text block read for track info and paths.
@@ -132,6 +133,8 @@ pub struct DeckState {
     /// The loaded track's own BPM (the deck's tempo without its pitch), when the offsets
     /// know the tempo fields and they read as a plausible tempo.
     pub track_bpm: Option<f32>,
+    /// The deck's pitch as a fraction, read with `track_bpm`.
+    pub pitch: Option<f32>,
 }
 
 /// A track's own BPM from a deck's tempo and pitch (a fraction), when both are plausible:
@@ -145,10 +148,8 @@ pub fn track_bpm_from(bpm: f32, pitch: f32) -> Option<f32> {
 pub struct ChainReader<M: Mem> {
     mem: M,
     offsets: Offsets,
-    /// Sample rate of the loaded track, used when the offsets count file samples.
-    track_rate_hz: Option<f64>,
-    /// Analysed tempo of the loaded track, for decks without a readable tempo field.
-    track_bpm: Option<f32>,
+    /// What is known of each deck's track beyond its playhead, by deck index.
+    tracks: Vec<DeckTrack>,
     /// Position field addresses found through the signature, in deck order.
     found: Vec<u64>,
     /// Position fields of the player objects (see `TrackIdFields`).
@@ -187,8 +188,7 @@ impl<M: Mem> ChainReader<M> {
         Self {
             mem,
             offsets,
-            track_rate_hz: None,
-            track_bpm: None,
+            tracks: Vec::new(),
             found: Vec::new(),
             players: Vec::new(),
         }
@@ -199,8 +199,13 @@ impl<M: Mem> ChainReader<M> {
         &self.found
     }
 
-    /// Records the position fields a signature scan found, in deck order.
+    /// Records the position fields a signature scan found, in deck order. A different set
+    /// of decks (rekordbox rebuilt them) forgets what was known of their tracks: the
+    /// indices no longer mean the same decks.
     pub fn set_found_decks(&mut self, positions: Vec<u64>) {
+        if positions != self.found {
+            self.tracks.clear();
+        }
         self.found = positions;
     }
 
@@ -248,7 +253,7 @@ impl<M: Mem> ChainReader<M> {
     /// unloaded players also read zero), or the players disagree.
     pub fn track_id(&self, index: usize) -> Option<u32> {
         let ids = self.offsets.signature.as_ref()?.track_id.as_ref()?;
-        let rate = self.position_rate();
+        let rate = self.position_rate(index);
         let deck = self.read_position(*self.found.get(index)?)?;
         if deck < PLAYER_MIN_S * rate {
             return None;
@@ -340,25 +345,68 @@ impl<M: Mem> ChainReader<M> {
             .any(|pos| !signature_matches(&self.mem, sig, *pos))
     }
 
-    pub fn set_track_sample_rate(&mut self, hz: Option<u32>) {
-        self.track_rate_hz = hz.map(f64::from);
+    /// The library's sample rate and BPM for the track on deck `index`, as the engine
+    /// resolved it. They stay with the deck until it takes another track.
+    pub fn set_deck_track(&mut self, index: usize, sample_rate: Option<u32>, bpm: Option<f32>) {
+        let track = self.track_mut(index);
+        track.sample_rate = sample_rate.map(f64::from);
+        track.bpm = bpm;
     }
 
-    pub fn set_track_bpm(&mut self, bpm: Option<f32>) {
-        self.track_bpm = bpm;
+    /// The library's BPM for the track on deck `index`, when the engine sent it.
+    pub fn track_bpm(&self, index: usize) -> Option<f32> {
+        self.tracks.get(index).and_then(|t| t.bpm)
     }
 
-    pub fn track_bpm(&self) -> Option<f32> {
-        self.track_bpm
+    /// The content id the track on deck `index` is known by: the last one read for it, kept
+    /// while the deck plays on (rekordbox's players, where the id is read, exist only while
+    /// a deck plays).
+    pub fn known_track_id(&self, index: usize) -> Option<u32> {
+        self.tracks.get(index).and_then(|t| t.identity.id())
     }
 
-    /// Units per second for the position: the offsets' fixed rate, else the track's.
-    fn position_rate(&self) -> f64 {
-        if self.offsets.position_rate_hz > 0.0 {
-            self.offsets.position_rate_hz
-        } else {
-            self.track_rate_hz.unwrap_or(44_100.0)
+    /// Takes in this poll's evidence about deck `index`: its state as read, whether it is
+    /// playing and the open file paired with it. Reads the content id, notices a change of
+    /// track (which forgets the old track's rate and BPM) and measures the rate the position
+    /// counts at. Returns the content id the deck is known by.
+    pub fn observe_deck(
+        &mut self,
+        index: usize,
+        state: &DeckState,
+        playing: bool,
+        file: Option<&Path>,
+        now: Instant,
+    ) -> Option<u32> {
+        let read = self.track_id(index);
+        let track = self.track_mut(index);
+        let (id, changed) = track.identity.update(read, state.track_bpm, file);
+        if changed {
+            tracing::info!(deck = index, ?id, "deck took another track");
+            track.new_track();
         }
+        track
+            .probe
+            .update(state.position_raw, state.pitch, playing, now);
+        id
+    }
+
+    fn track_mut(&mut self, index: usize) -> &mut DeckTrack {
+        if self.tracks.len() <= index {
+            self.tracks.resize_with(index + 1, DeckTrack::default);
+        }
+        &mut self.tracks[index]
+    }
+
+    /// Units per second for deck `index`'s position: the offsets' fixed rate, else what is
+    /// known of the deck's track (the library's rate, else the measured one), else CD rate.
+    fn position_rate(&self, index: usize) -> f64 {
+        if self.offsets.position_rate_hz > 0.0 {
+            return self.offsets.position_rate_hz;
+        }
+        self.tracks
+            .get(index)
+            .and_then(DeckTrack::rate_hz)
+            .unwrap_or(44_100.0)
     }
 
     pub fn offsets(&self) -> &Offsets {
@@ -412,13 +460,15 @@ impl<M: Mem> ChainReader<M> {
         if self.offsets.signature.is_some() {
             let pos_addr = *self.found.get(index)?;
             let raw = self.read_position(pos_addr)?;
+            let tempo = self.tempo_at(pos_addr);
             return Some(DeckState {
                 bpm: 0.0,
-                position_s: raw / self.position_rate(),
+                position_s: raw / self.position_rate(index),
                 position_raw: raw,
                 track_info: None,
                 anlz_path: None,
-                track_bpm: self.track_bpm_at(pos_addr),
+                track_bpm: tempo.and_then(|(bpm, pitch)| track_bpm_from(bpm, pitch)),
+                pitch: tempo.map(|(_, pitch)| pitch),
             });
         }
         let d = self.offsets.decks.get(index)?;
@@ -437,11 +487,12 @@ impl<M: Mem> ChainReader<M> {
         }
         Some(DeckState {
             bpm,
-            position_s: raw / self.position_rate(),
+            position_s: raw / self.position_rate(index),
             position_raw: raw,
             track_info: d.track_info.as_ref().and_then(|c| self.read_text(c)),
             anlz_path: d.anlz_path.as_ref().and_then(|c| self.read_text(c)),
             track_bpm: None,
+            pitch: None,
         })
     }
 }
@@ -457,8 +508,9 @@ impl<M: Mem> ChainReader<M> {
         raw.is_finite().then_some(raw)
     }
 
-    /// The loaded track's own BPM from the tempo fields beside the position at `pos`.
-    fn track_bpm_at(&self, pos: u64) -> Option<f32> {
+    /// The deck's tempo and pitch (a fraction) from the fields beside the position at
+    /// `pos`, as read: see `track_bpm_from` for whether they are plausible.
+    fn tempo_at(&self, pos: u64) -> Option<(f32, f32)> {
         let tempo = self.offsets.signature.as_ref()?.tempo?;
         let bpm = self
             .mem
@@ -468,7 +520,7 @@ impl<M: Mem> ChainReader<M> {
             .mem
             .read_f32(pos.checked_add_signed(tempo.pitch_offset)?)
             .ok()?;
-        track_bpm_from(bpm, pitch)
+        Some((bpm, pitch))
     }
 }
 
@@ -1095,8 +1147,8 @@ mod live {
         rx
     }
 
-    /// Names an unknown track: by the content id the player at the deck's playhead leads to,
-    /// else by the open file paired with the deck.
+    /// Names an unknown track: by the content id the deck's track is known by (read from
+    /// the player at its playhead), else by the open file paired with the deck.
     fn identify(
         track: &mut TrackRef,
         reader: &ChainReader<Process>,
@@ -1106,7 +1158,7 @@ mod live {
         if *track != TrackRef::Unknown {
             return;
         }
-        if let Some(id) = reader.track_id(deck) {
+        if let Some(id) = reader.known_track_id(deck) {
             *track = TrackRef::Id(TrackId(u64::from(id)));
         } else if let Some(file) = deck_files.file_for(deck) {
             *track = TrackRef::FilePath(file.clone());
@@ -1122,7 +1174,7 @@ mod live {
         now: Instant,
     ) -> bool {
         (0..reader.deck_count()).any(|i| {
-            trackers.get(i).is_some_and(|t| t.is_playing(now)) && reader.track_id(i).is_none()
+            trackers.get(i).is_some_and(|t| t.is_playing(now)) && reader.known_track_id(i).is_none()
         })
     }
 
@@ -1137,6 +1189,28 @@ mod live {
         now.duration_since(last_scan) >= ID_RESCAN
             && reader.player_needle().is_some()
             && playing_without_id(reader, trackers, now)
+    }
+
+    /// Hands each readable deck's state, play state and paired file to the reader, which
+    /// keeps what it knows of the deck's track (id, rate) from it.
+    fn observe_decks(
+        reader: &mut ChainReader<Process>,
+        states: &[Option<DeckState>],
+        playing: &[Option<bool>],
+        deck_files: &DeckFiles,
+        now: Instant,
+    ) {
+        for (i, state) in states.iter().enumerate() {
+            if let Some(state) = state {
+                reader.observe_deck(
+                    i,
+                    state,
+                    playing[i].unwrap_or(false),
+                    deck_files.file_for(i).map(PathBuf::as_path),
+                    now,
+                );
+            }
+        }
     }
 
     /// Pairs the open files with the decks (by length and, where the deck's tempo reads, by
@@ -1256,15 +1330,9 @@ mod live {
             }
         }
 
-        fn set_track_sample_rate(&mut self, hz: Option<u32>) {
+        fn set_deck_track(&mut self, deck: u8, sample_rate: Option<u32>, bpm: Option<f32>) {
             if let State::Connected { reader, .. } = &mut self.state {
-                reader.set_track_sample_rate(hz);
-            }
-        }
-
-        fn set_track_bpm(&mut self, bpm: Option<f32>) {
-            if let State::Connected { reader, .. } = &mut self.state {
-                reader.set_track_bpm(bpm);
+                reader.set_deck_track(usize::from(deck), sample_rate, bpm);
             }
         }
 
@@ -1348,6 +1416,7 @@ mod live {
                         &self.durations,
                         &self.bpms,
                     );
+                    observe_decks(reader, &states, &playing, deck_files, now);
                     let master = reader.master_deck().map(usize::from);
                     note_master(&mut self.last_master, master);
                     if let Some(i) = chooser.choose(master, &playing)
@@ -1359,7 +1428,7 @@ mod live {
                             state,
                             playing[i].unwrap_or(false),
                             now,
-                            reader.track_bpm(),
+                            reader.track_bpm(i),
                             trackers[i].rate(),
                         );
                         identify(&mut snapshot.track, reader, deck_files, i);

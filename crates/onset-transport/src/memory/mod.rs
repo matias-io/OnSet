@@ -9,6 +9,7 @@ pub mod process;
 
 pub mod calibrate;
 pub mod chain;
+pub mod deck_track;
 pub mod offsets;
 pub mod reader;
 
