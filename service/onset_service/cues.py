@@ -48,6 +48,9 @@ UUID_PREFIX = "a0c0e5e5-a070-4cfe-"   # marks cues OnSet writes (so re-runs can 
 
 
 # --- audio ----------------------------------------------------------------
+# Seconds an ffmpeg decode may take; a half-hour track decodes in well under a minute.
+DECODE_TIMEOUT_S = 600
+
 def load_audio(path):
     """Return (mono float32 array, sample rate). Uses soundfile, falls back to ffmpeg."""
     try:
@@ -58,9 +61,14 @@ def load_audio(path):
         if not shutil.which("ffmpeg"):
             raise RuntimeError(f"cannot decode {path} ({e}); install ffmpeg for m4a/aac support")
         sr = 44100
+        # ffmpeg must not share the service's stdin, which is the app's RPC pipe: attached to
+        # it, ffmpeg finished decoding a 2-second sampler WAV but did not return, and
+        # `communicate` waited on it for good (the stall watchdog caught the job there after
+        # 57 tracks). A decode that outlives DECODE_TIMEOUT_S fails the track, not the job.
         raw = subprocess.run(
-            ["ffmpeg", "-v", "error", "-i", str(path), "-f", "f32le", "-ac", "1", "-ar", str(sr), "-"],
-            capture_output=True, check=True).stdout
+            ["ffmpeg", "-nostdin", "-v", "error", "-i", str(path), "-f", "f32le", "-ac", "1", "-ar", str(sr), "-"],
+            capture_output=True, check=True, stdin=subprocess.DEVNULL, timeout=DECODE_TIMEOUT_S,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
         return np.frombuffer(raw, dtype=np.float32), sr
 
 
