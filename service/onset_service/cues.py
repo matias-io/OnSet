@@ -46,6 +46,7 @@ CUE_SCHEME = {
 # 7, 8, 9; Kind 4 is a memory loop. Until 2026-10-22 OnSet wrote D..L to Kind 4..8, which put hot D
 # where rekordbox shows no pad and every later cue one pad late. The end loop takes slot H.
 HOT_SLOT = {"A": 1, "B": 2, "C": 3, "D": 5, "E": 6, "F": 7, "G": 8, "L": 9}
+LEGACY_HOT_SLOT = {"D": 4, "E": 5, "F": 6, "G": 7, "L": 8}   # the numbering before 2026-10-22
 UUID_PREFIX = "a0c0e5e5-a070-4cfe-"   # marks cues OnSet writes (so re-runs can replace them); unchanged since Autocue
 
 

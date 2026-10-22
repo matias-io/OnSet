@@ -205,6 +205,8 @@ def apply(store, preview_id):
     not_running()
     if preview.get("kind") == "playlist":
         return apply_playlist(store, preview)
+    if preview.get("kind") == "hot-slot-repair":
+        return apply_hot_slot_repair(store, preview)
     fresh = prepare(store, preview["track_ids"], preview["db_path"], preview["plain"], preview["hot"], preview["comments"])
     if fresh["id"] != preview_id:
         raise ValueError("Database or approvals changed; review a new preview")
@@ -368,6 +370,111 @@ def apply_adoption(store,preview):
     store.artifact('written',tid+(':hot' if preview['hot'] else ':memory'),{'track_id':tid,'content_id':preview['content_id'],'cues':preview['cues'],'adopted':utcnow()})
     preview['stale']=True;store.artifact('write-preview',preview['id'],preview)
     return {'adopted':len(preview['cues']),'track_id':tid,'database_modified':False}
+
+
+def prepare_hot_slot_repair(store, path=None, plain=False):
+    """OnSet's own hot cues still on the numbering used before 2026-10-22 (D..L on Kind 4..8), each
+    moved to its rekordbox pad with time, colour and name unchanged. Only a cue with the OnSet
+    prefix, a scheme name and exactly that name's old Kind moves. One whose new pad keeps any other
+    cue stays where it is and is listed, which can in turn keep the cue that would take its pad."""
+    from onset_service.cues import UUID_PREFIX, CUE_SCHEME, HOT_SLOT, LEGACY_HOT_SLOT
+    names = {CUE_SCHEME[role][0]: role for role in LEGACY_HOT_SLOT}
+    db = open_db(path, plain)
+    try:
+        supported(db)
+        contents = {str(c.ID): c for c in db.get_content()}
+        by_content = {}
+        for c in db.get_cue():
+            by_content.setdefault(str(c.ContentID), []).append(c)
+        moves, conflicts = [], []
+        for content_id, cues in sorted(by_content.items()):
+            pending = [c for c in cues if (c.UUID or "").startswith(UUID_PREFIX) and c.Comment in names
+                       and c.Kind == LEGACY_HOT_SLOT[names[c.Comment]]]
+            while True:
+                leaving = {c.UUID for c in pending}
+                targets = [HOT_SLOT[names[c.Comment]] for c in pending]
+                blocked = [c for c in pending if targets.count(HOT_SLOT[names[c.Comment]]) > 1 or
+                           any(o.Kind == HOT_SLOT[names[c.Comment]] and o.UUID not in leaving for o in cues)]
+                if not blocked:
+                    break
+                for c in blocked:
+                    pending.remove(c)
+                    conflicts.append({"content_id": content_id, "title": contents[content_id].Title if content_id in contents else None,
+                                      "cue": c.Comment, "reason": "Another cue holds its rekordbox pad; left where it is"})
+            moves += [{"content_id": content_id, "title": contents[content_id].Title if content_id in contents else None,
+                       "uuid": c.UUID, "before": cue_record(c), "kind": HOT_SLOT[names[c.Comment]]} for c in pending]
+        by_path = {}
+        for c in contents.values():
+            by_path.setdefault(str(c.FolderPath or "").replace("\\", "/").casefold(), []).append(str(c.ID))
+        moved = {m["content_id"] for m in moves}
+        owners = {}
+        for t in store.tracks():
+            ids = {i for loc in t["locations"] for i in by_path.get(str(loc).replace("\\", "/").casefold(), [])}
+            if len(ids) == 1 and next(iter(ids)) in moved:
+                owners.setdefault(next(iter(ids)), []).append(t["id"])
+        preview = {"schema_version": 1, "kind": "hot-slot-repair", "db_path": str(Path(db.engine.url.database).resolve()),
+                   "plain": plain, "moves": moves, "conflicts": conflicts, "owners": owners, "stale": False}
+        preview["id"] = digest(preview)[:24]
+        store.artifact("write-preview", preview["id"], preview)
+        return preview
+    finally:
+        db.close()
+        db.engine.dispose()
+
+
+def apply_hot_slot_repair(store, preview):
+    import datetime as dt
+    fresh = prepare_hot_slot_repair(store, preview["db_path"], preview["plain"])
+    if fresh["id"] != preview["id"]:
+        raise ValueError("Database changed; review the pad repair again")
+    if not preview["moves"]:
+        raise ValueError("No hot cues to move")
+    db = open_db(preview["db_path"], preview["plain"])
+    backup = Path(store.home) / "backups" / (uuid.uuid4().hex + ".db.bak")
+    try:
+        consistent_backup(db, backup)
+        auxiliary = backup_auxiliary(db, backup)
+        not_running()
+        db.session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+        now = dt.datetime.now()
+        for move in preview["moves"]:
+            cue = next((c for c in db.get_cue(ContentID=move["content_id"]) if c.UUID == move["uuid"]), None)
+            if cue is None or cue_record(cue) != move["before"]:
+                raise ValueError("Database changed after preview")
+            cue.Kind = move["kind"]
+            cue.updated_at = now
+        db.flush()
+        not_running()
+        db.commit()
+        for move in preview["moves"]:
+            cue = next(c for c in db.get_cue(ContentID=move["content_id"]) if c.UUID == move["uuid"])
+            if cue.Kind != move["kind"]:
+                raise RuntimeError("Post-commit verification failed; backup retained")
+        kinds = {m["uuid"]: m["kind"] for m in preview["moves"]}
+        owned_before = {}
+        for track_ids in preview["owners"].values():
+            for track_id in track_ids:
+                key = track_id + ":hot"
+                record = store.artifact("written", key)
+                if not record or not any(c["UUID"] in kinds for c in record["cues"]):
+                    continue
+                owned_before[key] = record
+                store.artifact("written", key, {**record, "cues": [{**c, "Kind": kinds.get(c["UUID"], c["Kind"])} for c in record["cues"]]})
+        manifest = {"schema_version": 1, "id": uuid.uuid4().hex, "preview_id": preview["id"], "kind": "hot-slot-repair",
+                    "backup": str(backup), "backup_hash": file_hash(backup), "db_path": preview["db_path"],
+                    "plain": preview["plain"], "written": [], "failed": [], "moved": len(preview["moves"]),
+                    "created": utcnow(), "auxiliary": auxiliary, "owned_before": owned_before}
+        atomic_json(backup.with_suffix(".json"), manifest)
+        store.artifact("write-manifest", manifest["id"], manifest)
+        preview["stale"] = True
+        store.artifact("write-preview", preview["id"], preview)
+        return manifest
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+        db.engine.dispose()
 
 
 def prepare_library_adoption(store, path=None, plain=False):

@@ -398,3 +398,55 @@ def test_a_manual_cue_on_the_new_pad_is_preserved(tmp_path,song,plain_db):
     preview=prepare(store,[p['id']],plain_db,True,hot=True)
     assert any(c.get('role')=='D' and 'preserved' in c['reason'] for c in preview['conflicts'])
     store.close()
+
+
+def _legacy_hot_write(tmp_path,song,plain_db,monkeypatch,roles):
+    import onset_service.cues as cues
+    times={'A':1.,'D':4.,'E':8.,'F':12.,'G':16.}
+    data=analysis(song);data['cues']=[[r,cues.CUE_SCHEME[r][0],times[r]] for r in roles]
+    store=Store(tmp_path/'app');p=store.import_track(song);p=store.apply_analysis(p['id'],data)
+    for cue in p['cues']:store.review_cue(p['id'],cue['id'],'approved')
+    monkeypatch.setattr(cues,'HOT_SLOT',{'A':1,'B':2,'C':3,'D':4,'E':5,'F':6,'G':7,'L':8})
+    apply(store,prepare(store,[p['id']],plain_db,True,hot=True)['id'])
+    monkeypatch.undo()
+    return store,p
+
+
+def _pads(plain_db):
+    db=open_db(plain_db,True)
+    try:return sorted((c.Comment,c.Kind,c.InMsec) for c in db.get_cue(ContentID='42') if c.Comment!='My manual cue')
+    finally:db.close();db.engine.dispose()
+
+
+def test_pad_repair_moves_old_numbering_and_keeps_ownership(tmp_path,song,plain_db,monkeypatch):
+    from onset_service.rekordbox import prepare_hot_slot_repair
+    store,p=_legacy_hot_write(tmp_path,song,plain_db,monkeypatch,'ADEFG')
+    legacy=_pads(plain_db)
+    assert legacy==[('A intro',1,1000),('D drop',4,4000),('E breakdown',5,8000),('F outro',6,12000),('G drop 2',7,16000)]
+    preview=prepare_hot_slot_repair(store,plain_db,True)
+    assert sorted((m['before']['Comment'],m['kind']) for m in preview['moves'])==[('D drop',5),('E breakdown',6),('F outro',7),('G drop 2',8)]
+    assert not preview['conflicts'] and preview['owners']=={'42':[p['id']]}
+    manifest=apply(store,preview['id'])
+    assert _pads(plain_db)==[('A intro',1,1000),('D drop',5,4000),('E breakdown',6,8000),('F outro',7,12000),('G drop 2',8,16000)]
+    again=prepare(store,[p['id']],plain_db,True,hot=True)
+    assert not again['conflicts'] and not again['changes']
+    assert not prepare_hot_slot_repair(store,plain_db,True)['moves']
+    restore(store,manifest['id'])
+    assert _pads(plain_db)==legacy
+    assert not prepare_hot_slot_repair(store,plain_db,True)['conflicts']
+    store.close()
+
+
+def test_pad_repair_leaves_a_cue_whose_new_pad_is_taken(tmp_path,song,plain_db,monkeypatch):
+    import uuid,datetime as dt
+    from pyrekordbox.db6 import tables
+    from onset_service.rekordbox import prepare_hot_slot_repair
+    store,p=_legacy_hot_write(tmp_path,song,plain_db,monkeypatch,'DE')
+    db=open_db(plain_db,True);now=dt.datetime.now()
+    db.add(tables.DjmdCue(ID='9',ContentID='42',InMsec=2000,OutMsec=-1,Kind=6,Comment='My pad E',UUID=str(uuid.uuid4()),created_at=now,updated_at=now))
+    db.commit();db.close();db.engine.dispose()
+    preview=prepare_hot_slot_repair(store,plain_db,True)
+    # E cannot leave Kind 5 for the manual cue on 6, so D cannot take 5 either.
+    assert not preview['moves'] and {c['cue'] for c in preview['conflicts']}=={'D drop','E breakdown'}
+    with pytest.raises(ValueError,match='No hot cues'):apply(store,preview['id'])
+    store.close()

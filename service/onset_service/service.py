@@ -927,7 +927,9 @@ class Service:
         return self.store.artifact("benchmark-label",p["track_id"],{**p,"verified_at":utcnow()})
 
     def rb_preview(self, p):
-        from .rekordbox import prepare, prepare_playlist, prepare_adoption, prepare_library_adoption
+        from .rekordbox import prepare, prepare_playlist, prepare_adoption, prepare_library_adoption, prepare_hot_slot_repair
+        if p.get("repair_hot_slots"):
+            return prepare_hot_slot_repair(self.store, p.get("db_path"), p.get("plain", False))
         if p.get("adopt") and p.get("all"):
             return prepare_library_adoption(self.store, p.get("db_path"), p.get("plain", False))
         if p.get("adopt"):return prepare_adoption(self.store,p["track_ids"][0],p.get("db_path"),p.get("plain",False),p.get("hot",False))
