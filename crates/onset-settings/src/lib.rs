@@ -151,9 +151,13 @@ impl Default for Config {
 }
 
 impl Config {
+    /// `%ONSET_SETTINGS%` (for tests that must not touch the DJ's settings), else
     /// `%APPDATA%\Onset\Onset\config\config.toml`, or a relative fallback when no profile
     /// dir exists.
     pub fn path() -> PathBuf {
+        if let Some(path) = std::env::var_os("ONSET_SETTINGS") {
+            return PathBuf::from(path);
+        }
         directories::ProjectDirs::from("", "Onset", "Onset").map_or_else(
             || PathBuf::from("onset-config.toml"),
             |d| d.config_dir().join("config.toml"),

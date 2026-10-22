@@ -25,8 +25,11 @@ export type LiveState = {
 type Onset = {
   onLive: (callback: (s: LiveState) => void) => () => void;
   setLiveOnTop: (onTop: boolean) => Promise<void>;
-  /** Starts the full-screen visuals (`onset.exe` beside the app): `started` or `running`. */
+  /** Starts the show on the projector screen: `started` or `running`. */
   startVisuals: () => Promise<'started' | 'running'>;
+  endVisuals: () => Promise<void>;
+  visualsRunning: () => Promise<boolean>;
+  onShow: (callback: (s: {running: boolean}) => void) => () => void;
 };
 const onset = (window as unknown as {onset?: Onset}).onset;
 
@@ -36,6 +39,12 @@ function Live() {
   const [, setBeat] = useState(0);
   const [onTop, setOnTop] = useState(false);
   const [visuals, setVisuals] = useState<string | null>(null);
+  const [showOn, setShowOn] = useState(false);
+  useEffect(() => {
+    if (!onset) return;
+    onset.visualsRunning().then(setShowOn).catch(() => {});
+    return onset.onShow(s => setShowOn(s.running));
+  }, []);
   useEffect(() => onset?.onLive(state => setLive({state, at: performance.now()})), []);
   const elapsed = live ? (performance.now() - live.at) / 1000 : 0;
   const now = live ? carry(live.state, elapsed) : null;
@@ -56,15 +65,14 @@ function Live() {
     <main className="live">
       <header className="live-head">
         <Logo size={20} />
-        <span className={`live-dot ${live.state}`} aria-hidden="true" />
+        <span className={`live-dot ${live.state.state}`} aria-hidden="true" />
         <span className="live-status">{live.state.status}</span>
-        <button type="button" className="live-visuals" title={visuals ?? 'Open the full-screen visuals'}
+        <button type="button" className="live-visuals" title={visuals ?? (showOn ? 'Close the show on the projector' : 'Start the show on the projector screen')}
           onClick={() => {
-            onset.startVisuals()
-              .then(r => setVisuals(r === 'running' ? 'The visuals are already open' : 'Visuals started'))
-              .catch((e: unknown) => setVisuals(String(e)));
+            const act = showOn ? onset.endVisuals().then(() => 'Show ended') : onset.startVisuals().then(r => r === 'running' ? 'The show is already on' : 'Show started');
+            act.then(setVisuals).catch((e: unknown) => setVisuals(String(e)));
           }}>
-          Start visuals
+          {showOn ? 'End show' : 'Start show'}
         </button>
         <label className="live-ontop">
           <input type="checkbox" checked={onTop}

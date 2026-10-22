@@ -6,14 +6,20 @@ use serde_json::{Value, json};
 use tauri::State;
 
 use crate::AppState;
+use crate::sidecar::Service;
 
 /// Starts or ends show mode. Returns the service's answer: `{show, jobs}`, the jobs it
 /// paused or resumed.
 #[tauri::command]
 pub async fn show_mode(state: State<'_, AppState>, on: bool) -> Result<Value, String> {
-    let answer = state.service.call("show-mode", json!({ "on": on })).await?;
+    set(&state.service, on).await
+}
+
+/// Starts or ends show mode; the projector calls this when a show starts and ends.
+pub async fn set(service: &Service, on: bool) -> Result<Value, String> {
+    let answer = service.call("show-mode", json!({ "on": on })).await?;
     // Jobs are already waiting; a priority that can't be changed is logged, not fatal.
-    if let Err(e) = state.service.set_background(on) {
+    if let Err(e) = service.set_background(on) {
         tracing::warn!("{e}");
     }
     tracing::info!(on, jobs = %answer["jobs"], "show mode");

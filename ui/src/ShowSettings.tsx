@@ -16,6 +16,9 @@ type Onset={
   saveShowSettings:(s:ShowConfig)=>Promise<{settings:ShowConfig;read_only:boolean;path:string}>;
   showMonitors:()=>Promise<Monitor[]>;
   startVisuals:()=>Promise<'started'|'running'>;
+  endVisuals:()=>Promise<void>;
+  visualsRunning:()=>Promise<boolean>;
+  onShow:(callback:(s:{running:boolean})=>void)=>()=>void;
 };
 const onset=():Onset|undefined=>(window as any).onset?.showSettings?(window as any).onset:undefined;
 
@@ -53,7 +56,8 @@ export function sceneTitle(name:string){return name==='zerog'?'Zero-G':name[0].t
 export function ShowSettings(){
   const api=onset();
   const [state,setState]=useState<{settings:ShowConfig;read_only:boolean;path:string}|null>(null);
-  const [monitors,setMonitors]=useState<Monitor[]>([]),[message,setMessage]=useState(''),[error,setError]=useState('');
+  const [monitors,setMonitors]=useState<Monitor[]>([]),[message,setMessage]=useState(''),[error,setError]=useState(''),[showOn,setShowOn]=useState(false);
+  useEffect(()=>{if(!api)return;api.visualsRunning().then(setShowOn).catch(()=>{});return api.onShow(s=>setShowOn(s.running));},[]);
   useEffect(()=>{if(!api)return;api.showSettings().then(setState).catch(e=>setError(String(e.message||e)));api.showMonitors().then(setMonitors).catch(()=>setMonitors([]));},[]);
   if(!api)return <Card title="Show"><p className="muted">Show settings need the OnSet desktop app.</p></Card>;
   if(!state)return <Card title="Show"><p className="muted">{error||'Loading the show settings…'}</p></Card>;
@@ -61,7 +65,7 @@ export function ShowSettings(){
   const change=(patch:Partial<ShowConfig>)=>{
     const next={...s,...patch};
     setState({...state,settings:next});setError('');
-    api.saveShowSettings(next).then(saved=>{setState(saved);setMessage('Saved. The visuals use it the next time they start.');})
+    api.saveShowSettings(next).then(saved=>{setState(saved);setMessage(showOn?'Saved. It applies from the next show.':'Saved.');})
       .catch(e=>setError(String(e.message||e)));
   };
   const picked=chosenMonitor(s.output_monitor,monitors);
@@ -108,7 +112,9 @@ export function ShowSettings(){
       </div>
     </Card>
     <div className="row">
-      <Button kind="primary" onClick={()=>api.startVisuals().then(r=>setMessage(r==='running'?'The visuals are already running.':'Visuals started.')).catch(e=>setError(String(e.message||e)))}>Start visuals</Button>
+      {showOn
+        ?<Button onClick={()=>api.endVisuals().then(()=>setMessage('Show ended.')).catch(e=>setError(String(e.message||e)))}>End show</Button>
+        :<Button kind="primary" onClick={()=>api.startVisuals().then(r=>setMessage(r==='running'?'The show is already on.':'Show started. Esc on the projector also ends it.')).catch(e=>setError(String(e.message||e)))}>Start show</Button>}
       {message&&<Pill state="good">{message}</Pill>}
       {error&&<span className="bad">{error}</span>}
     </div>

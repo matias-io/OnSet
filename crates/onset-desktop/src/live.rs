@@ -6,6 +6,7 @@
 //! touches rekordbox or the workspace.
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use onset_core::music_state::MusicState;
@@ -18,6 +19,14 @@ use tauri::{AppHandle, Emitter, Manager};
 const PERIOD: Duration = Duration::from_millis(33);
 /// While playing, the screens get the tempo and phase at least this often.
 const RESYNC: Duration = Duration::from_millis(500);
+
+/// The one engine: the live view follows it, and the projector shows it.
+static ENGINE: OnceLock<Arc<Engine>> = OnceLock::new();
+
+/// The running engine, once it has started.
+pub fn engine() -> Option<Arc<Engine>> {
+    ENGINE.get().cloned()
+}
 
 /// Set after a calibration: the engine reloads the offsets and finds the decks again.
 static RECONNECT: AtomicBool = AtomicBool::new(false);
@@ -207,7 +216,7 @@ pub fn offsets_dir() -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../offsets"))
 }
 
-fn cache_dir() -> PathBuf {
+pub fn cache_dir() -> PathBuf {
     directories::ProjectDirs::from("", "Onset", "Onset")
         .map_or_else(|| PathBuf::from(".cache"), |d| d.cache_dir().to_path_buf())
 }
@@ -235,11 +244,12 @@ pub fn spawn(app: AppHandle) {
                 sim_seek_s: 0.0,
                 sim_gain: 0.0,
                 audio_device: None,
-                // The screens need the deck and structure, not the room's sound.
+                // The screens need the deck and structure; the projector switches the
+                // room's sound on for a show.
                 capture_audio: false,
             });
             let engine = match engine {
-                Ok(e) => e,
+                Ok(e) => ENGINE.get_or_init(|| Arc::new(e)).clone(),
                 Err(e) => {
                     tracing::error!("live engine unavailable: {e:#}");
                     let failed = snapshot(

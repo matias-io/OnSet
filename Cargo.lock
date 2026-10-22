@@ -4143,6 +4143,7 @@ dependencies = [
  "onset-engine",
  "onset-settings",
  "onset-transport",
+ "onset-visuals",
  "onset-workspace",
  "open",
  "parking_lot",

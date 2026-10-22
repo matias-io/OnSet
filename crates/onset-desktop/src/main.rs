@@ -943,6 +943,8 @@ fn main() {
             ai_read_structure,
             set_live_on_top,
             visuals::visuals_start,
+            visuals::visuals_end,
+            visuals::visuals_running,
             show::show_mode,
             show_settings::show_settings,
             show_settings::show_settings_save,

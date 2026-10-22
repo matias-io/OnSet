@@ -2,8 +2,8 @@
 //! only the visuals do with them.
 use std::path::{Path, PathBuf};
 
-pub use onset_settings::*;
 use onset_render::renderer::RenderSettings;
+pub use onset_settings::*;
 
 pub trait ConfigExt {
     /// What the renderer needs from the settings.

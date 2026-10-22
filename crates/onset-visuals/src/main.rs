@@ -144,6 +144,7 @@ fn main() -> anyhow::Result<()> {
         bench: cli.bench.map(|_| cli.bench_pace),
         frame_latency: cli.frame_latency,
         settings_open: cli.settings,
+        save_settings: true,
         screenshot: cli.screenshot.clone(),
         launcher,
         offsets_dir,

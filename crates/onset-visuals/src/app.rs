@@ -52,6 +52,9 @@ pub struct AppOptions {
     pub frame_latency: u32,
     /// Start with the settings panel open.
     pub settings_open: bool,
+    /// Save setting changes (key toggles, a new logo) to the settings file. Off when the
+    /// desktop app hosts the show: it owns the file, and key toggles last for that show.
+    pub save_settings: bool,
     /// Save one frame here shortly before exit.
     pub screenshot: Option<PathBuf>,
     /// Open on the launcher page rather than straight into the show.
@@ -388,7 +391,22 @@ fn draw_overlay(
         .draw(&target, enc, &mut opts.config, &overlay_view)
 }
 
+/// What the desktop app tells a running show.
+#[derive(Debug, Clone)]
+pub enum ShowMessage {
+    /// Close the show window; the run returns.
+    End,
+}
+
 impl OnsetApp {
+    fn save_config(&self) {
+        if self.opts.save_settings
+            && let Err(e) = self.opts.config.save()
+        {
+            tracing::warn!("could not save config: {e:#}");
+        }
+    }
+
     pub fn new(opts: AppOptions) -> Self {
         let screenshot_pending = opts.screenshot.clone();
         let opts_cache_dir = opts.cache_dir.clone();
@@ -399,7 +417,8 @@ impl OnsetApp {
             Mode::Show
         };
         Self {
-            fullscreen: !opts.launcher,
+            // The launcher is a window; a show follows the "Fullscreen" setting.
+            fullscreen: !opts.launcher && opts.config.fullscreen,
             mode,
             opts,
             surface: None,
@@ -703,8 +722,8 @@ impl OnsetApp {
         for action in pending {
             self.apply(action);
         }
-        if save && let Err(e) = self.opts.config.save() {
-            tracing::warn!("could not save config: {e:#}");
+        if save {
+            self.save_config();
         }
     }
 
@@ -829,9 +848,7 @@ impl OnsetApp {
             None => None,
         };
         self.opts.config.blackout_logo = adopted;
-        if let Err(e) = self.opts.config.save() {
-            tracing::warn!("could not save config: {e:#}");
-        }
+        self.save_config();
         self.apply_logo();
     }
 
@@ -1055,7 +1072,7 @@ impl OnsetApp {
     }
 }
 
-impl ApplicationHandler for OnsetApp {
+impl ApplicationHandler<ShowMessage> for OnsetApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.surface.is_none()
             && let Err(e) = self.create_surface(event_loop)
@@ -1124,8 +1141,12 @@ impl ApplicationHandler for OnsetApp {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Err(e) = self.opts.config.save() {
-            tracing::warn!("could not save config: {e:#}");
+        self.save_config();
+    }
+
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, message: ShowMessage) {
+        match message {
+            ShowMessage::End => self.exiting = true,
         }
     }
 
