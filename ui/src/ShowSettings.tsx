@@ -116,6 +116,9 @@ export function ShowSettings(){
         ?<Button onClick={()=>api.endVisuals().then(()=>setMessage('Show ended.')).catch(e=>setError(String(e.message||e)))}>End show</Button>
         :<Button kind="primary" onClick={()=>api.startVisuals().then(r=>setMessage(r==='running'?'The show is already on.':'Show started. Esc on the projector also ends it.')).catch(e=>setError(String(e.message||e)))}>Start show</Button>}
       {message&&<Pill state="good">{message}</Pill>}
+    </div>
+    <p className="hint">On the projector itself (click the show first), even if this window is busy: <kbd>Esc</kbd> ends the show · <kbd>B</kbd> blackout · <kbd>F</kbd> fullscreen · <kbd>H</kbd> stats · <kbd>C</kbd> Now Playing card · <kbd>←</kbd><kbd>→</kbd> scene. Untick Fullscreen to preview the show in a window on this screen.</p>
+    <div className="row">
       {error&&<span className="bad">{error}</span>}
     </div>
   </>;

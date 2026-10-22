@@ -28,7 +28,7 @@ fn show_options(config: Config) -> AppOptions {
         bench: None,
         frame_latency: 2,
         settings_open: false,
-        save_settings: false,
+        hosted: true,
         screenshot: None,
         launcher: false,
         offsets_dir: live::offsets_dir(),
@@ -134,7 +134,7 @@ mod tests {
             !opts.launcher,
             "no launcher page: the app holds the settings"
         );
-        assert!(!opts.save_settings, "the app owns config.toml");
+        assert!(opts.hosted, "the app owns config.toml and the controls");
         assert!(opts.bench.is_none() && opts.exit_after.is_none());
     }
 }

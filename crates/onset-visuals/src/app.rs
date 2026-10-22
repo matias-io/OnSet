@@ -52,9 +52,10 @@ pub struct AppOptions {
     pub frame_latency: u32,
     /// Start with the settings panel open.
     pub settings_open: bool,
-    /// Save setting changes (key toggles, a new logo) to the settings file. Off when the
-    /// desktop app hosts the show: it owns the file, and key toggles last for that show.
-    pub save_settings: bool,
+    /// The desktop app hosts the show: it owns the settings file and the controls. The
+    /// show saves nothing (key toggles last for that show) and opens no settings panel
+    /// on the projector; its emergency keys still work.
+    pub hosted: bool,
     /// Save one frame here shortly before exit.
     pub screenshot: Option<PathBuf>,
     /// Open on the launcher page rather than straight into the show.
@@ -309,10 +310,11 @@ fn window_attributes(
             None => attrs.with_inner_size(LogicalSize::new(LAUNCHER_SIZE.0, LAUNCHER_SIZE.1)),
         };
     }
+    // A windowed show is a preview on the DJ's own screen, with a title bar to move it.
     let attrs = WindowAttributes::default()
         .with_title("OnSet")
         .with_window_icon(crate::brand::window_icon())
-        .with_decorations(false);
+        .with_decorations(!fullscreen);
     if fullscreen {
         attrs
             .with_fullscreen(Some(Fullscreen::Borderless(monitor.cloned())))
@@ -435,7 +437,7 @@ fn settings_change(old: &Config, new: &Config) -> SettingsChange {
 
 impl OnsetApp {
     fn save_config(&self) {
-        if self.opts.save_settings
+        if !self.opts.hosted
             && let Err(e) = self.opts.config.save()
         {
             tracing::warn!("could not save config: {e:#}");
@@ -1041,6 +1043,8 @@ impl OnsetApp {
             let monitor = s.window.current_monitor().or_else(|| self.monitor.clone());
             let mode = self.fullscreen.then_some(Fullscreen::Borderless(monitor));
             s.window.set_fullscreen(mode);
+            // A windowed show is a preview on the DJ's own screen: let it be moved.
+            s.window.set_decorations(!self.fullscreen);
             s.window.set_window_level(if self.fullscreen {
                 WindowLevel::AlwaysOnTop
             } else {
@@ -1169,7 +1173,7 @@ impl ApplicationHandler<ShowMessage> for OnsetApp {
             },
             _ => None,
         };
-        if pressed_key == Some(KeyCode::Tab) {
+        if pressed_key == Some(KeyCode::Tab) && !self.opts.hosted {
             if let Some(s) = self.surface.as_mut() {
                 s.overlay.toggle(&s.window);
             }
