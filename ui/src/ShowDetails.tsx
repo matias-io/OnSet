@@ -1,4 +1,4 @@
-import React,{useState} from 'react';
+import React,{useEffect,useState} from 'react';
 import {Button,Card,Field,Segmented} from './ui';
 
 /** Everything the visuals' launcher tabs held beyond the main Show page. Each card edits
@@ -109,8 +109,18 @@ export function OnScreenCard({s,change,setLogo}:{s:Settings;change:Change;setLog
 const STYLES=[{id:'clean',label:'Clean',blurb:'White text, the line being sung only. Reads anywhere.'},{id:'glow',label:'Glow',blurb:"The sung line glows in the track's colours; the next line waits below."},{id:'karaoke',label:'Karaoke',blurb:'Each word lights up as it is sung.'}];
 const PLACES=[{id:'top',label:'Top'},{id:'centre',label:'Centre'},{id:'lower',label:'Lower third'}];
 
+/** The engine's audio input in use and lyrics look-up progress, refreshed while shown. */
+function useShowStatus(){
+  const [status,setStatus]=useState<{audio_device:string;lyrics_progress:string}|null>(null);
+  useEffect(()=>{const api=(window as any).onset;if(!api?.showStatus)return;
+    const tick=()=>api.showStatus().then(setStatus).catch(()=>{});tick();
+    const timer=window.setInterval(tick,2000);return ()=>window.clearInterval(timer);},[]);
+  return status;
+}
+
 export function LyricsCard({s,change}:{s:Settings;change:Change}){
   const l=s.lyrics||{};
+  const status=useShowStatus();
   const set=(patch:Settings)=>change({lyrics:{...l,...patch}});
   return <Card title="Lyrics">
     <p className="hint">Synced lyrics, line by line, timed to the playhead of the MASTER deck.</p>
@@ -122,10 +132,17 @@ export function LyricsCard({s,change}:{s:Settings;change:Change}){
     <Slider label="Size" value={l.size??1} min={.6} max={2} format={v=>`${v.toFixed(2)}×`} onChange={v=>set({size:v})}/>
     <Slider label="Effects at drops" value={l.drop_fx??.6} min={0} max={1} format={pct} onChange={v=>set({drop_fx:v})}/>
     <Slider label="Timing" hint="Move the lyrics earlier (−) or later (+) when they run off the music." value={l.offset_s??0} min={-2} max={2} step={.05} format={v=>`${v>0?'+':''}${v.toFixed(2)} s`} onChange={v=>set({offset_s:v})}/>
+    <h4 className="show-sub">Before a set</h4>
+    <div className="row">
+      <Button size="sm" onClick={()=>(window as any).onset.prefetchLyrics().catch(()=>{})}>Look up the whole library</Button>
+      {status?.lyrics_progress&&<span className="dim">{status.lyrics_progress}</span>}
+    </div>
+    <p className="hint">Saves every track's lyrics now, so the show needs no look-ups online.</p>
   </Card>;
 }
 
-export function OutputCard({s,change,catalogue}:{s:Settings;change:Change;catalogue:Catalogue|null}){
+export function OutputCard({s,change,catalogue,rescan}:{s:Settings;change:Change;catalogue:Catalogue|null;rescan:()=>void}){
+  const status=useShowStatus();
   return <Card title="Output and audio">
     <Field label="Graphics card" hint="The fastest is picked unless you choose one. Applies from the next show.">
       <select value={s.gpu??''} onChange={e=>change({gpu:e.target.value||null})}>
@@ -144,5 +161,9 @@ export function OutputCard({s,change,catalogue}:{s:Settings;change:Change;catalo
         {(catalogue?.audio_inputs||[]).map(a=><option key={a} value={a}>{a}</option>)}
       </select>
     </Field>
+    <div className="row">
+      <span className="dim">In use: {status?.audio_device&&status.audio_device!=='none'?status.audio_device:'none (only while a show runs)'}</span>
+      <Button size="sm" kind="ghost" onClick={rescan}>Rescan devices</Button>
+    </div>
   </Card>;
 }

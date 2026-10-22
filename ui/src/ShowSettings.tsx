@@ -83,7 +83,7 @@ export function ShowSettings(){
     {tab==='scenes'&&<ScenesCard s={s} change={change} catalogue={catalogue}/>}
     {tab==='screen'&&<OnScreenCard s={s} change={change} setLogo={clear=>api.showLogo(clear).then(setState).catch(e=>setError(String(e.message||e)))}/>}
     {tab==='lyrics'&&<LyricsCard s={s} change={change}/>}
-    {tab==='output'&&<OutputCard s={s} change={change} catalogue={catalogue}/>}
+    {tab==='output'&&<OutputCard s={s} change={change} catalogue={catalogue} rescan={()=>api.showCatalogue().then(setCatalogue).catch(()=>{})}/>}
     {tab==='show'&&<>
     <Card title="Where the show goes">
       <div className="stack">

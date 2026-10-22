@@ -952,6 +952,8 @@ fn main() {
             show_settings::show_monitors,
             show_settings::show_catalogue,
             show_settings::show_logo,
+            show_settings::show_status,
+            show_settings::show_prefetch_lyrics,
             calibration::calibration_status,
             calibration::calibration_start,
             calibration::calibration_cancel,

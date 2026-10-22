@@ -133,6 +133,25 @@ pub async fn show_logo(
     describe(&config, &path)
 }
 
+/// What the engine is doing for the show pages: the audio input in use ("none" outside a
+/// show) and the progress of a whole-library lyrics look-up.
+#[tauri::command]
+pub fn show_status() -> Value {
+    crate::live::engine().map_or_else(
+        || json!({ "audio_device": "none", "lyrics_progress": "" }),
+        |e| json!({ "audio_device": e.audio_device(), "lyrics_progress": e.lyrics_progress() }),
+    )
+}
+
+/// Looks up and caches the lyrics of every track in the rekordbox collection, in the
+/// background, so a set needs no look-ups online.
+#[tauri::command]
+pub fn show_prefetch_lyrics() -> Result<(), String> {
+    let engine = crate::live::engine().ok_or("The live link has not started yet")?;
+    engine.command(onset_engine::EngineCommand::PrefetchLyrics);
+    Ok(())
+}
+
 /// The screens the show can go to. The settings name a screen by its Windows name
 /// (`\\.\DISPLAY2`), which the visuals match, rather than by its place in the list.
 #[tauri::command]

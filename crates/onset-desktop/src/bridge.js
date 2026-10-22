@@ -45,6 +45,8 @@
       showMonitors: () => invoke('show_monitors', {}),
       showCatalogue: () => invoke('show_catalogue', {}),
       showLogo: (clear) => invoke('show_logo', { clear }),
+      showStatus: () => invoke('show_status', {}),
+      prefetchLyrics: () => invoke('show_prefetch_lyrics', {}),
       providers: () => invoke('providers_status', {}),
       testProvider: (provider) => invoke('providers_test', { provider }),
       lookUpDetails: (providers, trackIds, web) =>
