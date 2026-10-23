@@ -130,20 +130,28 @@ impl Library {
         })?;
         let mut tracks: Vec<TrackMeta> = rows.collect::<Result<_, _>>()?;
         attach_my_tags(&conn, &mut tracks);
+        tracing::info!(tracks = tracks.len(), "loaded rekordbox collection");
+        Ok(Self {
+            db_path,
+            ..Self::from_tracks(tracks)
+        })
+    }
 
+    /// A collection held in memory with no database behind it, so it has no cues: for
+    /// tests and simulations that make up their own tracks.
+    pub fn from_tracks(tracks: Vec<TrackMeta>) -> Self {
         let by_id = tracks.iter().enumerate().map(|(i, t)| (t.id, i)).collect();
         let by_analysis = tracks
             .iter()
             .enumerate()
             .filter_map(|(i, t)| t.analysis_path.as_deref().map(|p| (norm(p), i)))
             .collect();
-        tracing::info!(tracks = tracks.len(), "loaded rekordbox collection");
-        Ok(Self {
+        Self {
             tracks,
             by_id,
             by_analysis,
-            db_path,
-        })
+            db_path: PathBuf::new(),
+        }
     }
 
     pub fn tracks(&self) -> &[TrackMeta] {
@@ -180,6 +188,9 @@ impl Library {
 
     /// Memory cues and hot cues of a track, sorted by time.
     pub fn cues(&self, id: TrackId) -> Vec<HotCue> {
+        if self.db_path.as_os_str().is_empty() {
+            return Vec::new();
+        }
         let Ok(conn) = open_read_only(&self.db_path) else {
             return Vec::new();
         };
