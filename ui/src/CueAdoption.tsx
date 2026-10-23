@@ -1,5 +1,6 @@
 import React,{useState} from 'react';
 import {Button} from './ui';
+import {padRepairRows} from './padRepair';
 
 export function CueAdoption({track,run}:any){
   const [preview,setPreview]=useState<any>(null),[hot,setHot]=useState(false),[library,setLibrary]=useState<any>(null);
@@ -17,6 +18,25 @@ export function CueAdoption({track,run}:any){
       <div className="row end"><Button size="sm" kind="primary" disabled={!preview.cues.length} onClick={()=>run(async()=>{const r=await window.onset.call('rekordbox-apply',{id:preview.id});setPreview(null);return r;},'Generated cue ownership recorded locally')}>Adopt these cues</Button></div>
     </>}
     {library&&<LibraryAdoption preview={library} run={run} done={()=>setLibrary(null)}/>}
+    <HotPadRepair run={run}/>
+  </div>;
+}
+
+/** Moves hot cues that versions before 2026-10-22 put one pad late (D..H on rekordbox's Kind 4..8)
+ *  onto their pads. A cue whose pad holds the DJ's own cue is removed when it is also a memory cue. */
+function HotPadRepair({run}:any){
+  const [preview,setPreview]=useState<any>(null);
+  const rows=preview?padRepairRows(preview):[];
+  const changes=preview?preview.moves.length+(preview.drops||[]).length:0;
+  return <div className="stack">
+    <p className="muted">Earlier versions put hot cues from D onward one pad late, and hot D on no pad. This moves them onto their rekordbox pads, keeping time, colour and name. Your own cues are never moved or removed; where one holds a pad, OnSet's hot cue for that pad is removed only if it is also a memory cue. Close rekordbox before applying.</p>
+    <div className="row end"><Button size="sm" onClick={()=>run(async()=>{const r=await window.onset.call('rekordbox-preview',{repair_hot_slots:true});setPreview(r);return r;})}>Find hot cues on the wrong pads</Button></div>
+    {preview&&<>
+      {rows.length?<div className="table-wrap"><table><thead><tr><th>Track</th><th>Moves</th><th>Removed</th><th>Left in place</th></tr></thead><tbody>
+        {rows.map(r=><tr key={r.title}><td>{r.title}</td><td>{r.moves.join(', ')||'—'}</td><td>{r.removed.join(', ')||'—'}</td><td>{r.left.join(', ')||'—'}</td></tr>)}
+      </tbody></table></div>:<p className="muted">Every hot cue is already on its pad.</p>}
+      <div className="row end"><Button size="sm" kind="primary" disabled={!changes} onClick={()=>run(async()=>{const r=await window.onset.call('rekordbox-apply',{id:preview.id});setPreview(null);return r;},'Hot cues moved to their pads; backup saved')}>Apply {changes} change{changes===1?'':'s'}</Button></div>
+    </>}
   </div>;
 }
 
