@@ -46,6 +46,18 @@ def bars_on_beats(result):
     return len(beats) > 0 and (not len(bars) or float(np.abs(beats[None, :] - bars[:, None]).min(1).max()) <= .001)
 
 
+def section_keys(sections, times, chroma, tuning):
+    """Each section's own key estimate. A section between the last downbeat and the end of the
+    audio can hold no frames at all; its key is unknown rather than failing the whole analysis."""
+    local = []
+    for section in sections:
+        idx = (times >= section["start"]) & (times < section["end"])
+        key = estimate_key(chroma[:, idx], tuning) if idx.any() else {
+            "state": "unknown", "source": "chroma-template-v1", "alternatives": [], "reason": "Section holds no audio frames"}
+        local.append({"start": section["start"], "end": section["end"], **key})
+    return local
+
+
 @measure_resources
 def analyse(profile, home, deep=False, checkpoint=lambda *a: None, experimental=(), settings=None):
     checkpoint("loading audio tools", .01)
@@ -131,6 +143,12 @@ def analyse(profile, home, deep=False, checkpoint=lambda *a: None, experimental=
         grid = profile.get("overrides", {}).get("grid") or previous.get("downbeats")
         source = "manual" if profile.get("overrides", {}).get("grid") else previous.get("grid_source", "imported")
         if grid:
+            grid = [float(t) for t in grid]
+            # rekordbox can count a downbeat just after the audio ends; drop such trailing ones when
+            # they are within a bar of the end. A grid running further past the end is for other audio.
+            bar = float(np.median(np.diff(grid))) if len(grid) > 2 else 0.
+            while len(grid) > 2 and grid[-1] > duration + .05 and grid[-1] - duration < bar:
+                grid.pop()
             downbeats = np.array(validate_grid(grid, duration))
             # The grid in force dictates the beats too; the detector's own estimate stays in
             # grid_observation, so beats can no longer contradict downbeats and bpm.
@@ -267,10 +285,7 @@ def analyse(profile, home, deep=False, checkpoint=lambda *a: None, experimental=
     for name, value in deep_results.get("models", {}).get("essentia", {}).get("data", {}).items():
         key_observations.append({"source": "essentia:" + name, **value})
     independent = deep_results.get("models", {}).get("beat_this", {}).get("data")
-    local = []
-    for section in structure["sections"]:
-        idx = (times >= section["start"]) & (times < section["end"])
-        local.append({"start": section["start"], "end": section["end"], **estimate_key(chroma[:, idx], tuning)})
+    local = section_keys(structure["sections"], times, chroma, tuning)
     # Raw dimensions retained; library calibration is a separate explicit operation.
     drive = .6 * scale(f["onset"]) + .4 * scale(f["percussive"])
     density = .5 * scale(f["flux"]) + .5 * scale(f["high"])

@@ -136,3 +136,27 @@ def test_results_cached_with_detector_beats_follow_the_grid(tmp_path,song,monkey
     fixed=analyse(p,store.home,deep=False)
     assert module.bars_on_beats(fixed) and abs(60/np.median(np.diff(fixed['beats']))-fixed['bpm'])<.5
     store.close()
+
+
+def test_a_trailing_rekordbox_downbeat_within_a_bar_is_dropped_not_fatal(tmp_path,song):
+    # Beautiful Places and Ray Of Solar: rekordbox's grid ran a fraction of a bar past the audio.
+    import soundfile as sf
+    duration=sf.info(song).duration
+    store=Store(tmp_path/'app');p=store.import_track(song)
+    p['analysis']={'downbeats':[2.*i for i in range(12)]+[duration+.25],'bpm':120.,'grid_source':'rekordbox'}
+    result=analyse(p,store.home,deep=False)
+    assert result['downbeats'][-1]<=duration
+    p['analysis']['downbeats']=[2.*i for i in range(12)]+[duration+3.]
+    with pytest.raises(ValueError,match='Grid extends past the audio'):
+        analyse(p,store.home,deep=False)
+    store.close()
+
+
+def test_a_section_with_no_audio_frames_has_an_unknown_key():
+    # Lock In, Joya, Follow, Safe And Sound: the last downbeat fell a millisecond before the end,
+    # leaving a section with no frames, and the whole analysis failed on its key.
+    from onset_service.analysis import section_keys
+    times=np.arange(0,10,.5);chroma=np.random.default_rng(0).random((12,len(times)))
+    local=section_keys([{'start':0.,'end':9.999},{'start':9.999,'end':10.}],times,chroma,0)
+    assert local[0]['state']!='unknown'
+    assert local[1]['state']=='unknown' and local[1]['reason']=='Section holds no audio frames'
