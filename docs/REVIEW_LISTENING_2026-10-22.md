@@ -91,15 +91,14 @@ One run of the four transitions on the controller serves both reviews. Set up as
 [REVIEW_VISUALS_2026-10-22.md](REVIEW_VISUALS_2026-10-22.md) part 4: projector running, HUD
 on (`H`), **Signal scope** ticked.
 
-Which projector build to run is your decision first. The replay branch (visual part 5) was
-rebased before the structure lift, so it records the set but can't judge the structure
-checks below. Either:
+One projector build does everything: `merge-autocue` has the beat lock (`9e4d9be`), the
+structure lift (`527523b`) and the set recorder (`41dba6c`). Build it as in the visual
+review's part 4 and run it with `--record`, so this set becomes the recording the visuals
+are tuned against:
 
-- **(a)** merge the replay branch into `merge-autocue` first (the visual session's
-  recommendation), then one build does everything: run it with `--record` so this set
-  becomes the recording the visuals are tuned against; or
-- **(b)** play the set twice: once on the `merge-autocue` release build for the beat-lock and
-  structure checks, once on the replay build with `--record`.
+```bash
+cd /c/Users/water/Projects/OnSet && CARGO_TARGET_DIR=D:/Offload/cargo-target cargo run -j 4 --release -p onset-visuals -- --record D:/Offload/scratch/review-set.onsetrec
+```
 
 In rekordbox, load the playlist **OnSet test 2026-10-22** and mix it using the table in part
 3: start each incoming track at its time, with the technique shown, pitch per the column.
