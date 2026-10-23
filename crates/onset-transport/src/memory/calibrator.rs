@@ -57,7 +57,7 @@ const SETTLE: Duration = Duration::from_millis(800);
 
 /// The steps the operator performs, in order, as the launcher lists them up front.
 pub const STEPS: &[&str] = &[
-    "Load a track on any deck and leave it paused, at least a minute before any loop or the end",
+    "Load a track on any deck and leave it paused, at least two minutes before any loop or the end",
     "Press play on that deck when asked, and leave rekordbox in front while it plays",
     "Pause that deck",
     "Press play on it again",
@@ -174,6 +174,15 @@ fn started_with_play(baseline: &BTreeSet<u64>, confirmed: Vec<Counter>) -> Vec<C
         .into_iter()
         .filter(|c| !baseline.contains(&c.addr))
         .collect()
+}
+
+/// The counters of two scans, each address once, the later scan's reading kept.
+fn merge_scans(first: Vec<Counter>, second: Vec<Counter>) -> Vec<Counter> {
+    let mut by_addr: BTreeMap<u64, Counter> = BTreeMap::new();
+    for c in first.into_iter().chain(second) {
+        by_addr.insert(c.addr, c);
+    }
+    by_addr.into_values().collect()
 }
 
 /// Groups counters by the second they show, largest group first (the position exists in
@@ -307,7 +316,13 @@ fn ranked_counters(
         s.say("  no newly playing deck found yet; scanning again");
         s.sleep(Duration::from_secs(2))?;
     };
-    let best = rank(started);
+    // A scan takes about half a minute. When play is pressed late, the first scan that finds
+    // anything read most of memory before the deck moved and holds only the clocks play
+    // starts (time since play), not the position, and the pause is then never seen
+    // (2026-10-22, twice). A second scan, made entirely while the deck plays, finds it.
+    s.say("  confirming with one more scan while the deck plays...");
+    let again = started_with_play(&baseline, scan_counters(s, p));
+    let best = rank(merge_scans(started, again));
     s.say(format!(
         "  {} counter(s) confirmed; the largest group reads {:.1} s",
         best.len(),
@@ -821,10 +836,10 @@ pub fn calibrate(out_dir: &Path, s: &mut Session<'_>) -> anyhow::Result<PathBuf>
     ));
     s.say(
         "This takes about three minutes: with a track paused, play it, pause it, play it again. \
-         The deck plays for under a minute of that.",
+         The deck plays for about a minute and a half of that.",
     );
     s.say(
-        "Step 1: load a track on any deck and leave it paused, at least a minute before any \
+        "Step 1: load a track on any deck and leave it paused, at least two minutes before any \
          loop or the end of the track (anywhere else is fine; the start is not needed).",
     );
     let counters = absolute_position_counters(s, &p)?;
@@ -1059,6 +1074,21 @@ mod tests {
         assert_eq!(
             choose_layout(vec![(generic, "generic"), (deck, "deck")]).unwrap(),
             "deck"
+        );
+    }
+
+    #[test]
+    fn a_late_press_is_recovered_by_the_confirming_scan() {
+        // The first scan caught only clocks play started; the second also finds the position.
+        let clock = counter(0x1000, CounterFormat::I32, 2.6);
+        let position = counter(0x2000, CounterFormat::F64, 46.5);
+        let clock_later = counter(0x1000, CounterFormat::I32, 33.0);
+        let merged = merge_scans(vec![clock], vec![clock_later, position]);
+        let addrs: Vec<u64> = merged.iter().map(|c| c.addr).collect();
+        assert_eq!(addrs, vec![0x1000, 0x2000]);
+        assert!(
+            (merged[0].seconds(merged[0].second) - 33.0).abs() < 0.01,
+            "later reading kept"
         );
     }
 

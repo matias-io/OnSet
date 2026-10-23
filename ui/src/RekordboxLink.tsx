@@ -57,7 +57,7 @@ export function RekordboxLink(){
       <p className="muted">Takes about three minutes at the decks; the first, paused part is the longest. Calibrate again after a rekordbox update, or if the live view shows the wrong track or time.</p>
       <ol className="calib-checklist">
         <li>rekordbox is open in <strong>Performance</strong> mode.</li>
-        <li>A track is loaded on any deck and <strong>paused</strong>, at least a minute before any loop or the end. The start isn’t needed.</li>
+        <li>A track is loaded on any deck and <strong>paused</strong>, at least two minutes before any loop or the end. The start isn’t needed. Keep rekordbox in front while the deck plays.</li>
         <li>Press play <strong>only when OnSet asks</strong>.</li>
       </ol>
       <div className="row">

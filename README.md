@@ -204,7 +204,7 @@ For a new rekordbox version, open **Setup → Calibrate** or run:
 .\target\release\onset-cli.exe calibrate
 ```
 
-Start with a loaded track paused, at least a minute before any loop or the end of the
+Start with a loaded track paused, at least two minutes before any loop or the end of the
 track; where it sits otherwise does not matter. The calibrator first records the clocks
 rekordbox runs with every deck paused, then asks you to play, pause and play the track,
 and only keeps counters that started with play. Press play only when asked: playing
