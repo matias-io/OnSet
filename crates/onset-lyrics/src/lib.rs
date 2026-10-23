@@ -21,8 +21,11 @@ const LRCLIB: &str = "https://lrclib.net/api";
 const MUSICBRAINZ: &str = "https://musicbrainz.org/ws/2";
 /// A track that was not found is asked about again after this long.
 const RETRY_NOT_FOUND_S: u64 = 14 * 24 * 3600;
-/// Search results further than this from the track's length are a different version.
-const MAX_LENGTH_GAP_S: f32 = 12.0;
+/// Search results further than this from the track's length are a different version: an
+/// extended mix or a radio edit, whose lyrics run off the music by the length of the
+/// missing intro. LRCLIB rounds lengths to whole seconds, and files of one version differ
+/// by a second or two.
+const MAX_LENGTH_GAP_S: f32 = 4.0;
 
 /// What the lyrics lookup is asked about.
 #[derive(Debug, Clone, PartialEq)]
@@ -84,7 +87,22 @@ impl Outcome {
     /// One line for the launcher.
     pub fn describe(&self) -> String {
         match self {
-            Self::Synced(l) => format!("Synced lyrics from {} ({} lines)", l.source, l.lines.len()),
+            Self::Synced(l) => {
+                // A version a few seconds longer or shorter runs off the music by that much.
+                let version = match l.version_gap_s {
+                    Some(gap) if gap.abs() >= 2.0 => format!(
+                        "; for a version {:.0} s {}",
+                        gap.abs(),
+                        if gap > 0.0 { "longer" } else { "shorter" }
+                    ),
+                    _ => String::new(),
+                };
+                format!(
+                    "Synced lyrics from {} ({} lines{version})",
+                    l.source,
+                    l.lines.len()
+                )
+            }
             Self::Plain => "Only unsynced lyrics exist for this track, so none are shown".into(),
             Self::Instrumental => "Instrumental: no lyrics".into(),
             Self::NotFound => "No lyrics found for this track".into(),
@@ -102,6 +120,9 @@ struct Cached {
     lrc: String,
     #[serde(default)]
     source: String,
+    /// The length of the version the lyrics are for, as the source gave it.
+    #[serde(default)]
+    duration_s: Option<f32>,
     fetched_unix: u64,
 }
 
@@ -214,14 +235,21 @@ fn to_cached(r: &LrcRecord) -> Cached {
         status: status.into(),
         lrc,
         source: "LRCLIB".into(),
+        duration_s: r.duration,
         fetched_unix: now_unix(),
     }
 }
 
-fn outcome(c: &Cached) -> Outcome {
+/// The outcome a cache entry stands for; `track_s` is the length of the track being
+/// played, so synced lyrics carry how far their version's length is from it.
+fn outcome(c: &Cached, track_s: Option<f32>) -> Outcome {
     match c.status.as_str() {
         "synced" => {
-            let l = Lyrics::parse_lrc(&c.lrc, &c.source);
+            let mut l = Lyrics::parse_lrc(&c.lrc, &c.source);
+            l.version_gap_s = match (c.duration_s, track_s) {
+                (Some(v), Some(t)) => Some(v - t),
+                _ => None,
+            };
             if l.lines.is_empty() {
                 Outcome::Plain
             } else {
@@ -290,7 +318,7 @@ impl LyricsStore {
 
     /// The cached answer, if any; never goes online.
     pub fn cached(&self, q: &Query) -> Option<Outcome> {
-        self.read_cache(q).map(|c| outcome(&c))
+        self.read_cache(q).map(|c| outcome(&c, q.duration_s))
     }
 
     /// The cached answer, or (when `online`) a fresh lookup that is then cached. A cached
@@ -300,7 +328,7 @@ impl LyricsStore {
             let stale =
                 c.status == "none" && now_unix().saturating_sub(c.fetched_unix) > RETRY_NOT_FOUND_S;
             if !stale || !online {
-                return outcome(&c);
+                return outcome(&c, q.duration_s);
             }
         }
         if !online {
@@ -309,7 +337,7 @@ impl LyricsStore {
         match self.fetch(q) {
             Ok(c) => {
                 self.write_cache(q, &c);
-                outcome(&c)
+                outcome(&c, q.duration_s)
             }
             Err(e) => {
                 // Network trouble is not an answer: nothing is cached, it is tried next time.
@@ -325,6 +353,7 @@ impl LyricsStore {
                 status: status.into(),
                 lrc: String::new(),
                 source: "Onset".into(),
+                duration_s: None,
                 fetched_unix: now_unix(),
             });
         }
@@ -361,6 +390,7 @@ impl LyricsStore {
             status: "none".into(),
             lrc: String::new(),
             source: "LRCLIB".into(),
+            duration_s: None,
             fetched_unix: now_unix(),
         })
     }
@@ -508,6 +538,35 @@ mod tests {
     }
 
     #[test]
+    fn a_longer_version_is_said_so_and_a_far_one_is_refused() {
+        let cached = Cached {
+            status: "synced".into(),
+            lrc: "[00:01.00] hi\n[00:03.00] there".into(),
+            source: "LRCLIB".into(),
+            duration_s: Some(205.0),
+            fetched_unix: 0,
+        };
+        let Outcome::Synced(l) = outcome(&cached, Some(201.4)) else {
+            panic!("synced");
+        };
+        assert!((l.version_gap_s.unwrap() - 3.6).abs() < 1e-3);
+        assert_eq!(
+            Outcome::Synced(l).describe(),
+            "Synced lyrics from LRCLIB (2 lines; for a version 4 s longer)"
+        );
+        let Outcome::Synced(same) = outcome(&cached, Some(204.6)) else {
+            panic!("synced");
+        };
+        assert!(
+            !Outcome::Synced(same).describe().contains("version"),
+            "under two seconds is the same version"
+        );
+        // A search result 12 s off used to be accepted; it is a different edit.
+        assert!(best_match(&[rec(212.0, true)], Some(200.0)).is_none());
+        assert!(best_match(&[rec(203.0, true)], Some(200.0)).is_some());
+    }
+
+    #[test]
     fn answers_are_cached_and_read_back() {
         let dir = tempfile::tempdir().unwrap();
         let store = LyricsStore::new(dir.path());
@@ -525,6 +584,7 @@ mod tests {
                 status: "synced".into(),
                 lrc: "[00:16.46] You lift my heart up\n".into(),
                 source: "LRCLIB".into(),
+                duration_s: None,
                 fetched_unix: now_unix(),
             },
         );

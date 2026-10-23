@@ -3,20 +3,40 @@
 //! and build-ups the words split into colour, sweep through a rainbow and ride a gentle wave.
 //! Nothing blinks: opacity only ever eases in and out, so it stays safe for photosensitive
 //! viewers.
+//!
+//! Timing: a line slides in ahead of its stamp so it is readable the moment its first word
+//! is sung, and the playhead is pulled back by the audio lag the beat lock measured, so
+//! the words follow what the room hears rather than what the deck reports. Readability:
+//! every word carries an outline and a shadow, and a dark band sits behind the line.
 use std::sync::Arc;
 
-use onset_core::lyrics::Lyrics;
+use onset_core::lyrics::{LyricAt, Lyrics};
 use onset_core::music_state::MusicState;
 use onset_core::show::Fx;
 use onset_core::track::TrackId;
 
+use crate::gpu::Gpu;
 use crate::overlay_options::{LyricPlace, LyricStyle, LyricsOptions};
+use crate::quad::{QuadPipeline, QuadTexture};
 use crate::text::{TextItem, TextLayer, linear_to_srgb8};
 
 /// Design size of the sung line at 1080 lines.
 const LINE_PX: f32 = 64.0;
-/// How long a new line takes to slide in, in seconds.
+/// How long a new line takes to slide in, in seconds. The slide starts this long before
+/// the line's stamp, so the line is in place when its first word is sung.
 const APPEAR_S: f32 = 0.28;
+/// Seconds of the beat lock's measured audio lag that nobody hears: the analyser's window
+/// centre and hop (2048 / 2 + 256 samples at 48 kHz). The rest is the sound reaching the
+/// room after the deck's position says it should, and the lyrics wait for it.
+const ANALYSIS_S: f32 = 0.024;
+/// Kicks the beat lock must have measured before its lag is trusted.
+const LAG_MIN_SAMPLES: u32 = 20;
+/// Outline thickness as a share of the font size.
+const OUTLINE: f32 = 0.035;
+/// The band's alpha at its middle when `backdrop` is 1.
+const BAND_ALPHA: f32 = 0.85;
+/// Rows of the band image: a soft edge needs a few.
+const BAND_STEPS: u32 = 48;
 
 /// Per-frame inputs to [`LyricsLayer::items`].
 pub struct LyricsFrame<'a> {
@@ -28,13 +48,86 @@ pub struct LyricsFrame<'a> {
     pub time_s: f32,
 }
 
-#[derive(Default)]
 pub struct LyricsLayer {
     track: Option<TrackId>,
     lyrics: Option<Arc<Lyrics>>,
     line: Option<usize>,
     previous: Option<usize>,
     changed_at: f32,
+    quads: QuadPipeline,
+    band: QuadTexture,
+}
+
+/// When the lyrics stand this frame: the playhead the words follow (after the DJ's offset
+/// and the measured audio lag), the line to show (ahead of its stamp by the slide-in) and
+/// what is being sung on it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Timing {
+    pub playhead: f32,
+    pub line: Option<usize>,
+    /// The word being sung on `line`; at the start of a line, before its stamp, word 0 at
+    /// progress 0.
+    pub sung: Option<LyricAt>,
+}
+
+/// The playhead the lyrics follow: the deck's, shifted by the DJ's offset and pulled back
+/// by the part of the measured audio lag a listener hears.
+pub fn lyric_playhead(ms: &MusicState, opts: &LyricsOptions) -> f32 {
+    let heard_lag = if ms.hits.lag_samples >= LAG_MIN_SAMPLES {
+        (ms.hits.lag_s - ANALYSIS_S).max(0.0)
+    } else {
+        0.0
+    };
+    ms.playhead_s as f32 + opts.offset_s - heard_lag
+}
+
+pub fn timing(lyrics: &Lyrics, ms: &MusicState, opts: &LyricsOptions) -> Timing {
+    let playhead = lyric_playhead(ms, opts);
+    let now = lyrics.at(playhead);
+    // The line slides in ahead of its stamp.
+    let line = lyrics.at(playhead + APPEAR_S).or(now).map(|a| a.line);
+    let sung = line.map(|l| match now {
+        Some(a) if a.line == l => a,
+        _ => LyricAt {
+            line: l,
+            line_progress: 0.0,
+            since_s: 0.0,
+            word: 0,
+            word_progress: 0.0,
+        },
+    });
+    Timing {
+        playhead,
+        line,
+        sung,
+    }
+}
+
+/// How lit word `index` is, 0..1: Karaoke sweeps through the words, Glow lights the words
+/// sung so far, and both light the whole line at once when the source did not time the
+/// words, rather than guessing. Clean is always lit.
+pub fn lit(style: LyricStyle, word_timed: bool, index: usize, sung: &LyricAt) -> f32 {
+    match style {
+        LyricStyle::Clean => 1.0,
+        LyricStyle::Glow => {
+            if !word_timed || index <= sung.word {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        LyricStyle::Karaoke => {
+            if !word_timed {
+                // A sweep across the line over its time, without pretending to know words.
+                return sung.line_progress.clamp(0.0, 1.0);
+            }
+            match index.cmp(&sung.word) {
+                std::cmp::Ordering::Less => 1.0,
+                std::cmp::Ordering::Equal => sung.word_progress,
+                std::cmp::Ordering::Greater => 0.0,
+            }
+        }
+    }
 }
 
 fn smooth(t: f32) -> f32 {
@@ -74,6 +167,15 @@ fn accent(theme: &[[f32; 3]; 5]) -> [f32; 3] {
     mix([c[0] / m, c[1] / m, c[2] / m], [1.0; 3], 0.25)
 }
 
+/// A black band with soft top and bottom edges, stretched behind the line.
+fn band_image(steps: u32) -> image::RgbaImage {
+    image::RgbaImage::from_fn(1, steps, |_, y| {
+        let t = y as f32 / (steps - 1).max(1) as f32;
+        let edge = smooth(t / 0.35).min(smooth((1.0 - t) / 0.35));
+        image::Rgba([0, 0, 0, (edge * 255.0).round() as u8])
+    })
+}
+
 /// A word placed on screen.
 struct Placed {
     text: String,
@@ -84,8 +186,18 @@ struct Placed {
 }
 
 impl LyricsLayer {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(gpu: &Gpu, format: wgpu::TextureFormat) -> Self {
+        let quads = QuadPipeline::new(gpu, format);
+        let band = quads.upload(gpu, &band_image(BAND_STEPS));
+        Self {
+            track: None,
+            lyrics: None,
+            line: None,
+            previous: None,
+            changed_at: 0.0,
+            quads,
+            band,
+        }
     }
 
     /// The lyrics for `track`, or `None` when it has none. Replaces what was shown.
@@ -145,9 +257,53 @@ impl LyricsLayer {
         out
     }
 
-    /// The text to draw this frame; empty when there is nothing to sing.
+    /// Draws the band behind the words over `span` (top and bottom pixels), `strength` 0..1.
+    fn draw_band(
+        &self,
+        gpu: &Gpu,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        size: (u32, u32),
+        span: (f32, f32),
+        strength: f32,
+    ) {
+        let (top, bottom) = span;
+        if strength <= 0.001 || bottom <= top {
+            return;
+        }
+        self.band.place(
+            gpu,
+            [0.0, top, size.0 as f32, bottom - top],
+            size,
+            strength * BAND_ALPHA,
+        );
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("lyrics band"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        self.quads.draw(&mut pass, &self.band);
+    }
+
+    /// Draws the band and returns the text to draw this frame; empty when there is
+    /// nothing to sing.
     #[allow(clippy::too_many_lines)] // one frame of the lyrics, read top to bottom
-    pub fn items(&mut self, text: &mut TextLayer, frame: &LyricsFrame<'_>) -> Vec<TextItem> {
+    pub fn items(
+        &mut self,
+        gpu: &Gpu,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        text: &mut TextLayer,
+        frame: &LyricsFrame<'_>,
+    ) -> Vec<TextItem> {
         let opts = frame.options;
         let Some(lyrics) = self.lyrics.clone() else {
             return Vec::new();
@@ -156,9 +312,11 @@ impl LyricsLayer {
         if !opts.enabled || !same_track || lyrics.lines.is_empty() {
             return Vec::new();
         }
-        let playhead = frame.ms.playhead_s as f32 + opts.offset_s;
-        let at = lyrics.at(playhead);
-        let now_line = at.map(|a| a.line);
+        let Timing {
+            line: now_line,
+            sung: at,
+            ..
+        } = timing(&lyrics, frame.ms, opts);
         if now_line != self.line {
             self.previous = self.line;
             self.line = now_line;
@@ -178,8 +336,15 @@ impl LyricsLayer {
         let accent = accent(frame.theme);
         // How much the lyrics move: the drop and, more gently, the build-up towards it.
         let amount = opts.drop_fx.clamp(0.0, 1.0) * frame.fx.drop_hit.max(frame.fx.build * 0.6);
-        let kick = frame.ms.audio.kick.clamp(0.0, 1.0);
+        let kick = frame.ms.hits.kick.clamp(0.0, 1.0);
         let mut items = Vec::new();
+        // The band's extent, grown around whatever is drawn.
+        let mut band_top = f32::MAX;
+        let mut band_bottom = f32::MIN;
+        let mut cover = |y: f32, h: f32| {
+            band_top = band_top.min(y);
+            band_bottom = band_bottom.max(y + h);
+        };
 
         // The previous line drifts up and fades as the new one arrives.
         if let Some(prev) = self.previous.filter(|_| appear < 1.0)
@@ -188,6 +353,7 @@ impl LyricsLayer {
             let words: Vec<String> = line.words.iter().map(|w| w.text.clone()).collect();
             let fade = 1.0 - appear;
             for word in Self::layout(text, &words, px, width, centre_y - px * 0.8 * appear) {
+                cover(word.y, px * 1.08);
                 items.push(
                     TextItem::new(word.text, px, (word.x, word.y))
                         .weight(700)
@@ -203,22 +369,8 @@ impl LyricsLayer {
         let lift = (1.0 - appear) * px * 0.5;
         for word in Self::layout(text, &words, px, width, centre_y + lift) {
             let index = word.index;
-            // Style colour.
-            let sung = match opts.style {
-                LyricStyle::Clean => 1.0,
-                LyricStyle::Glow => {
-                    if index <= sung_at.word {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
-                LyricStyle::Karaoke => match index.cmp(&sung_at.word) {
-                    std::cmp::Ordering::Less => 1.0,
-                    std::cmp::Ordering::Equal => sung_at.word_progress,
-                    std::cmp::Ordering::Greater => 0.0,
-                },
-            };
+            cover(word.y, px * 1.08);
+            let sung = lit(opts.style, line.word_timed, index, &sung_at);
             let (base, lit_col) = match opts.style {
                 LyricStyle::Clean => ([1.0; 3], [1.0; 3]),
                 LyricStyle::Glow => (mix([1.0; 3], accent, 0.35), accent),
@@ -239,12 +391,30 @@ impl LyricsLayer {
             let (wx, wy) = (word.x, word.y + wave - bounce);
             alpha = alpha.clamp(0.0, 1.0);
 
-            // Shadow for legibility over bright scenes.
+            // Shadow, then an outline all round: the word reads on any scene, bright or
+            // busy, whatever colour it takes.
             items.push(
                 TextItem::new(word.text.as_str(), px, (wx + px * 0.035, wy + px * 0.045))
                     .weight(700)
-                    .color([0, 0, 0, (150.0 * alpha) as u8]),
+                    .color([0, 0, 0, (170.0 * alpha) as u8]),
             );
+            let o = px * OUTLINE;
+            for (dx, dy) in [
+                (-1.0f32, 0.0f32),
+                (1.0, 0.0),
+                (0.0, -1.0),
+                (0.0, 1.0),
+                (-0.7, -0.7),
+                (0.7, -0.7),
+                (-0.7, 0.7),
+                (0.7, 0.7),
+            ] {
+                items.push(
+                    TextItem::new(word.text.as_str(), px, (wx + dx * o, wy + dy * o))
+                        .weight(700)
+                        .color([0, 0, 0, (220.0 * alpha) as u8]),
+                );
+            }
             // Glow: soft copies in the accent around the lit words.
             if opts.style == LyricStyle::Glow && sung > 0.0 {
                 for (dx, dy) in [(-1.0f32, 0.0f32), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
@@ -295,12 +465,25 @@ impl LyricsLayer {
                     0.0
                 };
             for word in Self::layout(text, &words, small, width, below) {
+                cover(word.y, small * 1.08);
                 items.push(
                     TextItem::new(word.text, small, (word.x, word.y))
                         .weight(500)
                         .color(linear_to_srgb8([1.0; 3], 0.4 * appear)),
                 );
             }
+        }
+
+        if band_top < band_bottom {
+            let pad = px * 0.6;
+            self.draw_band(
+                gpu,
+                encoder,
+                target,
+                frame.size,
+                (band_top - pad, band_bottom + pad),
+                opts.backdrop.clamp(0.0, 1.0) * appear.max(0.5),
+            );
         }
         items
     }
@@ -309,6 +492,18 @@ impl LyricsLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const LRC: &str = "[00:10.00] first line here\n[00:14.00] second line\n[00:20.00] <00:20.00>timed <00:20.50>words\n";
+
+    fn state(playhead: f64, lag_s: f32, lag_samples: u32) -> MusicState {
+        let mut ms = MusicState {
+            playhead_s: playhead,
+            ..MusicState::default()
+        };
+        ms.hits.lag_s = lag_s;
+        ms.hits.lag_samples = lag_samples;
+        ms
+    }
 
     #[test]
     fn hsv_hits_the_primaries() {
@@ -324,5 +519,79 @@ mod tests {
         theme[2] = [0.02, 0.0, 0.1];
         let a = accent(&theme);
         assert!(a[2] > 0.9 && a[0] > 0.2, "{a:?}");
+    }
+
+    #[test]
+    fn a_line_slides_in_before_its_stamp_and_is_sung_from_it() {
+        let lyrics = Lyrics::parse_lrc(LRC, "");
+        let opts = LyricsOptions::default();
+        // 0.2 s before the second line's stamp: it is the line to show, nothing sung yet.
+        let t = timing(&lyrics, &state(13.8, 0.0, 0), &opts);
+        assert_eq!(t.line, Some(1), "{t:?}");
+        let sung = t.sung.unwrap();
+        assert_eq!((sung.line, sung.word), (1, 0));
+        assert!(sung.word_progress.abs() < f32::EPSILON);
+        // Before the slide-in window, the first line is still the one.
+        assert_eq!(timing(&lyrics, &state(13.5, 0.0, 0), &opts).line, Some(0));
+        // A second into the line, the words are under way.
+        let t = timing(&lyrics, &state(15.0, 0.0, 0), &opts);
+        assert_eq!(t.line, Some(1));
+        assert!(t.sung.unwrap().since_s > 0.9);
+    }
+
+    #[test]
+    fn the_measured_audio_lag_delays_the_lyrics_once_trusted() {
+        let lyrics = Lyrics::parse_lrc(LRC, "");
+        let opts = LyricsOptions::default();
+        // 84 ms of lag, 24 ms of it analysis: the words wait 60 ms for the room.
+        let lagged = timing(&lyrics, &state(15.0, 0.084, 40), &opts);
+        assert!((lagged.playhead - 14.94).abs() < 1e-3, "{lagged:?}");
+        // Too few kicks measured: no correction.
+        let fresh = timing(&lyrics, &state(15.0, 0.084, 5), &opts);
+        assert!((fresh.playhead - 15.0).abs() < 1e-3, "{fresh:?}");
+        // A lag smaller than the analysis alone is not the room's.
+        let tiny = timing(&lyrics, &state(15.0, 0.01, 40), &opts);
+        assert!((tiny.playhead - 15.0).abs() < 1e-3, "{tiny:?}");
+        // The DJ's offset still applies on top.
+        let shifted = LyricsOptions {
+            offset_s: 0.5,
+            ..LyricsOptions::default()
+        };
+        let both = timing(&lyrics, &state(15.0, 0.084, 40), &shifted);
+        assert!((both.playhead - 15.44).abs() < 1e-3, "{both:?}");
+    }
+
+    #[test]
+    fn untimed_words_are_not_lit_one_by_one() {
+        let lyrics = Lyrics::parse_lrc(LRC, "");
+        let opts = LyricsOptions::default();
+        // Line-synced: halfway through "first line here", Glow lights all three words.
+        let t = timing(&lyrics, &state(12.0, 0.0, 0), &opts);
+        let sung = t.sung.unwrap();
+        assert!(!lyrics.lines[0].word_timed);
+        assert!((0..3).all(|i| lit(LyricStyle::Glow, false, i, &sung) > 0.99));
+        // Karaoke sweeps by line progress instead of guessing words.
+        let k = lit(LyricStyle::Karaoke, false, 2, &sung);
+        assert!(
+            (k - sung.line_progress).abs() < 1e-6 && k > 0.4 && k < 0.6,
+            "{k}"
+        );
+        // Word-timed: the second word lights only once it is sung.
+        let t = timing(&lyrics, &state(20.2, 0.0, 0), &opts);
+        let sung = t.sung.unwrap();
+        assert!(lyrics.lines[2].word_timed);
+        assert!(lit(LyricStyle::Glow, true, 0, &sung) > 0.99);
+        assert!(lit(LyricStyle::Glow, true, 1, &sung) < 0.01);
+        assert!(lit(LyricStyle::Clean, false, 1, &sung) > 0.99);
+    }
+
+    #[test]
+    fn the_band_is_soft_edged_and_solid_in_the_middle() {
+        let img = band_image(BAND_STEPS);
+        let a = |y: u32| img.get_pixel(0, y)[3];
+        assert_eq!(a(0), 0);
+        assert_eq!(a(BAND_STEPS - 1), 0);
+        assert_eq!(a(BAND_STEPS / 2), 255);
+        assert!(a(4) > 0 && a(4) < a(8), "a soft ramp");
     }
 }

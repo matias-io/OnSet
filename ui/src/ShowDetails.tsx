@@ -131,6 +131,7 @@ export function LyricsCard({s,change}:{s:Settings;change:Change}){
     <Field label="Place"><Segmented label="Lyric place" value={l.place} options={PLACES} onChange={id=>set({place:id})}/></Field>
     <Slider label="Size" value={l.size??1} min={.6} max={2} format={v=>`${v.toFixed(2)}×`} onChange={v=>set({size:v})}/>
     <Slider label="Effects at drops" value={l.drop_fx??.6} min={0} max={1} format={pct} onChange={v=>set({drop_fx:v})}/>
+    <Slider label="Backdrop" hint="A dark band behind the line being sung, so the words read on bright scenes. The words always have an outline and a shadow." value={l.backdrop??.5} min={0} max={1} format={pct} onChange={v=>set({backdrop:v})}/>
     <Slider label="Timing" hint="Move the lyrics earlier (−) or later (+) when they run off the music." value={l.offset_s??0} min={-2} max={2} step={.05} format={v=>`${v>0?'+':''}${v.toFixed(2)} s`} onChange={v=>set({offset_s:v})}/>
     <h4 className="show-sub">Before a set</h4>
     <div className="row">

@@ -14,6 +14,9 @@ pub struct LyricLine {
     pub time_s: f32,
     pub text: String,
     pub words: Vec<LyricWord>,
+    /// The source stamped the words (enhanced LRC). Otherwise the word times are a guess
+    /// spread by word length, and a style should not light words as if it knew.
+    pub word_timed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -22,6 +25,10 @@ pub struct Lyrics {
     pub lines: Vec<LyricLine>,
     /// Where they came from, for the launcher ("LRCLIB").
     pub source: String,
+    /// Seconds the matched version is longer than the track being played (negative:
+    /// shorter), when the source said how long its version is. A different edit's lyrics
+    /// run off the music by about this much.
+    pub version_gap_s: Option<f32>,
 }
 
 /// What is being sung at a moment.
@@ -121,11 +128,13 @@ impl Lyrics {
                 time_s: *t,
                 text: text.clone(),
                 words: time_words(*t, next, words),
+                word_timed: words.iter().any(|(stamp, _)| stamp.is_some()),
             });
         }
         Self {
             lines,
             source: source.to_string(),
+            version_gap_s: None,
         }
     }
 
@@ -249,5 +258,13 @@ mod tests {
         let w = &l.lines[0].words;
         assert_eq!(l.lines[0].text, "hey there");
         assert!((w[1].time_s - 5.8).abs() < 1e-3, "{w:?}");
+        assert!(l.lines[0].word_timed);
+    }
+
+    #[test]
+    fn line_synced_lyrics_know_their_word_times_are_guesses() {
+        let l = Lyrics::parse_lrc(LRC, "");
+        assert!(l.lines.iter().all(|line| !line.word_timed));
+        assert!(l.version_gap_s.is_none());
     }
 }

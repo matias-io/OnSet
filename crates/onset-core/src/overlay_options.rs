@@ -202,6 +202,9 @@ pub struct LyricsOptions {
     pub drop_fx: f32,
     /// Seconds to shift the lyrics by, for tracks whose lyrics run early or late.
     pub offset_s: f32,
+    /// A dark band behind the line being sung, 0 none .. 1 solid, so the words read on a
+    /// bright scene. The words always carry an outline and a shadow.
+    pub backdrop: f32,
 }
 
 impl Default for LyricsOptions {
@@ -214,6 +217,7 @@ impl Default for LyricsOptions {
             size: 1.0,
             drop_fx: 0.6,
             offset_s: 0.0,
+            backdrop: 0.5,
         }
     }
 }

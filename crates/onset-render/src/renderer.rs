@@ -189,7 +189,7 @@ impl Renderer {
             lyrics_status: String::new(),
             adapter: String::new(),
             hint_from: None,
-            lyrics: crate::lyrics::LyricsLayer::new(),
+            lyrics: crate::lyrics::LyricsLayer::new(gpu, format),
             lyrics_options: crate::overlay_options::LyricsOptions::default(),
             hud_options: crate::overlay_options::HudOptions::default(),
             card_options: crate::overlay_options::CardOptions::default(),
@@ -934,6 +934,9 @@ impl Renderer {
         // Overlays grow a little on emphasis (track change, drop).
         let grow = 1.0 + 0.12 * fx.emphasis;
         let mut items: Vec<TextItem> = self.lyrics.items(
+            gpu,
+            encoder,
+            target,
             &mut self.text,
             &crate::lyrics::LyricsFrame {
                 size: self.size,
