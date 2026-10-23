@@ -30,7 +30,7 @@ pub struct SimPlayer {
 }
 
 /// Linear-interpolated stereo sample at fractional frame `p`.
-fn sample_at(d: &DecodedAudio, p: f64) -> (f32, f32) {
+pub(crate) fn sample_at(d: &DecodedAudio, p: f64) -> (f32, f32) {
     let ch = usize::from(d.channels.max(1));
     let frames = d.frames();
     let i = p.floor() as usize;
