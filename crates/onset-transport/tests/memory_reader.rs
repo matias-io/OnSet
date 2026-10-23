@@ -11,8 +11,8 @@ use onset_transport::memory::offsets::{
     TrackIdFields,
 };
 use onset_transport::memory::reader::{
-    ChainReader, DeckChooser, DeckFiles, FakeMem, PlayTracker, decks_from_hits, parse_track_info,
-    signature_matches, track_bpm_from,
+    ChainReader, DeckChooser, DeckFiles, FakeMem, PlayTracker, deck_order_from_hits,
+    decks_from_hits, order_decks, parse_track_info, signature_matches, track_bpm_from,
 };
 
 const BASE: u64 = 0x1000_0000;
@@ -359,6 +359,7 @@ fn signature_rekordbox() -> (FakeMem, DeckSignature) {
             mask: 0x80,
         }),
         tempo: None,
+        deck_list: None,
         track_id: None,
     };
     for (pos, samples) in [(0x9000u64, 44_100i32), (0x7000, 88_200)] {
@@ -422,6 +423,33 @@ fn reader_reads_signature_decks_without_chains() {
         reader.master_deck(),
         Some(1),
         "the flag byte names the master"
+    );
+}
+
+/// On 2026-10-23, after rekordbox restarted, its decks 1 to 4 sat at deck objects 4, 1, 3
+/// and 2 by address, and a list of pointers to the objects' starts held them in that order.
+#[test]
+fn rekordbox_lists_its_decks_in_order() {
+    // Pointers to objects 4, 1, 3, 2 in consecutive slots; stray single pointers elsewhere.
+    let list = 0x8000u64;
+    let mut hits: Vec<Vec<u64>> = vec![vec![0x100], vec![], vec![], vec![], vec![]];
+    for (slot, obj) in [4usize, 1, 3, 2].iter().enumerate() {
+        hits[*obj].push(list + 8 * slot as u64);
+    }
+    hits[1].push(0x200);
+    assert_eq!(deck_order_from_hits(&hits), Some(vec![4, 1, 3, 2]));
+    let found = [0x10, 0x20, 0x30, 0x40, 0x50];
+    assert_eq!(
+        order_decks(&found, &[4, 1, 3, 2]),
+        vec![0x50, 0x20, 0x40, 0x30, 0x10],
+        "the unlisted object (a player) comes last"
+    );
+    // No run of two different decks: no order.
+    assert_eq!(deck_order_from_hits(&[vec![0x100], vec![0x200]]), None);
+    // Two different lists of the same length: ambiguous.
+    assert_eq!(
+        deck_order_from_hits(&[vec![0x100, 0x308], vec![0x108, 0x300]]),
+        None
     );
 }
 

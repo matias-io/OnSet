@@ -156,6 +156,59 @@ pub struct ChainReader<M: Mem> {
     players: Vec<u64>,
 }
 
+/// The deck order from rekordbox's deck list. `hits[i]` holds the addresses where a
+/// pointer to deck object `i` was seen. The longest run of consecutive 8-byte slots that
+/// point at two or more different objects is the list; it gives the objects in deck order
+/// (first appearance). `None` when no run exists or two runs of the best length disagree.
+pub fn deck_order_from_hits(hits: &[Vec<u64>]) -> Option<Vec<usize>> {
+    let mut slots: Vec<(u64, usize)> = hits
+        .iter()
+        .enumerate()
+        .flat_map(|(i, addrs)| addrs.iter().map(move |a| (*a, i)))
+        .collect();
+    slots.sort_unstable();
+    slots.dedup();
+    let mut best: Vec<Vec<usize>> = Vec::new();
+    let mut i = 0;
+    while i < slots.len() {
+        let mut j = i;
+        while j + 1 < slots.len() && slots[j + 1].0 == slots[j].0 + 8 {
+            j += 1;
+        }
+        let mut order: Vec<usize> = Vec::new();
+        for (_, obj) in &slots[i..=j] {
+            if !order.contains(obj) {
+                order.push(*obj);
+            }
+        }
+        if order.len() >= 2 {
+            match best.first().map(Vec::len) {
+                Some(n) if order.len() < n => {}
+                Some(n) if order.len() == n => best.push(order),
+                _ => best = vec![order],
+            }
+        }
+        i = j + 1;
+    }
+    best.dedup();
+    (best.len() == 1).then(|| best.remove(0))
+}
+
+/// `found` reordered so the objects in `order` come first, in that order, then the rest
+/// in their original (address) order.
+pub fn order_decks(found: &[u64], order: &[usize]) -> Vec<u64> {
+    let mut out: Vec<u64> = order
+        .iter()
+        .filter_map(|i| found.get(*i).copied())
+        .collect();
+    for (i, pos) in found.iter().enumerate() {
+        if !order.contains(&i) {
+            out.push(*pos);
+        }
+    }
+    out
+}
+
 /// True when every anchor of `sig` reads as expected around a position field at `pos`.
 pub fn signature_matches(mem: &impl Mem, sig: &DeckSignature, pos: u64) -> bool {
     let base = mem.module_base();
@@ -207,6 +260,26 @@ impl<M: Mem> ChainReader<M> {
             self.tracks.clear();
         }
         self.found = positions;
+    }
+
+    /// The values rekordbox's deck list holds for the found decks (what each pointer in it
+    /// reads), when the offsets know the list: scan for these, then `adopt_deck_list`.
+    pub fn deck_list_values(&self) -> Option<Vec<u64>> {
+        let list = self.offsets.signature.as_ref()?.deck_list?;
+        self.found
+            .iter()
+            .map(|pos| pos.checked_add_signed(list.start_offset))
+            .collect()
+    }
+
+    /// Puts the found decks in rekordbox's deck order, from where pointers to each were
+    /// seen (`hits[i]` for found deck `i`). Returns the order applied, as indices into the
+    /// decks as found, or `None` when no deck list was recognised (the order stays).
+    pub fn adopt_deck_list(&mut self, hits: &[Vec<u64>]) -> Option<Vec<usize>> {
+        let order = deck_order_from_hits(hits)?;
+        let ordered = order_decks(&self.found, &order);
+        self.set_found_decks(ordered);
+        Some(order)
     }
 
     /// The bytes that mark a player object, when the offsets know them.
@@ -989,6 +1062,8 @@ mod live {
             .is_some_and(|d| *d >= MIN_TRACK_S)
     }
 
+    /// Most places a pointer to one deck is looked for when finding rekordbox's deck list.
+    const DECK_LIST_HITS: usize = 256;
     /// Most hits considered when looking for player objects (7.2.19 has about a dozen).
     const PLAYER_HITS: usize = 256;
     /// Least time between scans made only because a playing deck has no track id: rekordbox
@@ -1200,6 +1275,16 @@ mod live {
                 let before = offsets.signature.as_ref().map(|s| s.anchors.clone());
                 let mut reader = ChainReader::new(process, offsets);
                 discover_decks(&mut reader);
+                if let Some(values) = reader.deck_list_values() {
+                    let hits = find_u64_values(reader.mem(), &values, DECK_LIST_HITS);
+                    if let Some(order) = reader.adopt_deck_list(&hits) {
+                        tracing::info!(?order, "decks in rekordbox's order");
+                    } else {
+                        tracing::warn!(
+                            "rekordbox's deck list not found; decks stay in address order"
+                        );
+                    }
+                }
                 if let Some(needle) = reader.player_needle() {
                     let hits = find_bytes(reader.mem(), &needle, PLAYER_HITS);
                     let n = reader.adopt_player_hits(&hits);

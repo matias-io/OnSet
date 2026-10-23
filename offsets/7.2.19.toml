@@ -56,6 +56,14 @@ mask = 1
 # MASTER falls back to `master_flag` above, which goes quiet for a deck after it restarts
 # or loads a track but does not name a wrong deck.
 
+[signature.deck_list]
+# rekordbox keeps its decks in a list of pointers to each deck object's start, 420 bytes
+# before the position field (where the first anchor sits). After rekordbox restarted on
+# 2026-10-23 decks 1 to 4 were objects 4, 1, 3 and 2 by address; the list was the only
+# run of pointers to the deck objects in the heap and held them in that order. The fifth
+# object (a player) is not in it.
+start_offset = -420
+
 [signature.tempo]
 # The deck's tempo (f32 BPM) and pitch (f32 fraction) beside the position: Lady Hear Me
 # Tonight (126.02) synced to 125.00 read 125.0 and -0.00833.

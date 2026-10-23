@@ -508,6 +508,7 @@ fn best_signature(
             max_decks: 4,
             master_flag: None,
             tempo: None,
+            deck_list: None,
             track_id: None,
         },
         counter,
@@ -819,6 +820,7 @@ pub fn merge_offsets(runs: &[Offsets]) -> anyhow::Result<Offsets> {
         max_decks: sigs.iter().map(|s| s.max_decks).max().unwrap_or(4),
         master_flag: sigs.iter().find_map(|s| s.master_flag.clone()),
         tempo: sigs.iter().find_map(|s| s.tempo),
+        deck_list: sigs.iter().find_map(|s| s.deck_list),
         track_id: sigs.iter().find_map(|s| s.track_id.clone()),
     });
     merged.provenance = Some(format!("merged from {} calibrations", runs.len()));
@@ -923,6 +925,7 @@ mod tests {
                 max_decks,
                 master_flag: None,
                 tempo: None,
+                deck_list: None,
                 track_id: None,
             }),
             provenance: None,

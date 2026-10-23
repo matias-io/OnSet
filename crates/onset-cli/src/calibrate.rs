@@ -12,7 +12,7 @@ use onset_transport::memory::calibrator::{self, Session};
 use onset_transport::memory::offsets::Offsets;
 use onset_transport::memory::process::Process;
 use onset_transport::memory::reader::ChainReader;
-use onset_transport::memory::scan::find_bytes;
+use onset_transport::memory::scan::{find_bytes, find_u64_values};
 
 use crate::common::open_library;
 
@@ -79,6 +79,14 @@ pub fn decks(offsets_dir: &Path, app_dir: Option<PathBuf>) -> anyhow::Result<()>
         .ok_or_else(|| anyhow::anyhow!("the offsets file has no signature"))?;
     let hits = find_bytes(reader.mem(), &needle, 64);
     let decks = reader.adopt_hits(&hits);
+    if let Some(values) = reader.deck_list_values() {
+        let hits = find_u64_values(reader.mem(), &values, 256);
+        if let Some(order) = reader.adopt_deck_list(&hits) {
+            println!("deck order from rekordbox's deck list: objects {order:?} by address");
+        } else {
+            println!("rekordbox's deck list not found; decks in address order");
+        }
+    }
     let players = match reader.player_needle() {
         Some(n) => {
             let hits = find_bytes(reader.mem(), &n, 256);

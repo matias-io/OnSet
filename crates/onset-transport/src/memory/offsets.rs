@@ -50,6 +50,15 @@ pub struct FlagField {
     pub mask: u8,
 }
 
+/// rekordbox's list of its decks: consecutive pointers to each deck object, in deck order.
+/// The signature finds the deck objects in address order, which after a restart need not
+/// be deck order; the list says which object is deck 1, deck 2 and so on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeckList {
+    /// Where the list's pointers point, relative to each deck's position field.
+    pub start_offset: i64,
+}
+
 /// Tempo fields inside the deck object, relative to the position field: the deck's current
 /// BPM and its pitch as a fraction (-0.0083 is -0.83 %), both f32. Together they give the
 /// loaded track's own BPM, which tells loaded files apart.
@@ -87,6 +96,9 @@ pub struct DeckSignature {
     /// The deck's tempo, when known.
     #[serde(default)]
     pub tempo: Option<TempoFields>,
+    /// Where rekordbox lists its decks in order, when known.
+    #[serde(default)]
+    pub deck_list: Option<DeckList>,
     /// Where the loaded track's content id is found, when known.
     #[serde(default)]
     pub track_id: Option<TrackIdFields>,
