@@ -23,3 +23,15 @@ fn rekordbox_7_2_19_knows_the_master_deck() {
         .expect("master flag");
     assert_eq!((flag.offset, flag.mask), (-396, 1));
 }
+
+#[test]
+fn rekordbox_7_2_19_reads_master_through_static_memory() {
+    let o = Offsets::for_version(&shipped(), "7.2.19").expect("7.2.19");
+    let m = o
+        .signature
+        .and_then(|s| s.master_chains)
+        .expect("master chains");
+    assert_eq!((m.stride, m.decks, m.mask), (0x370, 4, 1));
+    assert!(m.chains.iter().all(|c| c.hops.last() == Some(&0x1b8)));
+    assert!(m.chains.len() >= 2, "a spare route");
+}

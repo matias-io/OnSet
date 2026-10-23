@@ -87,6 +87,10 @@ pub fn decks(offsets_dir: &Path, app_dir: Option<PathBuf>) -> anyhow::Result<()>
         None => 0,
     };
     println!("rekordbox {version}: {decks} deck object(s), {players} player object(s)");
+    match reader.master_deck() {
+        Some(m) => println!("  MASTER: deck object {m}"),
+        None => println!("  MASTER: none read"),
+    }
     for i in 0..decks {
         let Some(d) = reader.deck(i) else {
             println!("  deck object {i}: unreadable");

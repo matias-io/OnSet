@@ -50,6 +50,21 @@ pub struct FlagField {
     pub mask: u8,
 }
 
+/// rekordbox's MASTER state as one byte per deck, in an array that static memory leads to.
+/// The byte inside the deck objects (`FlagField`) stops following MASTER for a deck once
+/// that deck restarts or loads a track; this one keeps following it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MasterChains {
+    /// Routes to deck 1's byte, tried in order; the first that resolves is read.
+    pub chains: Vec<Chain>,
+    /// Bytes from one deck's entry to the next, added to the route's last hop per deck.
+    pub stride: u64,
+    /// Decks the array holds; found decks beyond these are never MASTER.
+    pub decks: usize,
+    /// Bits that are set on the MASTER deck.
+    pub mask: u8,
+}
+
 /// Tempo fields inside the deck object, relative to the position field: the deck's current
 /// BPM and its pitch as a fraction (-0.0083 is -0.83 %), both f32. Together they give the
 /// loaded track's own BPM, which tells loaded files apart.
@@ -84,6 +99,9 @@ pub struct DeckSignature {
     /// Set on the deck that is MASTER, when known.
     #[serde(default)]
     pub master_flag: Option<FlagField>,
+    /// The MASTER deck through static memory, preferred over `master_flag` when known.
+    #[serde(default)]
+    pub master_chains: Option<MasterChains>,
     /// The deck's tempo, when known.
     #[serde(default)]
     pub tempo: Option<TempoFields>,

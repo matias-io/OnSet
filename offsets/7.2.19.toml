@@ -47,6 +47,38 @@ module_offset = 92088496
 offset = -396
 mask = 1
 
+[signature.master_chains]
+# rekordbox's MASTER button, one byte per deck in an array static memory leads to: deck N's
+# byte is [[rekordbox.exe + root] + hop] + 0x1b8 + (N - 1) * 0x370, 1 on the MASTER deck.
+# Found on 2026-10-22 by scanning the heap through five MASTER presses, then watching
+# through a deck restart, a track load and four more presses: these bytes matched the lit
+# button every time, while the deck objects' byte (`master_flag`, used when this is absent)
+# stopped following a deck after it restarted or loaded a track. Four static routes reach
+# the array; the first that resolves is read.
+stride = 880
+decks = 4
+mask = 1
+
+[[signature.master_chains.chains]]
+# rekordbox.exe+0x6031e98 -> +0x1450 -> +0x1b8
+root = 100867736
+hops = [5200, 440]
+
+[[signature.master_chains.chains]]
+# rekordbox.exe+0x6156c00 -> +0x17e0 -> +0x1b8
+root = 102067200
+hops = [6112, 440]
+
+[[signature.master_chains.chains]]
+# rekordbox.exe+0x6048b28 -> +0x1b80 -> +0x1b8
+root = 100961064
+hops = [7040, 440]
+
+[[signature.master_chains.chains]]
+# rekordbox.exe+0x6113db8 -> +0x1ca0 -> +0x1b8
+root = 101793208
+hops = [7328, 440]
+
 [signature.tempo]
 # The deck's tempo (f32 BPM) and pitch (f32 fraction) beside the position: Lady Hear Me
 # Tonight (126.02) synced to 125.00 read 125.0 and -0.00833.

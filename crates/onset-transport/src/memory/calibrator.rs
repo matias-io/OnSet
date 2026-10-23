@@ -507,6 +507,7 @@ fn best_signature(
             anchors,
             max_decks: 4,
             master_flag: None,
+            master_chains: None,
             tempo: None,
             track_id: None,
         },
@@ -818,6 +819,7 @@ pub fn merge_offsets(runs: &[Offsets]) -> anyhow::Result<Offsets> {
         anchors,
         max_decks: sigs.iter().map(|s| s.max_decks).max().unwrap_or(4),
         master_flag: sigs.iter().find_map(|s| s.master_flag.clone()),
+        master_chains: sigs.iter().find_map(|s| s.master_chains.clone()),
         tempo: sigs.iter().find_map(|s| s.tempo),
         track_id: sigs.iter().find_map(|s| s.track_id.clone()),
     });
@@ -922,6 +924,7 @@ mod tests {
                     .collect(),
                 max_decks,
                 master_flag: None,
+                master_chains: None,
                 tempo: None,
                 track_id: None,
             }),
