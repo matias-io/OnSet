@@ -30,6 +30,26 @@ use onset_transport::source::{SourceStatus, TransportSource};
 
 const TICK: Duration = Duration::from_micros(1_000_000 / 120);
 
+/// Seconds the captured audio is taken to trail a deck's playhead until the hit lock has
+/// measured it.
+const EAR_LAG_S: f64 = 0.1;
+/// Hit-lock measurements needed before its lag is trusted for the ear.
+const EAR_LAG_SAMPLES: u32 = 20;
+/// Seconds a playing deck's playhead may move other than with time before the ear forgets
+/// what it heard (the waveform it compares against is no longer where it was).
+const EAR_JUMP_S: f64 = 0.5;
+/// Tracks whose waveforms are kept for the ear: a set's decks, with room for reloads.
+const EAR_CACHE: usize = 16;
+
+/// The ear listening to every deck with a known track (see [`deck_ear`]).
+struct Ear {
+    ear: deck_ear::DeckEar,
+    /// The decks and tracks it was built for, in deck order; a change rebuilds it.
+    tracks: Vec<(u8, TrackRef)>,
+    /// Each playing deck's playhead at the last listen, and when: `(deck, playhead_s, time_s)`.
+    heads: Vec<(u8, f64, f64)>,
+}
+
 pub struct EngineConfig {
     /// rekordbox data folder; `None` discovers `%APPDATA%\Pioneer\rekordbox`.
     pub app_dir: Option<PathBuf>,
@@ -463,6 +483,9 @@ impl Engine {
                     lyrics_progress: lyrics_progress_w,
                     prefetching: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     recorder: None,
+                    ear: None,
+                    ear_bands: Vec::new(),
+                    ear_lag_s: EAR_LAG_S,
                 };
 
                 engine.run(&rx, &state_w, &status_w);
@@ -602,6 +625,12 @@ struct Running {
     prefetching: Arc<std::sync::atomic::AtomicBool>,
     /// Writes each tick's state to a file while a recording runs.
     recorder: Option<recorder::Recorder>,
+    /// Weighs every playing deck against what the room hears (live only).
+    ear: Option<Ear>,
+    /// Waveforms loaded for the ear, by track, newest last.
+    ear_bands: Vec<(TrackRef, Option<Arc<onset_core::bands::TrackBands>>)>,
+    /// Seconds the captured audio trails the playhead, from the hit lock once measured.
+    ear_lag_s: f64,
 }
 
 impl Running {
@@ -704,6 +733,7 @@ impl Running {
                 self.source = Source::Live(live_source_for(&self.cfg, &self.library));
                 self.current = None;
                 self.deck = None;
+                self.ear = None;
                 self.unresolved = None;
                 self.clock = Clock::new();
                 self.last_status = None;
@@ -735,6 +765,111 @@ impl Running {
                 Err(e) => tracing::error!("recording not closed cleanly: {e}"),
             }
         }
+    }
+
+    /// The deck the room hears, when the ear has a verdict: a snapshot of that deck to
+    /// follow in place of the transport's choice. The transport picks by MASTER and play
+    /// state, which cannot see the mixer; the ear fits the captured audio to every playing
+    /// deck's waveform and switches only once another deck clearly carries the room.
+    fn hear_deck(&mut self, now: Instant, time_s: f64) -> Option<TransportSnapshot> {
+        let Source::Live(source) = &self.source else {
+            return None;
+        };
+        if self.capture.is_none() {
+            return None;
+        }
+        let live = source.live_decks();
+        self.tend_ear(&live.decks);
+        let g = self.audio(now).groups;
+        let heard = [
+            f32::midpoint(g[0], g[1]),
+            f32::midpoint(g[2], g[3]),
+            f32::midpoint(g[4], g[5]),
+        ];
+        let positions: Vec<(u8, f64)> = live
+            .decks
+            .iter()
+            .filter(|d| d.playing)
+            .map(|d| (d.deck, d.playhead_s))
+            .collect();
+        let state = self.ear.as_mut()?;
+        let jumped = positions.iter().any(|&(deck, at)| {
+            state.heads.iter().any(|&(d, before, then)| {
+                // A playhead that moved other than with time: a cue press, a jump, a loop.
+                d == deck && {
+                    let moved = at - before;
+                    let elapsed = time_s - then;
+                    moved < -EAR_JUMP_S || moved > elapsed * 1.5 + EAR_JUMP_S
+                }
+            })
+        });
+        state.heads = positions.iter().map(|&(d, at)| (d, at, time_s)).collect();
+        let ear = &mut state.ear;
+        if jumped {
+            ear.reset();
+        }
+        ear.set_lag(self.ear_lag_s);
+        ear.listen(time_s, heard, &positions);
+        ear.set_current(self.deck);
+        let pick = ear.choose(time_s, live.master)?;
+        if self.deck != Some(pick) {
+            tracing::info!(deck = pick, verdict = ?ear.verdict(), "the room hears another deck");
+        }
+        live.decks.into_iter().find(|d| d.deck == pick)
+    }
+
+    /// Rebuilds the ear when the decks' tracks change, keeping the deck it follows.
+    fn tend_ear(&mut self, decks: &[TransportSnapshot]) {
+        let tracks: Vec<(u8, TrackRef)> = decks
+            .iter()
+            .filter(|d| d.track != TrackRef::Unknown)
+            .map(|d| (d.deck, d.track.clone()))
+            .collect();
+        if self.ear.as_ref().is_some_and(|e| e.tracks == tracks) {
+            return;
+        }
+        let ear_decks: Vec<deck_ear::EarDeck> = tracks
+            .iter()
+            .filter_map(|(deck, track)| {
+                Some(deck_ear::EarDeck {
+                    deck: *deck,
+                    bands: self.bands_for(track)?,
+                })
+            })
+            .collect();
+        tracing::info!(
+            decks = ear_decks.len(),
+            of = tracks.len(),
+            "listening for the decks' waveforms"
+        );
+        let following = self.ear.as_ref().and_then(|e| e.ear.current());
+        let mut ear = deck_ear::DeckEar::new(ear_decks, self.ear_lag_s);
+        ear.set_current(following.or(self.deck));
+        self.ear = Some(Ear {
+            ear,
+            tracks,
+            heads: Vec::new(),
+        });
+    }
+
+    /// rekordbox's 3-band waveform for a deck's track, loaded once per track.
+    fn bands_for(&mut self, track: &TrackRef) -> Option<Arc<onset_core::bands::TrackBands>> {
+        if let Some((_, bands)) = self.ear_bands.iter().find(|(t, _)| t == track) {
+            return bands.clone();
+        }
+        let bands = resolve_track(&self.library, track).and_then(|meta| {
+            let rel = meta.analysis_path.as_deref()?;
+            onset_rekordbox::anlz::load_analysis(&self.paths, rel)
+                .map_err(|e| tracing::warn!(title = %meta.title, "no waveform for the ear: {e}"))
+                .ok()?
+                .bands
+                .map(Arc::new)
+        });
+        if self.ear_bands.len() >= EAR_CACHE {
+            self.ear_bands.remove(0);
+        }
+        self.ear_bands.push((track.clone(), bands.clone()));
+        bands
     }
 
     /// A live snapshot names a track; keep `current` in step with it.
@@ -915,6 +1050,9 @@ impl Running {
 
         if let Some(mut snapshot) = self.source.poll() {
             if matches!(self.source, Source::Live(_)) {
+                if let Some(heard) = self.hear_deck(now, time_s) {
+                    snapshot = heard;
+                }
                 self.follow_track(&snapshot);
                 // Memory reads carry the playing tempo only; the analysed tempo is ours.
                 if let Some(bpm) = self.current.as_ref().and_then(|c| c.meta.bpm)
@@ -948,6 +1086,7 @@ impl Running {
             );
             // No grid: the lock passes the audio through and keeps its lag estimate.
             ms.hits = self.hit_lock.update(&st, playing, 0.0, None, &audio, dt);
+            ms.ear = self.ear_shares();
             return ms;
         };
         let playhead = self.clock.playhead_at(now).unwrap_or(0.0);
@@ -987,7 +1126,18 @@ impl Running {
         ms.hits = self
             .hit_lock
             .update(&st, playing, ms.bpm, analysis_now, &audio, dt);
+        ms.ear = self.ear_shares();
         ms
+    }
+
+    /// What the ear makes of the room right now, for the HUD: each playing deck's share of
+    /// what is heard and how well the mix explains it. `None` when it has nothing to say.
+    fn ear_shares(&self) -> Option<onset_core::music_state::DeckShares> {
+        let verdict = self.ear.as_ref()?.ear.verdict()?;
+        Some(onset_core::music_state::DeckShares {
+            shares: verdict.shares,
+            fit: verdict.fit,
+        })
     }
 
     fn run(
@@ -1003,6 +1153,9 @@ impl Running {
             }
             let tick_started = Instant::now();
             let ms = self.tick();
+            if ms.hits.lag_samples >= EAR_LAG_SAMPLES {
+                self.ear_lag_s = f64::from(ms.hits.lag_s);
+            }
             if let Some(r) = self.recorder.as_mut()
                 && let Err(e) = r.push(&ms)
             {
