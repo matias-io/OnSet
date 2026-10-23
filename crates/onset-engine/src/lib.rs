@@ -4,6 +4,7 @@
 //! The transport is rekordbox's memory by default. The simulator is a developer tool: it
 //! only runs when asked for explicitly, and Onset never plays music on its own otherwise.
 pub mod priority;
+pub mod recorder;
 pub mod stream_match;
 
 use std::path::PathBuf;
@@ -62,6 +63,10 @@ pub enum EngineCommand {
     PrefetchLyrics,
     /// Reload the rekordbox calibration and find the decks again, after a new calibration.
     Reconnect,
+    /// Write every tick's `MusicState` to this file (`onset_core::recording`), replacing
+    /// any recording in progress, until `StopRecording`.
+    StartRecording(PathBuf),
+    StopRecording,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -452,6 +457,7 @@ impl Engine {
                     audio_want: spawn_audio_watch(audio_choice),
                     lyrics_progress: lyrics_progress_w,
                     prefetching: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    recorder: None,
                 };
 
                 engine.run(&rx, &state_w, &status_w);
@@ -589,6 +595,8 @@ struct Running {
     lyrics_progress: Arc<ArcSwap<String>>,
     /// Set while the whole-library look-up runs, so a second press does not start another.
     prefetching: Arc<std::sync::atomic::AtomicBool>,
+    /// Writes each tick's state to a file while a recording runs.
+    recorder: Option<recorder::Recorder>,
 }
 
 impl Running {
@@ -696,8 +704,30 @@ impl Running {
                 self.last_status = None;
             }
             (EngineCommand::Reconnect, Source::Sim(_)) => {}
+            (EngineCommand::StartRecording(path), _) => {
+                self.stop_recording();
+                match recorder::Recorder::create(path) {
+                    Ok(r) => {
+                        tracing::info!(path = %path.display(), "recording the set");
+                        self.recorder = Some(r);
+                    }
+                    Err(e) => tracing::error!(path = %path.display(), "cannot record: {e}"),
+                }
+            }
+            (EngineCommand::StopRecording, _) => self.stop_recording(),
             (_, Source::Live(_)) => {
                 tracing::debug!(?cmd, "transport command ignored: rekordbox is in control");
+            }
+        }
+    }
+
+    fn stop_recording(&mut self) {
+        if let Some(r) = self.recorder.take() {
+            match r.finish() {
+                Ok((path, frames)) => {
+                    tracing::info!(path = %path.display(), frames, "recording finished");
+                }
+                Err(e) => tracing::error!("recording not closed cleanly: {e}"),
             }
         }
     }
@@ -968,6 +998,12 @@ impl Running {
             }
             let tick_started = Instant::now();
             let ms = self.tick();
+            if let Some(r) = self.recorder.as_mut()
+                && let Err(e) = r.push(&ms)
+            {
+                tracing::error!(path = %r.path().display(), "recording stopped: {e}");
+                self.recorder = None;
+            }
             state.store(Arc::new(ms));
             self.publish_status(status);
 

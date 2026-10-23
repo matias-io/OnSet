@@ -14,6 +14,7 @@ pub mod lyrics;
 pub use onset_core::overlay_options;
 pub mod quad;
 pub mod renderer;
+pub mod replay;
 pub mod scene;
 pub mod scenes;
 pub mod stage;

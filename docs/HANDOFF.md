@@ -128,6 +128,24 @@ Codex's default shell failed with OS error 87 after a host restart. If needed, p
 
 Inspect `git status` and preserve all source, documentation and private evidence. Private evidence (`service/.artifacts`, `service/.test-data`) and runtimes (`service/.venv`, `.runtime`, `.managed-python`) are local only and git-ignored. Music, credentials, runtime caches, installers and private evidence stay excluded from Git.
 
+### Recording and replaying a set (visuals)
+
+Tuning how scenes react no longer needs a live set each time. `onset.exe` can record the engine's `MusicState` every tick (120 Hz, about 400 bytes a tick, so a ten-minute set is around 30 MB) and the headless renderer replays it, so a scene or mapping change is compared on identical input. The format is `onset_core::recording` (little-endian, versioned, no file paths from the DJ's machine); the engine writes it through `EngineCommand::StartRecording`/`StopRecording`, and `onset_render::replay::Recording` reads it back (`frames()`, `at(time)`, `sampled(fps)`). Record while rekordbox plays (or with `--sim <title>`); the file closes when the window does:
+
+```powershell
+cargo run --release -p onset-visuals -- --record                       # recordings/set-<unix seconds>.onsetrec in the app's data folder (%LOCALAPPDATA%/Onset/Onset/data)
+cargo run --release -p onset-visuals -- --record D:/sets/friday.onsetrec --exit-after 600
+```
+
+Replay it through one or more scenes, measuring each and optionally saving frames to diff against another build:
+
+```powershell
+$env:ONSET_RECORDING = 'D:/sets/friday.onsetrec'; $env:ONSET_REPLAY_SCENES = 'synthwave,crystal'; $env:ONSET_DUMP_DIR = 'D:/Offload/replay-before'
+cargo test --release -p onset-render --test replay replay_recording -- --ignored --nocapture
+```
+
+`ONSET_REPLAY_FPS` (30), `ONSET_REPLAY_SIZE` (1920x1080), `ONSET_REPLAY_SECONDS` (all) and `ONSET_REPLAY_EVERY` (a PNG every 30 frames) narrow the run; without `ONSET_RECORDING` the checked-in synthetic fixture plays. That fixture, `crates/onset-render/tests/fixtures/synthetic.onsetrec` (four seconds of the gallery's build-up and drop at 30 Hz, no real music), is regenerated with `ONSET_UPDATE_FIXTURES=1 cargo test -p onset-render --test replay`; the same test checks it still matches the generator, and a second test replays it through a scene and asserts the drop shows. Recordings of real sets stay out of Git.
+
 ## Windows launch context and data preservation
 
 Ordinary active workspace data is `%LOCALAPPDATA%\Onset\Onset\data\workspace` (moved there from `%LOCALAPPDATA%\Autocue` on the desktop app's first start). Packaged Codex children can instead see redirected AppData under `%USERPROFILE%\AppData\Local\Packages\OpenAI.Codex_2p2nqsd0c76g0\LocalCache\Local`. The same logical path previously led to an apparent empty library. **Launch the app through the ordinary OnSet shortcut**, and audit it with diagnostics plus a fresh native full-history export outside AppData. Shell logical-path reads alone cannot establish active DB identity.

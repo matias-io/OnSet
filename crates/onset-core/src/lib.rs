@@ -13,6 +13,7 @@ pub mod music_state;
 pub mod overlay_options;
 pub mod phrase;
 pub mod quality;
+pub mod recording;
 pub mod show;
 pub mod structure;
 pub mod track;

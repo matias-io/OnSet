@@ -7,7 +7,7 @@ use std::time::Duration;
 use clap::Parser;
 use onset_visuals::app::{AppOptions, BenchPace};
 use onset_visuals::config::{Config, MonitorChoice};
-use onset_visuals::engine::{Engine, EngineConfig};
+use onset_visuals::engine::{Engine, EngineCommand, EngineConfig};
 
 #[derive(Parser)]
 #[command(
@@ -54,6 +54,11 @@ struct Cli {
     /// Save one frame as PNG here, a second before exit (or 3 s in without --exit-after)
     #[arg(long, value_name = "PNG")]
     screenshot: Option<PathBuf>,
+    /// Record the engine's state every tick to this file, for replaying through the
+    /// headless renderer (defaults to a timestamped file in the app's data folder)
+    #[arg(long, value_name = "FILE")]
+    #[allow(clippy::option_option)] // clap's shape for a flag with an optional value
+    record: Option<Option<PathBuf>>,
 }
 
 fn parse_monitor(s: &str) -> MonitorChoice {
@@ -83,6 +88,17 @@ fn offsets_dir() -> PathBuf {
 fn cache_dir() -> PathBuf {
     directories::ProjectDirs::from("", "Onset", "Onset")
         .map_or_else(|| PathBuf::from(".cache"), |d| d.cache_dir().to_path_buf())
+}
+
+/// `recordings/set-<unix seconds>.onsetrec` in the app's data folder.
+fn default_recording_path() -> PathBuf {
+    let data = directories::ProjectDirs::from("", "Onset", "Onset")
+        .map_or_else(|| PathBuf::from(".data"), |d| d.data_local_dir().to_path_buf());
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    data.join("recordings")
+        .join(format!("set-{stamp}.{}", onset_core::recording::EXTENSION))
 }
 
 fn main() -> anyhow::Result<()> {
@@ -115,6 +131,10 @@ fn main() -> anyhow::Result<()> {
     }) {
         Ok(e) => {
             tracing::info!(status = ?e.status(), "engine started");
+            if let Some(target) = &cli.record {
+                let path = target.clone().unwrap_or_else(default_recording_path);
+                e.command(EngineCommand::StartRecording(path));
+            }
             Some(Arc::new(e))
         }
         Err(e) => {
@@ -134,7 +154,13 @@ fn main() -> anyhow::Result<()> {
         keep_clear: None,
         screenshot: cli.screenshot.clone(),
         cache_dir: cache_dir(),
-        engine,
+        engine: engine.clone(),
     };
-    onset_visuals::run(opts)
+    let result = onset_visuals::run(opts);
+    if let Some(e) = engine.filter(|_| cli.record.is_some()) {
+        // Close the recording before the process ends; the engine thread does it at once.
+        e.command(EngineCommand::StopRecording);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    result
 }
