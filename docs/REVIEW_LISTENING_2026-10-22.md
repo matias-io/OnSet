@@ -6,8 +6,8 @@ planned transitions work (M4). Part 4 combines a live run of the test set with t
 review in [REVIEW_VISUALS_2026-10-22.md](REVIEW_VISUALS_2026-10-22.md), parts 4a, 4b and 5,
 so one session at the decks serves both.
 
-**Before starting:** the installed OnSet must include `d62880b` (the verdict buttons on the
-Transitions page) and `df069c7` (the analysis fixes). The session that builds installers is
+**Before starting:** the installed OnSet must include `a3b8411` (the verdict buttons on the
+Transitions page) and `b4ae302` (the analysis fixes). The session that builds installers is
 installing one from `origin/merge-autocue`, then re-analysing La Danza and six other songs.
 Wait for that; with an older build the verdict buttons are missing.
 
