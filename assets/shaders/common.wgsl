@@ -6,7 +6,27 @@
 //
 // Scenes render into an HDR target: values above 1.0 bloom. The post pass tonemaps, adds
 // bloom, flashes, inversions, hue shifts, shake, glitch and grain on top, so scenes only
-// draw the picture.
+// draw the picture. Exposure, bloom and saturation already follow the director's
+// intensity there, so a scene need not dim itself for a breakdown.
+//
+// The grammar: one sound, one kind of motion, in every scene, so the audience learns the
+// language once. Scenes may add to it; they should not contradict it.
+//
+//   kick()        a push: scale, a ripple outward, the nearest thing flares
+//   snare()       a flash of brightness or a facet lighting up
+//   hat()         fine sparkle, dust, stars
+//   bass()/sub()  size and breath: things swell and the field opens
+//   lowmid()/mid() warp and twist
+//   treble()      edge detail and rim light
+//   vocal()       a soft glow or rim light, never a hard edge
+//   tension()     everything converges and slows ahead of the drop
+//   drop_hit()    everything expands, brightens and the colours swing
+//   phrase_hit()  a new look to the same motion (a roll, a new direction)
+//   is_breakdown() calmer, slower, softer; the post pass already dims and desaturates
+//
+// Colour: `band_colour(u)` maps the spectrum to the track's accents the same way in every
+// scene (lows = accent 1, mids = accent 2, highs = accent 3). Use `palette(t)` with a
+// `seed()` offset only for decoration that does not stand for a frequency.
 
 struct Frame {
     resolution: vec2<f32>,      // render size in pixels
@@ -206,6 +226,13 @@ fn palette(t: f32) -> vec3<f32> {
     // Keep accents vivid even when the cover is muted.
     let l = luma(col);
     return max(mix(vec3<f32>(l), col, 1.6), vec3<f32>(0.0));
+}
+
+// The colour of a spectrum position u (0 lows .. 1 highs): accent 1 for the lows, accent 2
+// for the mids, accent 3 for the highs, the same in every scene, so what lights up in the
+// track's own colours says what is playing. The DJ's colour shift still applies.
+fn band_colour(u: f32) -> vec3<f32> {
+    return palette(clamp(u, 0.0, 1.0) * (2.0 / 3.0));
 }
 
 // Inigo Quilez's cosine palette, for scenes that want a rainbow sweep.

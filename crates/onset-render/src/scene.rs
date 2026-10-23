@@ -359,6 +359,20 @@ impl FullscreenScene {
         format: wgpu::TextureFormat,
         layout: &wgpu::BindGroupLayout,
     ) -> Result<Self, ShaderError> {
+        Self::new_with_common(gpu, name, COMMON_WGSL, fragment_wgsl, format, layout)
+    }
+
+    /// Like [`Self::new`] with a caller-supplied prelude: the on-disk `common.wgsl` for a
+    /// scene read from disk, so the two always come from the same place and a binary older
+    /// than the files still loads them together.
+    pub fn new_with_common(
+        gpu: &Gpu,
+        name: &str,
+        common_wgsl: &str,
+        fragment_wgsl: &str,
+        format: wgpu::TextureFormat,
+        layout: &wgpu::BindGroupLayout,
+    ) -> Result<Self, ShaderError> {
         let pipeline_layout = gpu
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -366,7 +380,14 @@ impl FullscreenScene {
                 bind_group_layouts: &[Some(layout)],
                 immediate_size: 0,
             });
-        let pipeline = build_pipeline(gpu, name, fragment_wgsl, format, &pipeline_layout)?;
+        let pipeline = build_pipeline_with_common(
+            gpu,
+            name,
+            common_wgsl,
+            fragment_wgsl,
+            format,
+            &pipeline_layout,
+        )?;
         Ok(Self {
             name: name.to_string(),
             format,
@@ -402,16 +423,6 @@ impl FullscreenScene {
 }
 
 /// Compiles inside a validation error scope so a bad shader is an `Err`, never a panic.
-fn build_pipeline(
-    gpu: &Gpu,
-    name: &str,
-    fragment_wgsl: &str,
-    format: wgpu::TextureFormat,
-    layout: &wgpu::PipelineLayout,
-) -> Result<wgpu::RenderPipeline, ShaderError> {
-    build_pipeline_with_common(gpu, name, COMMON_WGSL, fragment_wgsl, format, layout)
-}
-
 fn build_pipeline_with_common(
     gpu: &Gpu,
     name: &str,

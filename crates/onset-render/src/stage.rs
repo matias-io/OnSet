@@ -30,7 +30,7 @@ pub struct PostUniforms {
     pub trans: [f32; 4],
     /// Build-up progress, beat count, phrase move (decaying), move direction (turns).
     pub build: [f32; 4],
-    /// Build-up strength, vocal level, unused, unused.
+    /// Build-up strength, vocal level, director intensity, unused.
     pub style: [f32; 4],
     /// Two palette colours (linear rgb) for the sweeps.
     pub accent: [f32; 4],

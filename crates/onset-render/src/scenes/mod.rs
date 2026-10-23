@@ -246,8 +246,11 @@ fn embedded(name: &str) -> Option<&'static str> {
 }
 
 /// Loads every built-in scene, preferring the file in `shader_dir` (so edits count) and
-/// falling back to the embedded copy when the file is missing or does not compile. A broken
-/// file is reported in `errors` for the HUD; nothing here is fatal.
+/// falling back to the embedded copy when the file is missing or does not compile. A file
+/// gets the on-disk `common.wgsl` as its prelude (the embedded one when that is missing),
+/// so the files always compile against each other, however old the binary; the embedded
+/// copies get the embedded prelude. A broken file is reported in `errors` for the HUD;
+/// nothing here is fatal.
 pub fn builtin_scenes(
     gpu: &Gpu,
     format: wgpu::TextureFormat,
@@ -256,17 +259,25 @@ pub fn builtin_scenes(
 ) -> LoadedScenes {
     let mut scenes: Vec<Box<dyn Scene>> = Vec::with_capacity(BUILTIN_SCENE_NAMES.len());
     let mut errors = Vec::new();
+    let disk_common = std::fs::read_to_string(shader_dir.join("common.wgsl"))
+        .map_err(|e| {
+            tracing::warn!("common.wgsl unavailable on disk ({e}); using the embedded copy");
+        })
+        .ok();
+    let common: &str = disk_common.as_deref().unwrap_or(crate::scene::COMMON_WGSL);
     for name in BUILTIN_SCENE_NAMES {
         let path = shader_dir.join(format!("{name}.wgsl"));
         let from_disk = match std::fs::read_to_string(&path) {
-            Ok(src) => match FullscreenScene::new(gpu, name, &src, format, layout) {
-                Ok(scene) => Some(scene),
-                Err(e) => {
-                    tracing::error!("{e}; using the embedded copy");
-                    errors.push(e);
-                    None
+            Ok(src) => {
+                match FullscreenScene::new_with_common(gpu, name, common, &src, format, layout) {
+                    Ok(scene) => Some(scene),
+                    Err(e) => {
+                        tracing::error!("{e}; using the embedded copy");
+                        errors.push(e);
+                        None
+                    }
                 }
-            },
+            }
             Err(e) => {
                 tracing::warn!(path = %path.display(), "shader file unavailable ({e}); using the embedded copy");
                 None

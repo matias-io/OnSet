@@ -66,7 +66,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
         // Struts: brightness from the spectrum slice they stand for.
         let level = spectrum(st.y);
-        let strut_col = palette(st.y + 0.33 + seed());
+        let strut_col = band_colour(st.y);
         col = col + strut_col * level * level * fade * (0.0009 / (0.0004 + st.x * st.x));
 
         dist = dist + max(min(dg, st.x) * 0.7, 0.02);

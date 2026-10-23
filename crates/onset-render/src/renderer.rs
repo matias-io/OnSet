@@ -781,10 +781,17 @@ impl Renderer {
                 0.35,
                 0.0015 + 0.004 * fx.drop_hit,
             ],
-            tone: [1.0, fx.seed, 0.9, if self.blackout { 1.0 } else { 0.0 }],
+            // Exposure follows the director: a breakdown sits dimmer than a drop in every
+            // scene, whatever the scene itself does with `intensity`.
+            tone: [
+                0.82 + 0.3 * intensity,
+                fx.seed,
+                0.9,
+                if self.blackout { 1.0 } else { 0.0 },
+            ],
             trans: [progress, kind, 0.0, fx.tension],
             build: [fx.build, fx.beat_count, fx.phrase_move, fx.move_angle],
-            style: [s.buildup, fx.vocal, 0.0, 0.0],
+            style: [s.buildup, fx.vocal, intensity, 0.0],
             accent: [pal[2][0], pal[2][1], pal[2][2], 1.0],
             accent2: [pal[3][0], pal[3][1], pal[3][2], 1.0],
         }
