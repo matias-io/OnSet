@@ -89,8 +89,17 @@ lower is just as useful.
 
 One run of the four transitions on the controller serves both reviews. Set up as in
 [REVIEW_VISUALS_2026-10-22.md](REVIEW_VISUALS_2026-10-22.md) part 4: projector running, HUD
-on (`H`), **Signal scope** ticked. If the replay build from its part 5 is ready, run that
-binary with `--record` so this set becomes the recording the visuals are tuned against.
+on (`H`), **Signal scope** ticked.
+
+Which projector build to run is your decision first. The replay branch (visual part 5) was
+rebased before the structure lift, so it records the set but can't judge the structure
+checks below. Either:
+
+- **(a)** merge the replay branch into `merge-autocue` first (the visual session's
+  recommendation), then one build does everything: run it with `--record` so this set
+  becomes the recording the visuals are tuned against; or
+- **(b)** play the set twice: once on the `merge-autocue` release build for the beat-lock and
+  structure checks, once on the replay build with `--record`.
 
 In rekordbox, load the playlist **OnSet test 2026-10-22** and mix it using the table in part
 3: start each incoming track at its time, with the technique shown, pitch per the column.
@@ -101,9 +110,10 @@ During the set:
   **Played in a set**. A transition can work in the render and not live, or the other way
   round; both verdicts are kept.
 - **Beat lock (visual 4a):** the two EQ / bass swaps pull the outgoing low EQ down for most
-  of 31 s, the case the visual review describes. The scope's kick confidence should fall
-  with the outgoing bass and rise with the incoming one, and the visual kick should stay on
-  the beat throughout.
+  of 31 s, the case the visual review describes. The beat lock follows the master deck's
+  grid, and in a beat-matched mix the incoming kick confirms that grid too. So expect kick
+  confidence to dip while the outgoing lows are down and recover as the incoming bass lands,
+  not a clean fall to zero. The visual kick should stay on the beat throughout.
 - **Structure (visual 4b):** each track's breakdown and drop should dim and lift the
   picture. La Danza is where it matters: if the picture lifts at 0:04 and not at the drop you
   labelled in part 1, that is the analysis's error showing.
