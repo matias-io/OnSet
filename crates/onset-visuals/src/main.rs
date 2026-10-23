@@ -23,6 +23,12 @@ struct Cli {
     /// reading rekordbox
     #[arg(long)]
     sim: Option<String>,
+
+    /// With --sim: hear the simulator through the system audio capture instead of its own
+    /// tap, so the show runs the whole audio path (and the HUD scope measures its lag)
+    /// without a deck. Turn the speakers on: silence captures as silence.
+    #[arg(long, requires = "sim")]
+    sim_loopback: bool,
     /// rekordbox data folder (defaults to %APPDATA%\Pioneer\rekordbox)
     #[arg(long)]
     app_dir: Option<PathBuf>,
@@ -92,8 +98,10 @@ fn cache_dir() -> PathBuf {
 
 /// `recordings/set-<unix seconds>.onsetrec` in the app's data folder.
 fn default_recording_path() -> PathBuf {
-    let data = directories::ProjectDirs::from("", "Onset", "Onset")
-        .map_or_else(|| PathBuf::from(".data"), |d| d.data_local_dir().to_path_buf());
+    let data = directories::ProjectDirs::from("", "Onset", "Onset").map_or_else(
+        || PathBuf::from(".data"),
+        |d| d.data_local_dir().to_path_buf(),
+    );
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
@@ -127,7 +135,7 @@ fn main() -> anyhow::Result<()> {
         sim_seek_s: cli.seek,
         sim_gain: cli.gain,
         audio_device: config.audio_device.clone(),
-        capture_audio: cli.sim.is_none(),
+        capture_audio: cli.sim.is_none() || cli.sim_loopback,
     }) {
         Ok(e) => {
             tracing::info!(status = ?e.status(), "engine started");

@@ -51,7 +51,8 @@ fn same_uniforms(a: &MusicState, b: &MusicState) -> bool {
     let fa: &[f32] = bytemuck::cast_slice(bytemuck::bytes_of(&ua));
     let fb: &[f32] = bytemuck::cast_slice(bytemuck::bytes_of(&ub));
     fa.iter().zip(fb).all(|(x, y)| (x - y).abs() < 1e-4)
-        && a.track.as_ref().map(|t| (&t.title, t.bpm)) == b.track.as_ref().map(|t| (&t.title, t.bpm))
+        && a.track.as_ref().map(|t| (&t.title, t.bpm))
+            == b.track.as_ref().map(|t| (&t.title, t.bpm))
         && a.beat_index == b.beat_index
         && (a.bpm_grid - b.bpm_grid).abs() < 1e-4
 }
@@ -76,7 +77,11 @@ fn synthetic_fixture_matches_the_generator() {
             "state {i} differs from the generator; regenerate with ONSET_UPDATE_FIXTURES=1"
         );
     }
-    assert!((recording.duration_s() - f64::from((FIXTURE_SECONDS * FIXTURE_HZ - 1.0) / FIXTURE_HZ)).abs() < 1e-6);
+    assert!(
+        (recording.duration_s() - f64::from((FIXTURE_SECONDS * FIXTURE_HZ - 1.0) / FIXTURE_HZ))
+            .abs()
+            < 1e-6
+    );
     // The drop is in the recording: the countdown reaches zero and the phrase flips.
     let before = recording.at(f64::from(DROP_AT) - 0.05).unwrap();
     let after = recording.at(f64::from(DROP_AT) + 0.05).unwrap();
@@ -124,7 +129,9 @@ impl Stage {
             .h
             .gpu
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("replay") });
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("replay"),
+            });
         r.render(&self.h.gpu, &mut enc, &view, ms, t);
         self.h.gpu.queue.submit([enc.finish()]);
         read.then(|| self.h.read_back())
@@ -169,7 +176,10 @@ fn the_fixture_replays_through_a_scene_and_shows_its_drop() {
             }
         }
     }
-    assert!(!build.is_empty() && !drop.is_empty(), "both moments were sampled");
+    assert!(
+        !build.is_empty() && !drop.is_empty(),
+        "both moments were sampled"
+    );
     if let Some(dir) = &dump {
         stage.save(dir, &format!("replay_{scene}_build"), &build);
         stage.save(dir, &format!("replay_{scene}_drop"), &drop);
@@ -198,7 +208,9 @@ fn replay_recording() {
     let path = std::env::var_os("ONSET_RECORDING").map_or_else(fixture_path, PathBuf::from);
     let recording = Recording::read(&path).expect("recording");
     let env = |k: &str| std::env::var(k).ok();
-    let fps: f64 = env("ONSET_REPLAY_FPS").and_then(|v| v.parse().ok()).unwrap_or(30.0);
+    let fps: f64 = env("ONSET_REPLAY_FPS")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30.0);
     let size = env("ONSET_REPLAY_SIZE")
         .and_then(|v| {
             let (w, h) = v.split_once('x')?;
@@ -208,7 +220,9 @@ fn replay_recording() {
     let seconds: f64 = env("ONSET_REPLAY_SECONDS")
         .and_then(|v| v.parse().ok())
         .unwrap_or(f64::INFINITY);
-    let every: u64 = env("ONSET_REPLAY_EVERY").and_then(|v| v.parse().ok()).unwrap_or(30);
+    let every: u64 = env("ONSET_REPLAY_EVERY")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30);
     let dump = std::env::var_os("ONSET_DUMP_DIR").map(PathBuf::from);
     let mut stage = Stage::new(size, false, Quality::High);
     let all = stage.r.scene_names();
@@ -232,7 +246,10 @@ fn replay_recording() {
     );
     let (start, _) = recording.span().unwrap();
     for scene in scenes {
-        assert!(stage.r.set_scene(&scene), "no scene {scene:?}; have {all:?}");
+        assert!(
+            stage.r.set_scene(&scene),
+            "no scene {scene:?}; have {all:?}"
+        );
         let first = recording.frames().next().unwrap().clone();
         for f in 0..30 {
             stage.frame(&first, f as f32 / fps as f32, false);
@@ -260,5 +277,56 @@ fn replay_recording() {
             "{scene:>10}: {frames} frames, {wall:6.2} ms each (renderer CPU {:5.2} ms)",
             cpu / frames.max(1) as f64
         );
+    }
+}
+
+/// What the beat lock made of a recording: how long it was locked, the confidences and the
+/// audio lag it measured against the grid. For the HUD scope's numbers without a person
+/// at the decks: record the simulator through the capture (`onset --sim <title>
+/// --sim-loopback --record <file> --exit-after 40`), then
+/// `ONSET_RECORDING=<file> cargo test -p onset-render --test replay hits_lock_summary --
+/// --ignored --nocapture`. With `ONSET_EXPECT_LOCK` set it also asserts the lock held.
+#[test]
+#[ignore = "replay tool: run on demand"]
+fn hits_lock_summary() {
+    let path = std::env::var_os("ONSET_RECORDING").map_or_else(fixture_path, PathBuf::from);
+    let rec = Recording::read(&path).expect("recording");
+    let frames: Vec<&MusicState> = rec.frames().collect();
+    assert!(!frames.is_empty(), "empty recording");
+    let locked = frames.iter().filter(|m| m.hits.locked).count();
+    let last = frames.last().unwrap();
+    let h = &last.hits;
+    let best_kick = frames
+        .iter()
+        .map(|m| m.hits.kick_confidence)
+        .fold(0.0f32, f32::max);
+    println!(
+        "recording {}: {} frames over {:.1} s, locked to the grid in {} ({:.0} %)",
+        path.display(),
+        frames.len(),
+        rec.duration_s(),
+        locked,
+        100.0 * locked as f64 / frames.len() as f64
+    );
+    println!(
+        "audio lag {:+.0} ms over {} kicks; final confidence kick {:.2} snare {:.2}; best kick confidence {:.2}",
+        h.lag_s * 1000.0,
+        h.lag_samples,
+        h.kick_confidence,
+        h.snare_confidence,
+        best_kick
+    );
+    if std::env::var_os("ONSET_EXPECT_LOCK").is_some() {
+        assert!(locked * 2 > frames.len(), "locked less than half the time");
+        assert!(
+            h.lag_samples >= 20,
+            "too few kicks heard: {}",
+            h.lag_samples
+        );
+        assert!(
+            best_kick > 0.8,
+            "kick confidence never rose above 0.8: {best_kick}"
+        );
+        assert!(h.lag_s.abs() < 0.25, "lag implausible: {} s", h.lag_s);
     }
 }

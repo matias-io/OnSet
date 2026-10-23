@@ -43,8 +43,10 @@ pub struct EngineConfig {
     pub sim_gain: f32,
     /// Loopback endpoint substring; default output device when `None`.
     pub audio_device: Option<String>,
-    /// Capture the system mix (rekordbox's output) for the analyzer. The simulator taps its
-    /// own audio instead.
+    /// Capture the system mix (rekordbox's output) for the analyzer. With the simulator this
+    /// is normally off (it taps its own audio); on, the simulator's output comes back
+    /// through the capture, so the whole audio path and its lag are exercised without a
+    /// deck.
     pub capture_audio: bool,
 }
 
@@ -412,7 +414,9 @@ impl Engine {
             (Source::Live(live_source_for(&cfg, &library)), None)
         };
         let simulator = matches!(source, Source::Sim(_));
-        let capture = if cfg.capture_audio && !simulator {
+        // With the simulator, capture is off unless asked for: then the simulator's output
+        // comes back through the system capture, the way a real deck's does.
+        let capture = if cfg.capture_audio {
             open_capture(cfg.audio_device.as_deref())
         } else {
             None
@@ -858,7 +862,7 @@ impl Running {
     /// plugged back in, or a new choice in the launcher). Checks every few seconds, or now
     /// when `force` is set.
     fn tend_audio(&mut self, force: bool) {
-        if !self.cfg.capture_audio || matches!(self.source, Source::Sim(_)) {
+        if !self.cfg.capture_audio {
             return;
         }
         let lost = self.capture.as_ref().is_none_or(|c| c.stream.is_lost());

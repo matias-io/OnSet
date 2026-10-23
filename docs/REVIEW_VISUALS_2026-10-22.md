@@ -1,7 +1,7 @@
 # Review: beat-locked hits, structure in every scene, replay and particles
 
 What to run and what to look for, in order. Parts 1–3 are on `merge-autocue` (commits
-`f39a790`, `c56801d`). Parts 4–5 are on their own branches and are tested in their own
+`9e4d9be`, `527523b`). Parts 4–5 are on their own branches and are tested in their own
 worktrees, so nothing is merged until you decide. Every automated block says what "pass"
 looks like; every manual check says what you should see and what would mean a problem.
 
@@ -88,7 +88,7 @@ playlist "OnSet test 2026-10-22" with its four transitions). Its two 31 s EQ/bas
 outgoing lows are down and recover as the incoming bass lands, since the lock follows the
 master deck's grid and a beat-matched incoming kick confirms it too. La Danza's drop is 4b's
 test of an analysis error: rekordbox puts it at 0:04; if the picture lifts there, that is the
-analysis showing through. The recorder is on `merge-autocue` since `ff9e87c`, so one build does 4a, 4b and the
+analysis showing through. The recorder is on `merge-autocue` since `41dba6c`, so one build does 4a, 4b and the
 recording for part 5: add `--record D:/Offload/scratch/review-set.onsetrec` to the run.
 
 Rebuild first: any binary built before today has none of this, and the loader fix means
@@ -101,6 +101,22 @@ cd /c/Users/water/Projects/OnSet && CARGO_TARGET_DIR=D:/Offload/cargo-target car
 Switch on the scope: Show page → Stats (HUD) → tick **Signal scope**, or set `scope =
 true` under `[hud]` in the config file (`onset.exe --config-path` prints where it is).
 Press `H` on the projector to show the HUD.
+
+### 4a-auto. The beat-lock, measured without a deck
+
+The simulator plays a library track through the speakers, `--sim-loopback` makes the
+show hear it through the system capture like a real deck, and the recording keeps the
+scope's numbers. Speakers on (silence captures as silence); 45 s of audio at half gain.
+
+```bash
+cd /c/Users/water/Projects/OnSet && CARGO_TARGET_DIR=D:/Offload/cargo-target cargo build -j 4 --release -p onset-visuals && D:/Offload/cargo-target/release/onset.exe --sim "Stop It" --sim-loopback --seek 60 --record D:/Offload/scratch/sim-lock.onsetrec --exit-after 45 && ONSET_RECORDING=D:/Offload/scratch/sim-lock.onsetrec ONSET_EXPECT_LOCK=1 CARGO_TARGET_DIR=D:/Offload/cargo-target cargo test -j 4 -p onset-render --test replay hits_lock_summary -- --ignored --nocapture 2>&1 | grep -E "recording |audio lag|test result"
+```
+
+Pass: `test result: ok` with the lock held more than half the time, at least 20 kicks
+heard, kick confidence above 0.8 at some point and a lag under 250 ms. The printed
+`audio lag` is the number: on this machine it measures the capture path (WASAPI loopback,
+the analysis window, the envelope) without rekordbox's memory read, which adds nothing
+measurable. A deck in 4a should read about the same.
 
 ### 4a. The beat-lock on a real deck
 
@@ -142,7 +158,7 @@ Play a track with a clear breakdown and drop, in Auto or any scene.
 
 ## 5. The replay branch (`refs/heads/claude/interesting-dijkstra-cb6df3`, commit `90f5829`)
 
-Cherry-picked onto `merge-autocue` as `ff9e87c`, so everything below runs from the main
+Cherry-picked onto `merge-autocue` as `41dba6c`, so everything below runs from the main
 checkout. Its tests, including the checked-in synthetic recording replaying through a scene:
 
 ```bash
@@ -150,6 +166,16 @@ cd /c/Users/water/Projects/OnSet && CARGO_TARGET_DIR=D:/Offload/cargo-target car
 ```
 
 Pass: all `ok`; `tests/replay.rs` runs and the fixture test passes.
+
+The record-and-replay path end to end, no deck needed: 4a-auto above already wrote
+`D:/Offload/scratch/sim-lock.onsetrec`; replay it through two scenes to frames:
+
+```bash
+cd /c/Users/water/Projects/OnSet && ONSET_RECORDING=D:/Offload/scratch/sim-lock.onsetrec ONSET_REPLAY_SCENES=synthwave,lasers ONSET_REPLAY_SECONDS=20 ONSET_DUMP_DIR=D:/Offload/scratch/sim-replay-frames CARGO_TARGET_DIR=D:/Offload/cargo-target cargo test --release -j 4 -p onset-render --test replay replay_recording -- --ignored --nocapture 2>&1 | grep -E "frames|test result" && explorer "D:\Offload\scratch\sim-replay-frames"
+```
+
+Pass: a per-scene line with frame count and ms per frame, and PNGs in the folder whose
+brightness follows the track.
 
 Then the thing it is for. Record a real set (rekordbox playing, the show window open):
 
@@ -173,14 +199,14 @@ set recordings out of the repository all the same.
 Likewise checked out at `.claude/worktrees/kind-shamir-4b8d38`. Its headless test proves a kick adds light and a drop adds more, both fading:
 
 ```bash
-cd /c/Users/water/Projects/OnSet/.claude/worktrees/kind-shamir-4b8d38 && CARGO_TARGET_DIR=D:/Offload/cargo-target cargo test -j 4 -p onset-render --test particles -- --nocapture 2>&1 | grep -E "^test |test result|light"
+cd /c/Users/water/Projects/OnSet/.claude/worktrees/kind-shamir-4b8d38 && CARGO_TARGET_DIR=D:/Offload/cargo-target-kind-shamir cargo test -j 4 -p onset-render --test particles -- --nocapture 2>&1 | grep -E "^test |test result|light"
 ```
 
 On the projector, from that worktree (settings: Show page → Particles, on by default,
 **Sparks** slider):
 
 ```bash
-cd /c/Users/water/Projects/OnSet/.claude/worktrees/kind-shamir-4b8d38 && CARGO_TARGET_DIR=D:/Offload/cargo-target cargo run --release -p onset-visuals
+cd /c/Users/water/Projects/OnSet/.claude/worktrees/kind-shamir-4b8d38 && CARGO_TARGET_DIR=D:/Offload/cargo-target-kind-shamir cargo run --release -p onset-visuals
 ```
 
 - Kicks throw sparks from the centre, snares a wider spray, a drop a full-screen throw, a
