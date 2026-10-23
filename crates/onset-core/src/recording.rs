@@ -465,6 +465,8 @@ fn read_state(c: &mut Cursor, track: Option<&TrackMeta>) -> Result<MusicState, D
         },
         structure_source,
         hits,
+        // The deck ear's reading is a HUD readout, not in the recording (a format bump).
+        ear: None,
     })
 }
 
@@ -634,6 +636,7 @@ mod tests {
                 lag_samples: 40,
                 locked: true,
             },
+            ear: None,
         }
     }
 

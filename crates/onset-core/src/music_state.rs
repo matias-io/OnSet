@@ -23,6 +23,14 @@ pub struct CueAhead {
     pub color: Option<[u8; 3]>,
 }
 
+/// What the deck ear heard: each playing deck's share of the room (summing to 1) and how
+/// well the mix explained the captured audio (r², 0..1).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DeckShares {
+    pub shares: Vec<(u8, f32)>,
+    pub fit: f32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MusicState {
     /// Wall-clock seconds since the app started.
@@ -57,6 +65,9 @@ pub struct MusicState {
     /// The kick and snare the visuals react to: locked to the beat grid while a track with
     /// one plays, the audio's own otherwise.
     pub hits: crate::hits::BeatHits,
+    /// The deck ear's reading of the room, when it has one (two or more decks heard for a
+    /// few seconds): for the HUD, so a wrong deck choice can be seen at once.
+    pub ear: Option<DeckShares>,
 }
 
 impl Default for MusicState {
@@ -84,6 +95,7 @@ impl Default for MusicState {
             analysis: crate::bands::BandsAt::default(),
             structure_source: None,
             hits: crate::hits::BeatHits::default(),
+            ear: None,
         }
     }
 }
@@ -148,6 +160,7 @@ impl MusicState {
                 audio_snare: audio.snare,
                 ..crate::hits::BeatHits::default()
             },
+            ear: None,
         }
     }
 }

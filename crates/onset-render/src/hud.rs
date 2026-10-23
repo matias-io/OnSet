@@ -86,7 +86,16 @@ fn scope_lines(ms: &MusicState) -> [String; 2] {
     } else {
         "hits as heard (no grid, paused or silent)".to_string()
     };
-    [first, format!("{lag}  ·  {lock}")]
+    // The deck ear: which deck the room is on, by ear, and how sure the fit is.
+    let room = ms.ear.as_ref().map_or_else(String::new, |e| {
+        let parts: Vec<String> = e
+            .shares
+            .iter()
+            .map(|(d, s)| format!("deck {} {:.0}%", d + 1, s * 100.0))
+            .collect();
+        format!("  ·  room by ear {} (fit {:.2})", parts.join(" / "), e.fit)
+    });
+    [first, format!("{lag}  ·  {lock}{room}")]
 }
 
 fn mmss(seconds: f64) -> String {
@@ -369,6 +378,21 @@ mod tests {
         assert!(lag.contains("locked to the grid"), "{lag}");
         let off = hud.items(&ms, &HudInfo::default(), 1.0, &HudOptions::default());
         assert_eq!(off.len() + 4, items.len());
+
+        ms.ear = Some(onset_core::music_state::DeckShares {
+            shares: vec![(0, 0.72), (1, 0.28)],
+            fit: 0.91,
+        });
+        let items = hud.items(&ms, &HudInfo::default(), 1.0, &o);
+        let lag = items
+            .iter()
+            .find(|i| i.text.starts_with("audio lag"))
+            .unwrap();
+        assert!(
+            lag.text.contains("room by ear deck 1 72% / deck 2 28% (fit 0.91)"),
+            "{}",
+            lag.text
+        );
     }
 
     #[test]
