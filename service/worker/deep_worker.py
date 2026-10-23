@@ -84,6 +84,23 @@ def discogs_styles(audio_path, cache, output, top=10):
             "taxonomy": "Discogs styles", "license": "CC BY-NC-SA 4.0"}
 
 
+def stereo_input(audio, workdir):
+    """Demucs 4.0.1 widens mono input to stereo as a view of one channel and then subtracts
+    in place (separate.py:171, `wav -= ref.mean()`), which torch refuses: La Danza, Lock In
+    and Ray Of Solar got no stems on 2026-10-23. Mono audio gets a real two-channel copy,
+    under the same file name so the stems folder keeps the track's name."""
+    import numpy as np
+    import soundfile as sf
+    if sf.info(audio).channels != 1:
+        return audio, None
+    data, rate = sf.read(audio, always_2d=True)
+    folder = Path(workdir) / "stereo-input"
+    folder.mkdir(parents=True, exist_ok=True)
+    copy = folder / Path(audio).name
+    sf.write(copy, np.repeat(data, 2, axis=1), rate, subtype="PCM_16")
+    return str(copy), folder
+
+
 def main():
     if not os.environ.get("ONSET_WORKER_CHILD"):
         try: os.setsid()
@@ -142,11 +159,18 @@ def main():
                     beats, downbeats = File2Beats(checkpoint_path="final0", device=device, dbn=False)(request["audio"])
                     data = {"beats": beats.tolist(), "downbeats": downbeats.tolist()}
                 elif name == "demucs":
+                    import shutil
                     import subprocess
-                    subprocess.run([sys.executable, "-m", "demucs", "-n", "htdemucs", "-d", device,
-                                    "--out", str(output), request["audio"]], check=True, stdout=sys.stderr)
+                    source, scratch = stereo_input(request["audio"], output)
+                    try:
+                        # FLAC keeps the stems lossless at about 60 % of the 16-bit WAV size.
+                        subprocess.run([sys.executable, "-m", "demucs", "-n", "htdemucs", "-d", device, "--flac",
+                                        "--out", str(output), source], check=True, stdout=sys.stderr)
+                    finally:
+                        if scratch:
+                            shutil.rmtree(scratch, ignore_errors=True)
                     stems = output / "htdemucs" / Path(request["audio"]).stem
-                    result["stems"] = {p.stem: str(p) for p in stems.glob("*.wav")}
+                    result["stems"] = {p.stem: str(p) for p in stems.glob("*.flac")}
                     data = {"stems": result["stems"]}
                 elif name == "essentia":
                     import essentia.standard as es
