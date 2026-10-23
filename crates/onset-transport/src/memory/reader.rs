@@ -753,29 +753,55 @@ impl DeckFiles {
 /// Which deck the show follows when more than one is loaded. The master deck wins while it
 /// plays; otherwise the deck that is playing, and during a transition (both playing) the
 /// one already being followed, so the visuals switch when the outgoing deck stops rather
-/// than the moment the incoming one starts.
+/// than the moment the incoming one starts. A followed deck that stops for less than
+/// [`DeckChooser::HOLD`] keeps the show: rekordbox's position sometimes stands still for a
+/// few hundred milliseconds while a deck plays, and that read as a stop.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DeckChooser {
     current: Option<usize>,
+    /// When the followed deck was last seen playing.
+    current_played_at: Option<Instant>,
 }
 
 impl DeckChooser {
+    /// How long the followed deck may stand still before another playing deck takes the
+    /// show. On 2026-10-22 a playing deck read as stopped for 0.37 s, and the show moved to
+    /// the other deck and stayed there.
+    pub const HOLD: Duration = Duration::from_millis(1500);
+
     /// `decks[i]` is `None` for a deck without a readable track, else whether it plays.
-    pub fn choose(&mut self, master: Option<usize>, decks: &[Option<bool>]) -> Option<usize> {
+    pub fn choose(
+        &mut self,
+        now: Instant,
+        master: Option<usize>,
+        decks: &[Option<bool>],
+    ) -> Option<usize> {
         let loaded = |i: usize| decks.get(i).is_some_and(Option::is_some);
         let playing = |i: usize| decks.get(i).copied().flatten().unwrap_or(false);
         let any_playing = decks.contains(&Some(true));
         let master = master.filter(|m| loaded(*m));
+        let held = |c: usize| {
+            loaded(c)
+                && self
+                    .current_played_at
+                    .is_some_and(|t| now.duration_since(t) < Self::HOLD)
+        };
         let pick = match master {
             Some(m) if playing(m) || !any_playing => Some(m),
             _ => self
                 .current
-                .filter(|c| playing(*c))
+                .filter(|c| playing(*c) || held(*c))
                 .or_else(|| (0..decks.len()).find(|i| playing(*i)))
                 .or_else(|| self.current.filter(|c| loaded(*c)))
                 .or(master)
                 .or_else(|| (0..decks.len()).find(|i| loaded(*i))),
         };
+        if pick != self.current {
+            self.current_played_at = None;
+        }
+        if pick.is_some_and(playing) {
+            self.current_played_at = Some(now);
+        }
         self.current = pick;
         pick
     }
@@ -1491,7 +1517,7 @@ mod live {
                     observe_decks(reader, &states, &playing, deck_files, now);
                     let master = reader.master_deck().map(usize::from);
                     note_master(&mut self.last_master, master);
-                    let followed = chooser.choose(master, &playing);
+                    let followed = chooser.choose(now, master, &playing);
                     note_decks(&mut self.last_decks, reader, &playing, followed);
                     if let Some(i) = followed
                         && let Some(state) = &states[i]

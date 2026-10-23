@@ -233,39 +233,109 @@ fn offsets_work_without_a_master_chain() {
 
 #[test]
 fn deck_chooser_follows_the_master_while_it_plays() {
+    let t0 = Instant::now();
+    let at = |s: f64| t0 + Duration::from_secs_f64(s);
     let mut chooser = DeckChooser::default();
-    assert_eq!(chooser.choose(Some(1), &[Some(true), Some(true)]), Some(1));
-    // The master sits idle while the other deck plays: the playing deck is the show.
-    assert_eq!(chooser.choose(Some(1), &[Some(true), Some(false)]), Some(0));
+    assert_eq!(
+        chooser.choose(at(0.0), Some(1), &[Some(true), Some(true)]),
+        Some(1)
+    );
+    // The master stops while the other deck plays: the playing deck is the show, once
+    // the master has stood still for longer than a stall.
+    assert_eq!(
+        chooser.choose(at(1.0), Some(1), &[Some(true), Some(false)]),
+        Some(1)
+    );
+    assert_eq!(
+        chooser.choose(at(2.0), Some(1), &[Some(true), Some(false)]),
+        Some(0)
+    );
     // Nothing plays: back to the master.
     assert_eq!(
-        chooser.choose(Some(1), &[Some(false), Some(false)]),
+        chooser.choose(at(3.0), Some(1), &[Some(false), Some(false)]),
         Some(1)
     );
 }
 
 #[test]
 fn deck_chooser_sticks_to_the_playing_deck_through_a_transition() {
+    let t0 = Instant::now();
+    let at = |s: f64| t0 + Duration::from_secs_f64(s);
     let mut chooser = DeckChooser::default();
-    assert_eq!(chooser.choose(None, &[Some(true), Some(false)]), Some(0));
     assert_eq!(
-        chooser.choose(None, &[Some(true), Some(true)]),
+        chooser.choose(at(0.0), None, &[Some(true), Some(false)]),
+        Some(0)
+    );
+    assert_eq!(
+        chooser.choose(at(1.0), None, &[Some(true), Some(true)]),
         Some(0),
         "both play: no switch until the first deck stops"
     );
-    assert_eq!(chooser.choose(None, &[Some(false), Some(true)]), Some(1));
     assert_eq!(
-        chooser.choose(None, &[Some(false), Some(false)]),
+        chooser.choose(at(2.0), None, &[Some(false), Some(true)]),
+        Some(0),
+        "a stop shorter than the hold may be a stall"
+    );
+    assert_eq!(
+        chooser.choose(at(2.6), None, &[Some(false), Some(true)]),
+        Some(1)
+    );
+    assert_eq!(
+        chooser.choose(at(3.0), None, &[Some(false), Some(false)]),
         Some(1),
         "nothing plays: keep showing the last deck"
     );
 }
 
+/// On 2026-10-22 Abyss, playing as MASTER, read as stopped for 0.37 s while Adagio For
+/// Strings played on the other deck; the show moved to Adagio and never came back.
+#[test]
+fn deck_chooser_rides_out_a_short_stall() {
+    let t0 = Instant::now();
+    let at = |s: f64| t0 + Duration::from_secs_f64(s);
+    let mut chooser = DeckChooser::default();
+    assert_eq!(
+        chooser.choose(at(0.0), None, &[Some(true), Some(true)]),
+        Some(0)
+    );
+    assert_eq!(
+        chooser.choose(at(10.0), None, &[Some(true), Some(true)]),
+        Some(0)
+    );
+    assert_eq!(
+        chooser.choose(at(10.1), None, &[Some(false), Some(true)]),
+        Some(0)
+    );
+    assert_eq!(
+        chooser.choose(at(10.4), None, &[Some(false), Some(true)]),
+        Some(0)
+    );
+    assert_eq!(
+        chooser.choose(at(10.5), None, &[Some(true), Some(true)]),
+        Some(0)
+    );
+    // The same with MASTER on the stalling deck.
+    let mut chooser = DeckChooser::default();
+    assert_eq!(
+        chooser.choose(at(0.0), Some(1), &[Some(true), Some(true)]),
+        Some(1)
+    );
+    assert_eq!(
+        chooser.choose(at(0.3), Some(1), &[Some(true), Some(false)]),
+        Some(1)
+    );
+    assert_eq!(
+        chooser.choose(at(0.6), Some(1), &[Some(true), Some(true)]),
+        Some(1)
+    );
+}
+
 #[test]
 fn deck_chooser_falls_back_to_a_loaded_deck() {
+    let now = Instant::now();
     let mut chooser = DeckChooser::default();
-    assert_eq!(chooser.choose(None, &[None, Some(false)]), Some(1));
-    assert_eq!(chooser.choose(None, &[None, None]), None);
+    assert_eq!(chooser.choose(now, None, &[None, Some(false)]), Some(1));
+    assert_eq!(chooser.choose(now, None, &[None, None]), None);
 }
 
 /// Two deck objects laid out the way rekordbox 7.2 does: module pointers at fixed
