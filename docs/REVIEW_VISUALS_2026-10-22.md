@@ -81,6 +81,16 @@ right chorus). Look for:
 
 ## 4. On the projector (the checks that matter)
 
+These can be done inside the listening review's live run
+([REVIEW_LISTENING_2026-10-22.md](REVIEW_LISTENING_2026-10-22.md), part 4: the five-track
+playlist "OnSet test 2026-10-22" with its four transitions). Its two 31 s EQ/bass swaps are
+4a's "pull the lows down" case inside a real mix: expect kick confidence to dip while the
+outgoing lows are down and recover as the incoming bass lands, since the lock follows the
+master deck's grid and a beat-matched incoming kick confirms it too. La Danza's drop is 4b's
+test of an analysis error: rekordbox puts it at 0:04; if the picture lifts there, that is the
+analysis showing through. The recorder is on `merge-autocue` since `ff9e87c`, so one build does 4a, 4b and the
+recording for part 5: add `--record D:/Offload/scratch/review-set.onsetrec` to the run.
+
 Rebuild first: any binary built before today has none of this, and the loader fix means
 an older binary silently falls back to its embedded shaders.
 
@@ -132,12 +142,11 @@ Play a track with a clear breakdown and drop, in Auto or any scene.
 
 ## 5. The replay branch (`refs/heads/claude/interesting-dijkstra-cb6df3`, commit `90f5829`)
 
-Its session's worktree is still checked out at
-`.claude/worktrees/interesting-dijkstra-cb6df3`, so it runs from there and nothing is
-merged here. Its tests, including the checked-in synthetic recording replaying through a scene:
+Cherry-picked onto `merge-autocue` as `ff9e87c`, so everything below runs from the main
+checkout. Its tests, including the checked-in synthetic recording replaying through a scene:
 
 ```bash
-cd /c/Users/water/Projects/OnSet/.claude/worktrees/interesting-dijkstra-cb6df3 && CARGO_TARGET_DIR=D:/Offload/cargo-target cargo test -j 4 -p onset-core -p onset-engine -p onset-render 2>&1 | grep -E "^test result|FAILED|panicked|replay"
+cd /c/Users/water/Projects/OnSet && CARGO_TARGET_DIR=D:/Offload/cargo-target cargo test -j 4 -p onset-core -p onset-engine -p onset-render 2>&1 | grep -E "^test result|FAILED|panicked|replay"
 ```
 
 Pass: all `ok`; `tests/replay.rs` runs and the fixture test passes.
@@ -145,13 +154,13 @@ Pass: all `ok`; `tests/replay.rs` runs and the fixture test passes.
 Then the thing it is for. Record a real set (rekordbox playing, the show window open):
 
 ```bash
-cd /c/Users/water/Projects/OnSet/.claude/worktrees/interesting-dijkstra-cb6df3 && CARGO_TARGET_DIR=D:/Offload/cargo-target cargo run --release -p onset-visuals -- --record D:/Offload/scratch/review-set.onsetrec --exit-after 180
+cd /c/Users/water/Projects/OnSet && CARGO_TARGET_DIR=D:/Offload/cargo-target cargo run --release -p onset-visuals -- --record D:/Offload/scratch/review-set.onsetrec --exit-after 180
 ```
 
 Replay it through two scenes and dump frames (replace the path if you recorded elsewhere):
 
 ```bash
-cd /c/Users/water/Projects/OnSet/.claude/worktrees/interesting-dijkstra-cb6df3 && ONSET_RECORDING=D:/Offload/scratch/review-set.onsetrec ONSET_REPLAY_SCENES=synthwave,lasers ONSET_DUMP_DIR=D:/Offload/scratch/review-replay-frames CARGO_TARGET_DIR=D:/Offload/cargo-target cargo test --release -j 4 -p onset-render --test replay replay_recording -- --ignored --nocapture
+cd /c/Users/water/Projects/OnSet && ONSET_RECORDING=D:/Offload/scratch/review-set.onsetrec ONSET_REPLAY_SCENES=synthwave,lasers ONSET_DUMP_DIR=D:/Offload/scratch/review-replay-frames CARGO_TARGET_DIR=D:/Offload/cargo-target cargo test --release -j 4 -p onset-render --test replay replay_recording -- --ignored --nocapture
 ```
 
 Look for: frames in `D:\Offload\scratch\review-replay-frames` that follow the set (the
