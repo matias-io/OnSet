@@ -222,7 +222,8 @@ pub fn cache_dir() -> PathBuf {
 }
 
 /// Starts the engine and the publishing thread. `ONSET_SIM=<title>` follows the developer
-/// simulator, silent, instead of rekordbox.
+/// simulator, silent, instead of rekordbox; `ONSET_SIM_BLEND=<title>` as well blends it
+/// into a second track on a second deck.
 pub fn spawn(app: AppHandle) {
     let spawned = std::thread::Builder::new()
         .name("onset-live".into())
@@ -236,11 +237,15 @@ pub fn spawn(app: AppHandle) {
                 ),
             );
             let sim_track = std::env::var("ONSET_SIM").ok().filter(|s| !s.is_empty());
+            let sim_blend = std::env::var("ONSET_SIM_BLEND")
+                .ok()
+                .filter(|s| !s.is_empty());
             let engine = Engine::start(EngineConfig {
                 app_dir: None,
                 cache_dir: cache_dir(),
                 offsets_dir: offsets_dir(),
                 sim_track,
+                sim_blend,
                 sim_seek_s: 0.0,
                 sim_gain: 0.0,
                 audio_device: None,

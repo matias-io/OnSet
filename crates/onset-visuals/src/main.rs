@@ -29,6 +29,10 @@ struct Cli {
     /// without a deck. Turn the speakers on: silence captures as silence.
     #[arg(long, requires = "sim")]
     sim_loopback: bool,
+    /// With --sim: blend into this library title on a second deck (the --sim track alone,
+    /// a 16-bar crossfade, then this one), so the show's deck-by-ear can be watched
+    #[arg(long, requires = "sim")]
+    blend: Option<String>,
     /// rekordbox data folder (defaults to %APPDATA%\Pioneer\rekordbox)
     #[arg(long)]
     app_dir: Option<PathBuf>,
@@ -132,6 +136,7 @@ fn main() -> anyhow::Result<()> {
         cache_dir: cache_dir(),
         offsets_dir: offsets_dir.clone(),
         sim_track: cli.sim.clone(),
+        sim_blend: cli.blend.clone(),
         sim_seek_s: cli.seek,
         sim_gain: cli.gain,
         audio_device: config.audio_device.clone(),

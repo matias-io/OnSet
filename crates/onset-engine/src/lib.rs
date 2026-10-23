@@ -25,6 +25,7 @@ use onset_core::transport::{TrackRef, TransportSnapshot};
 use onset_rekordbox::anlz::Analysis;
 use onset_rekordbox::library::Library;
 use onset_rekordbox::paths::RekordboxPaths;
+use onset_transport::blend::{BlendDeck, BlendPlayer, BlendScript};
 use onset_transport::sim::SimPlayer;
 use onset_transport::source::{SourceStatus, TransportSource};
 
@@ -40,6 +41,13 @@ const EAR_LAG_SAMPLES: u32 = 20;
 const EAR_JUMP_S: f64 = 0.5;
 /// Tracks whose waveforms are kept for the ear: a set's decks, with room for reloads.
 const EAR_CACHE: usize = 16;
+/// The two-deck simulator: seconds of the first track alone before the blend, and the
+/// blend's length in bars.
+const BLEND_LEAD_S: f64 = 30.0;
+const BLEND_BARS: u32 = 16;
+/// The furthest the simulator nudges the second track's tempo to match the first, as a
+/// fraction; further apart, both play at their own tempo.
+const BLEND_MAX_NUDGE: f64 = 0.08;
 
 /// The ear listening to every deck with a known track (see [`deck_ear`]).
 struct Ear {
@@ -59,6 +67,10 @@ pub struct EngineConfig {
     /// Developer mode: play this library title through the simulator instead of reading
     /// rekordbox. `None` is the normal case.
     pub sim_track: Option<String>,
+    /// Developer mode, with `sim_track`: a second library title the simulator blends into
+    /// on a second deck (`sim_track` alone, a 16-bar crossfade, then this one alone), so the
+    /// deck-by-ear can be watched without rekordbox.
+    pub sim_blend: Option<String>,
     pub sim_seek_s: f64,
     pub sim_gain: f32,
     /// Loopback endpoint substring; default output device when `None`.
@@ -202,22 +214,30 @@ struct SimSource {
     analyzer: Analyzer,
 }
 
+/// The two-deck simulator, heard through its own tap like [`SimSource`].
+struct BlendSource {
+    player: BlendPlayer,
+    tap: crossbeam_channel::Receiver<Vec<f32>>,
+    analyzer: Analyzer,
+}
+
 enum Source {
     Sim(Box<SimSource>),
+    Blend(Box<BlendSource>),
     Live(Box<dyn TransportSource>),
 }
 
 impl Source {
     fn name(&self) -> &'static str {
         match self {
-            Self::Sim(_) => "simulator",
+            Self::Sim(_) | Self::Blend(_) => "simulator",
             Self::Live(s) => s.name(),
         }
     }
 
     fn status(&self) -> SourceStatus {
         match self {
-            Self::Sim(_) => SourceStatus::Connected,
+            Self::Sim(_) | Self::Blend(_) => SourceStatus::Connected,
             Self::Live(s) => s.status(),
         }
     }
@@ -225,6 +245,7 @@ impl Source {
     fn poll(&mut self) -> Option<TransportSnapshot> {
         match self {
             Self::Sim(s) => s.player.poll(),
+            Self::Blend(s) => s.player.poll(),
             Self::Live(s) => s.poll(),
         }
     }
@@ -365,13 +386,8 @@ fn streaming_candidates(
         .collect()
 }
 
-fn start_sim(
-    library: &Library,
-    paths: &RekordboxPaths,
-    workspace: Option<&onset_workspace::Workspace>,
-    title: &str,
-    cfg: &EngineConfig,
-) -> anyhow::Result<(SimSource, Current)> {
+/// The library track titled `title` and its audio file, for the simulator.
+fn sim_file(library: &Library, title: &str) -> anyhow::Result<(TrackMeta, PathBuf)> {
     let meta = library
         .find_by_title_artist(title, "")
         .ok_or_else(|| anyhow::anyhow!("no track titled {title:?}"))?
@@ -381,6 +397,17 @@ fn start_sim(
         .clone()
         .filter(|p| p.exists())
         .ok_or_else(|| anyhow::anyhow!("audio file for {title:?} not found"))?;
+    Ok((meta, file))
+}
+
+fn start_sim(
+    library: &Library,
+    paths: &RekordboxPaths,
+    workspace: Option<&onset_workspace::Workspace>,
+    title: &str,
+    cfg: &EngineConfig,
+) -> anyhow::Result<(SimSource, Current)> {
+    let (meta, file) = sim_file(library, title)?;
     let player = SimPlayer::start(&file, TrackRef::Id(meta.id), meta.bpm.unwrap_or(120.0))?;
     player.set_gain(cfg.sim_gain);
     player.seek(cfg.sim_seek_s);
@@ -396,6 +423,82 @@ fn start_sim(
         },
         current,
     ))
+}
+
+/// The two-deck simulator: `title` alone from `cfg.sim_seek_s`, a [`BLEND_BARS`]-bar
+/// crossfade into `blend` (from its start, nudged to the first track's tempo when close),
+/// then `blend` alone while the first track runs on, faded out.
+fn start_blend(
+    library: &Library,
+    paths: &RekordboxPaths,
+    workspace: Option<&onset_workspace::Workspace>,
+    (title, blend): (&str, &str),
+    cfg: &EngineConfig,
+) -> anyhow::Result<(BlendSource, Current)> {
+    let (first, first_file) = sim_file(library, title)?;
+    let (second, second_file) = sim_file(library, blend)?;
+    let bpm = |m: &TrackMeta| m.bpm.filter(|b| *b > 0.0).unwrap_or(120.0);
+    let (bpm_first, bpm_second) = (bpm(&first), bpm(&second));
+    let nudge = f64::from(bpm_first) / f64::from(bpm_second);
+    let decks = [
+        BlendDeck {
+            audio: Arc::new(onset_transport::decode::decode_file(&first_file)?),
+            track: TrackRef::Id(first.id),
+            bpm: bpm_first,
+            cue_s: cfg.sim_seek_s,
+            rate: 1.0,
+        },
+        BlendDeck {
+            audio: Arc::new(onset_transport::decode::decode_file(&second_file)?),
+            track: TrackRef::Id(second.id),
+            bpm: bpm_second,
+            cue_s: 0.0,
+            rate: if (nudge - 1.0).abs() <= BLEND_MAX_NUDGE {
+                nudge
+            } else {
+                1.0
+            },
+        },
+    ];
+    let player = BlendPlayer::start(
+        decks,
+        BlendScript::bars(BLEND_LEAD_S, BLEND_BARS, bpm_first),
+    )?;
+    player.set_gain(cfg.sim_gain);
+    let tap = player.tap_audio();
+    let analyzer = Analyzer::new(player.tap_sample_rate());
+    let track_ref = TrackRef::Id(first.id);
+    let current = load_current(library, paths, workspace, first, track_ref);
+    Ok((
+        BlendSource {
+            player,
+            tap,
+            analyzer,
+        },
+        current,
+    ))
+}
+
+/// What the engine follows: the two-deck simulator, the simulator, or rekordbox, with the
+/// simulator's track already loaded.
+fn start_source(
+    library: &Library,
+    paths: &RekordboxPaths,
+    workspace: Option<&onset_workspace::Workspace>,
+    cfg: &EngineConfig,
+) -> anyhow::Result<(Source, Option<Current>)> {
+    Ok(match (&cfg.sim_track, &cfg.sim_blend) {
+        (Some(title), Some(blend)) => {
+            let titles = (title.as_str(), blend.as_str());
+            let (sim, current) = start_blend(library, paths, workspace, titles, cfg)?;
+            (Source::Blend(Box::new(sim)), Some(current))
+        }
+        (Some(title), None) => {
+            let (sim, current) = start_sim(library, paths, workspace, title, cfg)?;
+            (Source::Sim(Box::new(sim)), Some(current))
+        }
+        (None, _) => (Source::Live(live_source_for(cfg, library)), None),
+    })
 }
 
 impl Engine {
@@ -427,13 +530,8 @@ impl Engine {
             tracing::info!(path = %ws.path().display(), "workspace found");
         }
 
-        let (source, current) = if let Some(title) = &cfg.sim_track {
-            let (sim, current) = start_sim(&library, &paths, workspace.as_ref(), title, &cfg)?;
-            (Source::Sim(Box::new(sim)), Some(current))
-        } else {
-            (Source::Live(live_source_for(&cfg, &library)), None)
-        };
-        let simulator = matches!(source, Source::Sim(_));
+        let (source, current) = start_source(&library, &paths, workspace.as_ref(), &cfg)?;
+        let simulator = matches!(source, Source::Sim(_) | Source::Blend(_));
         // With the simulator, capture is off unless asked for: then the simulator's output
         // comes back through the system capture, the way a real deck's does.
         let capture = if cfg.capture_audio {
@@ -738,6 +836,8 @@ impl Running {
                 self.clock = Clock::new();
                 self.last_status = None;
             }
+            (EngineCommand::Pause, Source::Blend(s)) => s.player.pause(true),
+            (EngineCommand::Resume, Source::Blend(s)) => s.player.pause(false),
             (EngineCommand::Reconnect, Source::Sim(_)) => {}
             (EngineCommand::StartRecording(path), _) => {
                 self.stop_recording();
@@ -752,6 +852,12 @@ impl Running {
             (EngineCommand::StopRecording, _) => self.stop_recording(),
             (_, Source::Live(_)) => {
                 tracing::debug!(?cmd, "transport command ignored: rekordbox is in control");
+            }
+            (_, Source::Blend(_)) => {
+                tracing::debug!(
+                    ?cmd,
+                    "transport command ignored: the blend plays as scripted"
+                );
             }
         }
     }
@@ -772,13 +878,13 @@ impl Running {
     /// state, which cannot see the mixer; the ear fits the captured audio to every playing
     /// deck's waveform and switches only once another deck clearly carries the room.
     fn hear_deck(&mut self, now: Instant, time_s: f64) -> Option<TransportSnapshot> {
-        let Source::Live(source) = &self.source else {
-            return None;
+        let live = match &self.source {
+            // rekordbox's decks, heard through the capture.
+            Source::Live(source) if self.capture.is_some() => source.live_decks(),
+            // The two-deck simulator, heard through its tap (or the capture, when on).
+            Source::Blend(s) => s.player.live_decks(),
+            _ => return None,
         };
-        if self.capture.is_none() {
-            return None;
-        }
-        let live = source.live_decks();
         self.tend_ear(&live.decks);
         let g = self.audio(now).groups;
         let heard = [
@@ -1033,23 +1139,26 @@ impl Running {
             }
             return cap.analyzer.latest(now);
         }
-        if let Source::Sim(s) = &mut self.source {
-            while let Ok(block) = s.tap.try_recv() {
-                s.analyzer.push_at(&block, now);
-            }
-            return s.analyzer.latest(now);
+        let (tap, analyzer) = match &mut self.source {
+            Source::Sim(s) => (&s.tap, &mut s.analyzer),
+            Source::Blend(s) => (&s.tap, &mut s.analyzer),
+            Source::Live(_) => return AudioFeatures::silent(),
+        };
+        while let Ok(block) = tap.try_recv() {
+            analyzer.push_at(&block, now);
         }
-        AudioFeatures::silent()
+        analyzer.latest(now)
     }
 
-    fn tick(&mut self) -> MusicState {
-        let now = Instant::now();
+    /// One tick of the engine at `now`: the present, or a simulated clock in tests.
+    fn tick_at(&mut self, now: Instant) -> MusicState {
         let dt = now.duration_since(self.last_tick).as_secs_f32();
         self.last_tick = now;
-        let time_s = self.started.elapsed().as_secs_f64();
+        let time_s = now.duration_since(self.started).as_secs_f64();
 
         if let Some(mut snapshot) = self.source.poll() {
-            if matches!(self.source, Source::Live(_)) {
+            // Sources with several decks: follow the one the room hears.
+            if matches!(self.source, Source::Live(_) | Source::Blend(_)) {
                 if let Some(heard) = self.hear_deck(now, time_s) {
                     snapshot = heard;
                 }
@@ -1152,7 +1261,7 @@ impl Running {
                 self.handle(&cmd, status);
             }
             let tick_started = Instant::now();
-            let ms = self.tick();
+            let ms = self.tick_at(tick_started);
             if ms.hits.lag_samples >= EAR_LAG_SAMPLES {
                 self.ear_lag_s = f64::from(ms.hits.lag_s);
             }
@@ -1226,6 +1335,7 @@ mod tests {
             cache_dir: cache.to_path_buf(),
             offsets_dir: cache.join("no-offsets-here"),
             sim_track: sim_track.map(str::to_string),
+            sim_blend: None,
             sim_seek_s: 30.0,
             sim_gain: 0.0,
             audio_device: None,
@@ -1313,5 +1423,361 @@ mod tests {
             "paused playhead moved"
         );
         assert!(matches!(engine.status(), EngineStatus::Running { .. }));
+    }
+
+    // The engine following a blend by ear, with the two-deck simulator in place of
+    // rekordbox and a simulated clock in place of the tick thread.
+
+    /// A track for the blend tests: an id, a title and a tempo.
+    fn track_meta(id: u64, title: &str) -> TrackMeta {
+        TrackMeta {
+            id: onset_core::track::TrackId(id),
+            title: title.into(),
+            artist: String::new(),
+            album: String::new(),
+            year: None,
+            key: None,
+            bpm: Some(128.0),
+            duration_s: None,
+            sample_rate: None,
+            file_path: None,
+            artwork_path: None,
+            analysis_path: None,
+            isrc: None,
+            genre: None,
+            extra: onset_core::track::TrackExtra::default(),
+        }
+    }
+
+    /// An engine as the tick thread runs it, without the thread, a device or rekordbox.
+    fn headless_engine(
+        library: Library,
+        paths: RekordboxPaths,
+        source: Source,
+        epoch: Instant,
+    ) -> Running {
+        let nowhere = PathBuf::from("no-such-folder");
+        Running {
+            cfg: EngineConfig {
+                app_dir: None,
+                cache_dir: nowhere.clone(),
+                offsets_dir: nowhere,
+                sim_track: None,
+                sim_blend: None,
+                sim_seek_s: 0.0,
+                sim_gain: 0.0,
+                audio_device: None,
+                capture_audio: false,
+            },
+            paths,
+            library,
+            workspace: None,
+            source,
+            current: None,
+            capture: None,
+            clock: Clock::new(),
+            director: Director::new(),
+            hit_lock: onset_core::hits::HitLock::new(),
+            started: epoch,
+            last_tick: epoch,
+            last_status: None,
+            unresolved: None,
+            matcher: None,
+            deck: None,
+            audio_checked: epoch,
+            audio_device: Arc::new(ArcSwap::from_pointee("none".to_string())),
+            audio_choice: Arc::new(parking_lot::Mutex::new(None)),
+            audio_want: crossbeam_channel::never(),
+            lyrics_progress: Arc::new(ArcSwap::from_pointee(String::new())),
+            prefetching: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            recorder: None,
+            ear: None,
+            ear_bands: Vec::new(),
+            ear_lag_s: EAR_LAG_S,
+        }
+    }
+
+    fn blend_source(player: BlendPlayer) -> Source {
+        let tap = player.tap_audio();
+        let analyzer = Analyzer::new(player.tap_sample_rate());
+        Source::Blend(Box::new(BlendSource {
+            player,
+            tap,
+            analyzer,
+        }))
+    }
+
+    /// Plays the blend to `end_s` at 60 ticks a second and returns, for each tick, its time
+    /// and the deck the engine followed, with the title of the track it showed last.
+    fn play_blend(
+        engine: &mut Running,
+        epoch: Instant,
+        end_s: f64,
+    ) -> (Vec<(f64, Option<u8>)>, MusicState) {
+        const STEP_S: f64 = 1.0 / 60.0;
+        let mut followed = Vec::new();
+        let mut last = MusicState::default();
+        let mut ticks = 0u32;
+        while f64::from(ticks) * STEP_S < end_s {
+            if let Source::Blend(s) = &mut engine.source {
+                s.player.advance(STEP_S);
+            }
+            ticks += 1;
+            let t = f64::from(ticks) * STEP_S;
+            last = engine.tick_at(epoch + Duration::from_secs_f64(t));
+            followed.push((t, engine.deck));
+        }
+        (followed, last)
+    }
+
+    /// The followed deck moves from 0 to 1 once, after the blend is half done (when deck 1
+    /// is no louder than deck 0 yet) and within `settle_s` of its end, and stays there.
+    /// Returns when it moved.
+    fn assert_follows_the_blend(
+        followed: &[(f64, Option<u8>)],
+        script: &BlendScript,
+        settle_s: f64,
+    ) -> f64 {
+        let first_1 = followed.iter().position(|(_, d)| *d == Some(1));
+        let Some(i) = first_1 else {
+            panic!("never followed deck 1: {:?}", followed.last());
+        };
+        let switched_s = followed[i].0;
+        assert!(
+            followed[..i].iter().all(|(t, d)| *d == Some(0) || *t < 0.1),
+            "deck 0 until the switch"
+        );
+        assert!(
+            followed[i..].iter().all(|(_, d)| *d == Some(1)),
+            "deck 1 from the switch on: {:?}",
+            followed[i..].iter().find(|(_, d)| *d != Some(1))
+        );
+        assert!(
+            switched_s > script.fade_start_s + script.fade_s * 0.5,
+            "switched at {switched_s:.1} s, before the blend was half done ({:.1}-{:.1} s)",
+            script.fade_start_s,
+            script.fade_end_s()
+        );
+        assert!(
+            switched_s < script.fade_end_s() + settle_s,
+            "switched at {switched_s:.1} s, long after the blend ended at {:.1} s",
+            script.fade_end_s()
+        );
+        switched_s
+    }
+
+    /// A seeded noise source (xorshift), -1..1.
+    struct Noise(u32);
+
+    impl Noise {
+        fn sample(&mut self) -> f32 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 17;
+            self.0 ^= self.0 << 5;
+            self.0 as f32 / u32::MAX as f32 * 2.0 - 1.0
+        }
+    }
+
+    /// A band-pass biquad (RBJ, 0 dB at the centre).
+    struct BandPass {
+        b: [f32; 3],
+        a: [f32; 2],
+        x: [f32; 2],
+        y: [f32; 2],
+    }
+
+    impl BandPass {
+        fn new(centre_hz: f32, q: f32, rate: f32) -> Self {
+            let w = 2.0 * std::f32::consts::PI * centre_hz / rate;
+            let alpha = w.sin() / (2.0 * q);
+            let a0 = 1.0 + alpha;
+            Self {
+                b: [alpha / a0, 0.0, -alpha / a0],
+                a: [-2.0 * w.cos() / a0, (1.0 - alpha) / a0],
+                x: [0.0; 2],
+                y: [0.0; 2],
+            }
+        }
+
+        fn run(&mut self, x: f32) -> f32 {
+            let y = self.b[0] * x + self.b[1] * self.x[0] + self.b[2] * self.x[1]
+                - self.a[0] * self.y[0]
+                - self.a[1] * self.y[1];
+            self.x = [x, self.x[0]];
+            self.y = [y, self.y[0]];
+            y
+        }
+    }
+
+    /// A synthetic track and the waveform rekordbox would draw for it: noise in the low,
+    /// mid and high bands, each band switching between loud and quiet sections of its own
+    /// length (`(section_s, offset_s)`), so two tracks differ the way real ones do, in when
+    /// their sections change.
+    fn synthetic_track(
+        seed: u32,
+        sections: [(f64, f64); 3],
+        secs: f64,
+        rate: u32,
+    ) -> (
+        onset_transport::decode::DecodedAudio,
+        onset_core::bands::TrackBands,
+    ) {
+        const CENTRES_HZ: [f32; 3] = [70.0, 450.0, 4500.0];
+        let level = |band: usize, t: f64| {
+            let (len, offset) = sections[band];
+            if ((t + offset) / len).floor() as i64 % 2 == 0 {
+                1.0f32
+            } else {
+                0.2
+            }
+        };
+        let mut noise = [
+            Noise(seed),
+            Noise(seed ^ 0x9e37_79b9),
+            Noise(seed ^ 0x7f4a_7c15),
+        ];
+        // Two passes per band for steeper skirts, so one band's sections stay out of the
+        // others.
+        let mut filters: Vec<[BandPass; 2]> = CENTRES_HZ
+            .iter()
+            .map(|&hz| [0, 1].map(|_| BandPass::new(hz, 0.8, rate as f32)))
+            .collect();
+        let frames = (secs * f64::from(rate)) as usize;
+        let samples = (0..frames)
+            .map(|i| {
+                let t = i as f64 / f64::from(rate);
+                (0..3)
+                    .map(|b| {
+                        let [f1, f2] = &mut filters[b];
+                        f2.run(f1.run(noise[b].sample())) * level(b, t)
+                    })
+                    .sum::<f32>()
+            })
+            .collect();
+        let wave_rate = 150.0;
+        let wave = (0..(secs * wave_rate) as usize)
+            .map(|i| {
+                let t = i as f64 / wave_rate;
+                [0, 1, 2].map(|b| (level(b, t) * 255.0) as u8)
+            })
+            .collect();
+        (
+            onset_transport::decode::DecodedAudio {
+                sample_rate: rate,
+                channels: 1,
+                samples,
+            },
+            onset_core::bands::TrackBands::new(wave_rate as f32, wave, 1.0, vec![0]),
+        )
+    }
+
+    #[test]
+    fn the_ear_moves_the_show_to_the_incoming_deck_after_a_blend() {
+        const RATE: u32 = 44_100;
+        // Deck 0 alone for 20 s, a 16-bar blend at 128 BPM (30 s), deck 1 alone for 12 s,
+        // with deck 0 still running underneath as the transport keeps naming it.
+        let script = BlendScript::bars(20.0, 16, 128.0);
+        let end_s = script.fade_end_s() + 12.0;
+        let (audio_out, bands_out) = synthetic_track(
+            0x1234_5678,
+            [(3.0, 0.0), (4.2, 1.3), (2.4, 0.7)],
+            end_s + 5.0,
+            RATE,
+        );
+        let (audio_in, bands_in) = synthetic_track(
+            0x0bad_cafe,
+            [(3.6, 1.1), (2.8, 0.4), (5.0, 2.2)],
+            end_s + 5.0,
+            RATE,
+        );
+        let deck = |id: u64, audio: onset_transport::decode::DecodedAudio| BlendDeck {
+            audio: Arc::new(audio),
+            track: TrackRef::Id(onset_core::track::TrackId(id)),
+            bpm: 128.0,
+            cue_s: 0.0,
+            rate: 1.0,
+        };
+        let epoch = Instant::now();
+        let player =
+            BlendPlayer::headless([deck(1, audio_out), deck(2, audio_in)], script, RATE, epoch);
+        let library =
+            Library::from_tracks(vec![track_meta(1, "Outgoing"), track_meta(2, "Incoming")]);
+        let nowhere = PathBuf::from("no-such-folder");
+        let paths = RekordboxPaths {
+            master_db: nowhere.join("master.db"),
+            master_wal: nowhere.join("master.db-wal"),
+            share_dir: nowhere.join("share"),
+            app_dir: nowhere,
+        };
+        let mut engine = headless_engine(library, paths, blend_source(player), epoch);
+        // The waveforms rekordbox would have drawn, where the ear looks them up.
+        let id = |n| TrackRef::Id(onset_core::track::TrackId(n));
+        engine.ear_bands = vec![
+            (id(1), Some(Arc::new(bands_out))),
+            (id(2), Some(Arc::new(bands_in))),
+        ];
+
+        let (followed, last) = play_blend(&mut engine, epoch, end_s);
+        let switched_s = assert_follows_the_blend(&followed, &script, 8.0);
+        eprintln!(
+            "followed deck 1 from {switched_s:.2} s (blend {:.0}-{:.0} s)",
+            script.fade_start_s,
+            script.fade_end_s()
+        );
+        assert_eq!(
+            last.track.as_ref().map(|t| t.title.as_str()),
+            Some("Incoming"),
+            "the show names the incoming track"
+        );
+        let ear = last.ear.expect("the ear has a verdict at the end");
+        let share_in = ear.shares.iter().find(|s| s.0 == 1).map_or(0.0, |s| s.1);
+        assert!(share_in > 0.8, "{ear:?}");
+    }
+
+    /// The same blend with two tracks from the real rekordbox library and rekordbox's own
+    /// waveforms, named in `ONSET_BLEND` as `first title|second title`. Reads the library
+    /// read-only (decrypting a copy into a temporary folder) and decodes both files, so it
+    /// takes a while; run by hand with `--ignored`.
+    #[test]
+    #[ignore = "needs the rekordbox library and ONSET_BLEND=\"first title|second title\""]
+    fn the_ear_follows_a_blend_of_two_library_tracks() {
+        let titles = std::env::var("ONSET_BLEND").expect("ONSET_BLEND=\"first|second\"");
+        let (first, second) = titles.split_once('|').expect("two titles split by |");
+        let paths = RekordboxPaths::discover().expect("rekordbox data folder");
+        let cache = tempfile::tempdir().unwrap();
+        let library = Library::open(&paths, cache.path()).expect("library");
+        let (a, file_a) = sim_file(&library, first.trim()).unwrap();
+        let (b, file_b) = sim_file(&library, second.trim()).unwrap();
+        let bpm = |m: &TrackMeta| m.bpm.unwrap_or(120.0);
+        let script = BlendScript::bars(20.0, 16, bpm(&a));
+        let end_s = script.fade_end_s() + 12.0;
+        let decks = [
+            BlendDeck {
+                audio: Arc::new(onset_transport::decode::decode_file(&file_a).unwrap()),
+                track: TrackRef::Id(a.id),
+                bpm: bpm(&a),
+                // Into the body of the outgoing track, from the start of the incoming one.
+                cue_s: 60.0,
+                rate: 1.0,
+            },
+            BlendDeck {
+                audio: Arc::new(onset_transport::decode::decode_file(&file_b).unwrap()),
+                track: TrackRef::Id(b.id),
+                bpm: bpm(&b),
+                cue_s: 0.0,
+                rate: 1.0,
+            },
+        ];
+        let epoch = Instant::now();
+        let player = BlendPlayer::headless(decks, script, 44_100, epoch);
+        let mut engine = headless_engine(library, paths, blend_source(player), epoch);
+        let (followed, last) = play_blend(&mut engine, epoch, end_s);
+        eprintln!("ear at the end: {:?}", last.ear);
+        let switched_s = assert_follows_the_blend(&followed, &script, 8.0);
+        eprintln!(
+            "{first} -> {second}: followed deck 1 from {switched_s:.2} s (blend {:.0}-{:.0} s)",
+            script.fade_start_s,
+            script.fade_end_s()
+        );
     }
 }
