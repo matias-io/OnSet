@@ -202,8 +202,8 @@ impl HitLock {
         if self.last_beat != Some(beat) {
             match self.last_beat {
                 Some(prev) if beat > prev && beat - prev <= 8 => {
-                    self.kick_confidence +=
-                        CONFIDENCE_RATE * (f32::from(u8::from(self.kick_seen)) - self.kick_confidence);
+                    self.kick_confidence += CONFIDENCE_RATE
+                        * (f32::from(u8::from(self.kick_seen)) - self.kick_confidence);
                     if matches!(((st.bar_phase * 4.0).floor() as u32 + 3) % 4, 1 | 3) {
                         // The beat that ended was a backbeat.
                         self.snare_confidence += CONFIDENCE_RATE
@@ -331,11 +331,7 @@ mod tests {
                 assert!(h.kick > 0.85, "kick at beat start {h:?}");
             }
         }
-        let at_audio = late
-            .iter()
-            .find(|(_, _, h)| h.audio_kick > 0.99)
-            .unwrap()
-            .2;
+        let at_audio = late.iter().find(|(_, _, h)| h.audio_kick > 0.99).unwrap().2;
         assert!(at_audio.kick < at_audio.audio_kick, "{at_audio:?}");
         assert!(at_audio.locked);
     }
@@ -398,14 +394,7 @@ mod tests {
         let mut lock = HitLock::new();
         play(&mut lock, 8, 0.0, 0.8, false);
         // A kick halfway through the beat (a fill).
-        let h = lock.update(
-            &state(8, 0.5),
-            true,
-            BPM,
-            None,
-            &heard(1.0, 0.0),
-            TICK,
-        );
+        let h = lock.update(&state(8, 0.5), true, BPM, None, &heard(1.0, 0.0), TICK);
         assert!(h.kick > 0.9, "{h:?}");
     }
 

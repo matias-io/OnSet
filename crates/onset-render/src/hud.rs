@@ -389,7 +389,8 @@ mod tests {
             .find(|i| i.text.starts_with("audio lag"))
             .unwrap();
         assert!(
-            lag.text.contains("room by ear deck 1 72% / deck 2 28% (fit 0.91)"),
+            lag.text
+                .contains("room by ear deck 1 72% / deck 2 28% (fit 0.91)"),
             "{}",
             lag.text
         );

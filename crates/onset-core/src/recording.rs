@@ -255,7 +255,10 @@ struct Cursor<'a> {
 impl<'a> Cursor<'a> {
     fn take(&mut self, n: usize) -> Result<&'a [u8], DecodeError> {
         let end = self.pos.checked_add(n).ok_or(DecodeError::Truncated)?;
-        let s = self.bytes.get(self.pos..end).ok_or(DecodeError::Truncated)?;
+        let s = self
+            .bytes
+            .get(self.pos..end)
+            .ok_or(DecodeError::Truncated)?;
         self.pos = end;
         Ok(s)
     }
@@ -320,11 +323,7 @@ fn read_track(c: &mut Cursor) -> Result<Option<TrackMeta>, DecodeError> {
     let title = c.str()?;
     let artist = c.str()?;
     let album = c.str()?;
-    let year = if c.u8()? == 0 {
-        None
-    } else {
-        Some(c.u16()?)
-    };
+    let year = if c.u8()? == 0 { None } else { Some(c.u16()?) };
     let key = c.opt_str()?;
     let bpm = Some(c.f32()?).filter(|v| !v.is_nan());
     let duration_s = Some(c.f32()?).filter(|v| !v.is_nan());
@@ -397,7 +396,14 @@ fn read_state(c: &mut Cursor, track: Option<&TrackMeta>) -> Result<MusicState, D
     let time_s = c.f64()?;
     let playhead_s = c.f64()?;
     let flags = c.u8()?;
-    let [bpm, bpm_grid, beat_phase, bar_phase, phrase_phase, intensity] = c.f32s::<6>()?;
+    let [
+        bpm,
+        bpm_grid,
+        beat_phase,
+        bar_phase,
+        phrase_phase,
+        intensity,
+    ] = c.f32s::<6>()?;
     let phrase = phrase_from(c.u8()?);
     let next_phrase = phrase_from(c.u8()?);
     let beats_to_next_phrase = c.opt_u32()?;
@@ -617,7 +623,13 @@ mod tests {
                 seconds: 4.5,
                 color: Some([255, 0, 128]),
             }),
-            theme: [[0.1; 3], [0.9; 3], [0.2, 0.6, 1.0], [1.0, 0.4, 0.2], [0.6, 0.2, 0.9]],
+            theme: [
+                [0.1; 3],
+                [0.9; 3],
+                [0.2, 0.6, 1.0],
+                [1.0, 0.4, 0.2],
+                [0.6, 0.2, 0.9],
+            ],
             analysis: BandsAt {
                 low: 0.8,
                 mid: 0.5,
