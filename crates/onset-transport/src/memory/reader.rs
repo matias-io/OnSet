@@ -379,15 +379,21 @@ impl<M: Mem> ChainReader<M> {
     ) -> Option<u32> {
         let read = self.track_id(index);
         let track = self.track_mut(index);
-        let (id, changed) = track.identity.update(read, state.track_bpm, file);
-        if changed {
-            tracing::info!(deck = index, ?id, "deck took another track");
-            track.new_track();
+        let (id, change) = track.identity.update(read, state.track_bpm, file);
+        if let Some(change) = change {
+            tracing::info!(deck = index, ?id, ?change, "deck took another track");
+            track.new_track(change, state.track_bpm);
         }
         track
             .probe
             .update(state.position_raw, state.pitch, playing, now);
         id
+    }
+
+    /// The rate deck `index`'s position counts at, when known: the library's sample rate
+    /// for its track, else the measured one.
+    pub fn deck_rate_hz(&self, index: usize) -> Option<f64> {
+        self.tracks.get(index).and_then(DeckTrack::rate_hz)
     }
 
     fn track_mut(&mut self, index: usize) -> &mut DeckTrack {
@@ -1076,6 +1082,45 @@ mod live {
         }
     }
 
+    /// What the link makes of the decks at one poll: which play, the content id each is
+    /// known by and the rate its position counts at (Hz), and the deck the show follows.
+    #[derive(Debug, Clone, PartialEq, Default)]
+    struct DecksView {
+        playing: Vec<Option<bool>>,
+        ids: Vec<Option<u32>>,
+        rates: Vec<Option<u32>>,
+        followed: Option<usize>,
+    }
+
+    /// Logs the decks' view when it changes, so a session's play, pause and MASTER moves
+    /// can be read back from the log.
+    fn note_decks(
+        last: &mut DecksView,
+        reader: &ChainReader<Process>,
+        playing: &[Option<bool>],
+        followed: Option<usize>,
+    ) {
+        let n = playing.len();
+        let view = DecksView {
+            playing: playing.to_vec(),
+            ids: (0..n).map(|i| reader.known_track_id(i)).collect(),
+            rates: (0..n)
+                .map(|i| reader.deck_rate_hz(i).map(|hz| hz.round() as u32))
+                .collect(),
+            followed,
+        };
+        if view != *last {
+            tracing::info!(
+                playing = ?view.playing,
+                ids = ?view.ids,
+                rates_hz = ?view.rates,
+                followed = ?view.followed,
+                "decks"
+            );
+            *last = view;
+        }
+    }
+
     /// Applies a finished background deck scan, and starts one when there are no decks or
     /// the found ones went stale (rekordbox rebuilt its players).
     fn tend_scan(
@@ -1253,6 +1298,8 @@ mod live {
         bpms: HashMap<String, f32>,
         /// The MASTER deck at the last poll, to log changes.
         last_master: Option<usize>,
+        /// The decks as last logged, to log changes.
+        last_decks: DecksView,
     }
 
     const RETRY: Duration = Duration::from_secs(2);
@@ -1269,6 +1316,7 @@ mod live {
                 durations: HashMap::new(),
                 bpms: HashMap::new(),
                 last_master: None,
+                last_decks: DecksView::default(),
             }
         }
 
@@ -1419,7 +1467,9 @@ mod live {
                     observe_decks(reader, &states, &playing, deck_files, now);
                     let master = reader.master_deck().map(usize::from);
                     note_master(&mut self.last_master, master);
-                    if let Some(i) = chooser.choose(master, &playing)
+                    let followed = chooser.choose(master, &playing);
+                    note_decks(&mut self.last_decks, reader, &playing, followed);
+                    if let Some(i) = followed
                         && let Some(state) = &states[i]
                     {
                         *failures = 0;

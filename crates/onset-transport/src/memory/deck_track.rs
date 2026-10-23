@@ -72,6 +72,20 @@ const BPM_CHANGE_POLLS: u32 = 30;
 /// How far a deck's track BPM may move and still be the same track, as a fraction.
 const BPM_TOLERANCE: f32 = 0.005;
 
+/// Why a deck counts as holding another track.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrackChange {
+    /// A new content id or a new paired file. Seen in the same poll the deck is paired with
+    /// its file, before the engine resolves the track, so nothing the engine sent is for it.
+    Evidence,
+    /// A deck that showed no track (no id, no file, no BPM) now shows one. Anything the
+    /// engine sent for the deck is for this track: there was no other.
+    Loaded,
+    /// The deck's track BPM settled on another value. That takes `BPM_CHANGE_POLLS` polls,
+    /// by when the engine may already have sent the new track's values.
+    Tempo,
+}
+
 /// Which track a deck holds, as far as can be told. rekordbox's content id is only readable
 /// while the deck plays (it builds its player objects then), so the last id read is kept
 /// while the deck shows no sign of another track: the same track BPM and the same open file.
@@ -91,14 +105,14 @@ impl TrackIdentity {
     }
 
     /// Takes this poll's evidence: the content id read (if any), the deck's track BPM and
-    /// the open file paired with the deck. Returns the content id to report and whether the
-    /// deck now holds a different track than before.
+    /// the open file paired with the deck. Returns the content id to report and, when the
+    /// deck now holds a different track than before, why.
     pub fn update(
         &mut self,
         read: Option<u32>,
         bpm: Option<f32>,
         file: Option<&Path>,
-    ) -> (Option<u32>, bool) {
+    ) -> (Option<u32>, Option<TrackChange>) {
         if !self.seen {
             *self = Self {
                 seen: true,
@@ -107,8 +121,9 @@ impl TrackIdentity {
                 file: file.map(Path::to_path_buf),
                 bpm_differs: 0,
             };
-            return (read, false);
+            return (read, None);
         }
+        let was_empty = self.id.is_none() && self.file.is_none() && self.bpm.is_none();
         let new_id = read.is_some_and(|id| self.id.is_some_and(|old| old != id));
         let new_file = matches!((&self.file, file), (Some(old), Some(f)) if old != f);
         let bpm_moved = match (self.bpm, bpm) {
@@ -116,8 +131,18 @@ impl TrackIdentity {
             (old, b) => old.is_some() != b.is_some(),
         };
         self.bpm_differs = if bpm_moved { self.bpm_differs + 1 } else { 0 };
-        let changed = new_id || new_file || self.bpm_differs >= BPM_CHANGE_POLLS;
-        if changed {
+        let change = if new_id || new_file {
+            Some(TrackChange::Evidence)
+        } else if self.bpm_differs >= BPM_CHANGE_POLLS {
+            Some(if was_empty {
+                TrackChange::Loaded
+            } else {
+                TrackChange::Tempo
+            })
+        } else {
+            None
+        };
+        if change.is_some() {
             *self = Self {
                 seen: true,
                 id: read,
@@ -125,7 +150,7 @@ impl TrackIdentity {
                 file: file.map(Path::to_path_buf),
                 bpm_differs: 0,
             };
-            return (read, true);
+            return (read, change);
         }
         if read.is_some() {
             self.id = read;
@@ -133,7 +158,7 @@ impl TrackIdentity {
         if self.file.is_none() {
             self.file = file.map(Path::to_path_buf);
         }
-        (self.id, false)
+        (self.id, None)
     }
 }
 
@@ -154,11 +179,24 @@ impl DeckTrack {
         self.sample_rate.or(self.probe.measured())
     }
 
-    /// Forgets the track after the deck took a new one, keeping the identity just set.
-    pub fn new_track(&mut self) {
+    /// Forgets the old track after the deck took a new one, keeping the identity just set.
+    /// What the engine sent stays when it is already for the new track: after a load into
+    /// an empty deck, or after a settled BPM change when the engine's BPM is the deck's new
+    /// track BPM (the engine resolved the new track before the BPM settled).
+    pub fn new_track(&mut self, change: TrackChange, deck_bpm: Option<f32>) {
         self.probe = RateProbe::default();
-        self.sample_rate = None;
-        self.bpm = None;
+        let engine_has_it = match change {
+            TrackChange::Evidence => false,
+            TrackChange::Loaded => true,
+            TrackChange::Tempo => matches!(
+                (self.bpm, deck_bpm),
+                (Some(lib), Some(deck)) if (lib - deck).abs() <= lib * BPM_TOLERANCE
+            ),
+        };
+        if !engine_has_it {
+            self.sample_rate = None;
+            self.bpm = None;
+        }
     }
 }
 
@@ -209,10 +247,10 @@ mod tests {
     #[test]
     fn identity_keeps_the_id_while_the_deck_pauses() {
         let mut id = TrackIdentity::default();
-        assert_eq!(id.update(None, Some(126.0), None), (None, false));
-        assert_eq!(id.update(Some(7), Some(126.0), None), (Some(7), false));
+        assert_eq!(id.update(None, Some(126.0), None), (None, None));
+        assert_eq!(id.update(Some(7), Some(126.0), None), (Some(7), None));
         // Paused: no player, so no id to read, but nothing says another track.
-        assert_eq!(id.update(None, Some(126.0), None), (Some(7), false));
+        assert_eq!(id.update(None, Some(126.0), None), (Some(7), None));
         assert_eq!(id.id(), Some(7));
     }
 
@@ -220,26 +258,32 @@ mod tests {
     fn identity_changes_with_a_new_id_file_or_settled_bpm() {
         let mut id = TrackIdentity::default();
         id.update(Some(7), Some(126.0), Some(Path::new("a.mp3")));
-        assert_eq!(id.update(Some(8), Some(126.0), None), (Some(8), true));
+        assert_eq!(
+            id.update(Some(8), Some(126.0), None),
+            (Some(8), Some(TrackChange::Evidence))
+        );
 
         let mut id = TrackIdentity::default();
         id.update(Some(7), Some(126.0), Some(Path::new("a.mp3")));
         assert_eq!(
             id.update(None, Some(126.0), Some(Path::new("b.mp3"))),
-            (None, true)
+            (None, Some(TrackChange::Evidence))
         );
 
         let mut id = TrackIdentity::default();
         id.update(Some(7), Some(126.0), None);
         for _ in 0..BPM_CHANGE_POLLS - 1 {
-            assert_eq!(id.update(None, Some(140.0), None), (Some(7), false));
+            assert_eq!(id.update(None, Some(140.0), None), (Some(7), None));
         }
         // One odd read in between starts the count over.
-        assert_eq!(id.update(None, Some(126.0), None), (Some(7), false));
+        assert_eq!(id.update(None, Some(126.0), None), (Some(7), None));
         for _ in 0..BPM_CHANGE_POLLS - 1 {
-            assert_eq!(id.update(None, Some(140.0), None), (Some(7), false));
+            assert_eq!(id.update(None, Some(140.0), None), (Some(7), None));
         }
-        assert_eq!(id.update(None, Some(140.0), None), (None, true));
+        assert_eq!(
+            id.update(None, Some(140.0), None),
+            (None, Some(TrackChange::Tempo))
+        );
     }
 
     #[test]
@@ -249,7 +293,60 @@ mod tests {
         track.sample_rate = Some(48_000.0);
         track.bpm = Some(126.0);
         assert_eq!(track.rate_hz(), Some(48_000.0));
-        track.new_track();
+        track.new_track(TrackChange::Evidence, Some(126.0));
         assert_eq!((track.rate_hz(), track.bpm), (None, None));
+    }
+
+    /// On 2026-10-22 an empty deck loaded Anyma's Abyss (48 kHz). The engine sent its rate
+    /// once the file was paired, and the BPM that appeared 30 polls later wiped it, so the
+    /// deck was timed at 44.1 kHz.
+    #[test]
+    fn a_load_into_an_empty_deck_keeps_what_the_engine_sent() {
+        let file = Some(Path::new("abyss.flac"));
+        let mut track = DeckTrack::default();
+        track.identity.update(None, None, None);
+        // The file is paired first; it is the deck's first evidence, so no change.
+        assert_eq!(track.identity.update(None, None, file), (None, None));
+        track.sample_rate = Some(48_000.0);
+        track.bpm = Some(124.0);
+        let mut change = None;
+        for _ in 0..BPM_CHANGE_POLLS {
+            change = change.or(track.identity.update(None, Some(124.0), file).1);
+        }
+        assert_eq!(change, Some(TrackChange::Tempo), "a file was already known");
+        track.new_track(TrackChange::Tempo, Some(124.0));
+        assert_eq!(track.rate_hz(), Some(48_000.0));
+    }
+
+    #[test]
+    fn an_empty_deck_that_shows_a_bpm_counts_as_loaded() {
+        let mut id = TrackIdentity::default();
+        id.update(None, None, None);
+        for _ in 0..BPM_CHANGE_POLLS - 1 {
+            assert_eq!(id.update(None, Some(124.0), None).1, None);
+        }
+        assert_eq!(
+            id.update(None, Some(124.0), None).1,
+            Some(TrackChange::Loaded)
+        );
+        let mut track = DeckTrack {
+            sample_rate: Some(48_000.0),
+            ..DeckTrack::default()
+        };
+        track.new_track(TrackChange::Loaded, None);
+        assert_eq!(track.rate_hz(), Some(48_000.0));
+    }
+
+    #[test]
+    fn a_settled_bpm_change_keeps_engine_values_only_when_they_match() {
+        let mut track = DeckTrack {
+            sample_rate: Some(48_000.0),
+            bpm: Some(140.0),
+            ..DeckTrack::default()
+        };
+        track.new_track(TrackChange::Tempo, Some(140.2));
+        assert_eq!(track.rate_hz(), Some(48_000.0), "already the new track's");
+        track.new_track(TrackChange::Tempo, Some(126.0));
+        assert_eq!(track.rate_hz(), None, "the old track's");
     }
 }
