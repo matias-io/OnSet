@@ -156,10 +156,10 @@ Play a track with a clear breakdown and drop, in Auto or any scene.
 - Edit `assets/shaders/lasers.wgsl` while the show runs (change a number): hot reload still
   applies it.
 
-## 5. The replay branch (`refs/heads/claude/interesting-dijkstra-cb6df3`, commit `90f5829`)
+## 5. Record and replay (`41dba6c` on `merge-autocue`)
 
-Cherry-picked onto `merge-autocue` as `41dba6c`, so everything below runs from the main
-checkout. Its tests, including the checked-in synthetic recording replaying through a scene:
+The replay branch's commit `90f5829` is on `merge-autocue` as `41dba6c` (the branch itself is
+removed), so everything below runs from the main checkout. Its tests, including the checked-in synthetic recording replaying through a scene:
 
 ```bash
 cd /c/Users/water/Projects/OnSet && CARGO_TARGET_DIR=D:/Offload/cargo-target cargo test -j 4 -p onset-core -p onset-engine -p onset-render 2>&1 | grep -E "^test result|FAILED|panicked|replay"
