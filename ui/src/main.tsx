@@ -14,6 +14,7 @@ import {StemPlayer} from './StemPlayer';
 import {ImportPaths} from './ImportPaths';
 import {BenchmarkReview} from './BenchmarkReview';
 import {CueAdoption} from './CueAdoption';
+import {TransitionVerdict} from './TransitionVerdict';
 import {ExperimentalModels} from './ExperimentalModels';
 import {Relocate} from './Relocate';
 import {LibraryFilters,activeFilterCount} from './LibraryFilters';
@@ -332,6 +333,7 @@ function App(){
             <Button size="sm" icon="play" disabled={!o.preview_supported||busy} title={o.preview_supported?undefined:'This gesture has to be rehearsed manually'} onClick={()=>run(async()=>{const r=await api.previewMedia(o.id,click);setPreview(r);return r;})}>{o.preview_supported?'Render preview':'Manual only'}</Button>
           </div>
           <DualAudition option={o}/>
+          <TransitionVerdict option={o} run={run}/>
         </Card>)}</div>
         {!transitions.length&&<Empty icon="transition">Pick an outgoing track to see timed ways into the next one.</Empty>}
       </>}

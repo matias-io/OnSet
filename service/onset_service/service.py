@@ -234,6 +234,7 @@ class Service:
             "energy-judgment": lambda: self.energy_judgment(p),
             "benchmark": lambda: self.benchmark(p), "evidence": lambda: self.evidence(p),
             "benchmark-label": lambda: self.benchmark_label(p),
+            "transition-rating": lambda: self.transition_rating(p),
             "reliability": lambda: self.reliability(p), "replan-order": lambda: self.replan_order(p),
             "transition-alternatives":lambda:self.transition_alternatives(p),
             "ai-context": lambda: self.ai_context(p), "enrichment-import": lambda: self.enrichment(p),
@@ -913,6 +914,7 @@ class Service:
             saved = self.store.artifact("benchmark-label", record["track_id"])
             if saved: template["records"][index] = {**record, **saved, "split":record["split"],"group":record["group"]}
         template["energy_judgments"] = self.store.artifacts("energy-judgment")
+        template["transition_ratings"] = self.store.artifacts("transition-rating")
         return template
 
     def benchmark_label(self, p):
@@ -925,6 +927,24 @@ class Service:
             if event.get("state") not in {"present","absent","unknown"}:raise ValueError("Event state must be present, absent or unknown")
             if event["state"] == "present" and (not isinstance(event.get("bar"),int) or event["bar"]<0):raise ValueError("Present events need a nonnegative bar index")
         return self.store.artifact("benchmark-label",p["track_id"],{**p,"verified_at":utcnow()})
+
+    def transition_rating(self, p):
+        """The DJ's verdict on one transition option after hearing it: in the rendered preview, a
+        rehearsal on the decks or a real set. One verdict per option; a later one replaces it."""
+        check_version(p)
+        if set(p) - {"schema_version", "option_id", "verdict", "heard", "note"}:
+            raise ValueError("Unsupported transition rating fields")
+        option = self.store.artifact("transition", p.get("option_id"))
+        if not option:
+            raise ValueError("Unknown transition option")
+        if p.get("verdict") not in {"works", "needs-changes", "does-not-work"}:
+            raise ValueError("Verdict must be works, needs-changes or does-not-work")
+        if p.get("heard") not in {"render", "rehearsal", "set"}:
+            raise ValueError("Say whether it was heard in the render, a rehearsal or a set")
+        if not isinstance(p.get("note", ""), str) or len(p.get("note", "")) > 500:
+            raise ValueError("Note must be text of at most 500 characters")
+        return self.store.artifact("transition-rating", p["option_id"], {
+            **p, "track_ids": option["track_ids"], "technique": option["technique"], "rated_at": utcnow()})
 
     def rb_preview(self, p):
         from .rekordbox import prepare, prepare_playlist, prepare_adoption, prepare_library_adoption, prepare_hot_slot_repair
