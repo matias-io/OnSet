@@ -425,9 +425,6 @@ impl<M: Mem> ChainReader<M> {
 
     pub fn master_deck(&self) -> Option<u8> {
         if let Some(sig) = self.offsets.signature.as_ref() {
-            if let Some(chains) = sig.master_chains.as_ref() {
-                return self.master_from_chains(chains);
-            }
             let flag = sig.master_flag.as_ref()?;
             return self
                 .found
@@ -443,27 +440,6 @@ impl<M: Mem> ChainReader<M> {
         let addr = resolve_chain(&self.mem, chain)?;
         let v = self.mem.read_u8(addr).ok()?;
         (usize::from(v) < self.offsets.decks.len().max(1)).then_some(v)
-    }
-
-    /// The MASTER deck from rekordbox's per-deck MASTER bytes: deck `i`'s byte is the route
-    /// to deck 1's with `i * stride` added to its last hop. Decks are numbered as found.
-    fn master_from_chains(&self, master: &super::offsets::MasterChains) -> Option<u8> {
-        let chain = master
-            .chains
-            .iter()
-            .find(|c| c.resolve(&self.mem).is_some())?;
-        let last = chain.hops.len().checked_sub(1)?;
-        (0..master.decks.min(self.found.len()))
-            .find(|&i| {
-                u64::try_from(i)
-                    .ok()
-                    .and_then(|i| master.stride.checked_mul(i))
-                    .and_then(|delta| chain.with_hop_offset(last, delta))
-                    .and_then(|c| c.resolve(&self.mem))
-                    .and_then(|a| self.mem.read_u8(a).ok())
-                    .is_some_and(|b| b & master.mask != 0)
-            })
-            .and_then(|i| u8::try_from(i).ok())
     }
 
     fn read_text(&self, chain: &Chain) -> Option<String> {

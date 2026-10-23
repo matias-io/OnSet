@@ -47,7 +47,8 @@ module_offset = 92088496
 offset = -396
 mask = 1
 
-# Not shipped: `[signature.master_chains]`. On 2026-10-22 one rekordbox session kept a
+# Withdrawn: static routes to MASTER (59a860a; the reader for them was removed after). On
+# 2026-10-22 one rekordbox session kept a
 # per-deck MASTER byte at +0x1b8 in entries 0x370 apart, reached from static memory, and
 # it followed the button through restarts and loads of a deck. After rekordbox itself was
 # restarted on 2026-10-23 none of the 414 routes found to it reached a MASTER byte (the

@@ -7,8 +7,8 @@ use onset_transport::memory::chain::Chain;
 use std::path::{Path, PathBuf};
 
 use onset_transport::memory::offsets::{
-    Anchor, DeckChains, DeckSignature, FlagField, MasterChains, Offsets, PositionFormat,
-    TempoFields, TrackIdFields,
+    Anchor, DeckChains, DeckSignature, FlagField, Offsets, PositionFormat, TempoFields,
+    TrackIdFields,
 };
 use onset_transport::memory::reader::{
     ChainReader, DeckChooser, DeckFiles, FakeMem, PlayTracker, decks_from_hits, parse_track_info,
@@ -358,7 +358,6 @@ fn signature_rekordbox() -> (FakeMem, DeckSignature) {
             offset: -0x328,
             mask: 0x80,
         }),
-        master_chains: None,
         tempo: None,
         track_id: None,
     };
@@ -424,55 +423,6 @@ fn reader_reads_signature_decks_without_chains() {
         Some(1),
         "the flag byte names the master"
     );
-}
-
-/// On 7.2.19 the flag byte in the deck objects went quiet for a deck after it restarted or
-/// loaded a track, while rekordbox's per-deck MASTER array kept following the button.
-#[test]
-fn the_master_array_wins_over_a_quiet_deck_flag() {
-    let (mut mem, mut sig) = signature_rekordbox();
-    // Static root -> object; deck entries 0x370 apart, MASTER byte at +0x1b8 in each.
-    mem.put_u64(BASE + 0x200, 0xa000);
-    mem.put_u64(0xa000 + 0x1450, 0xb000);
-    let deck_byte = |i: u64| 0xb000 + 0x1b8 + i * 0x370;
-    mem.put_bytes(deck_byte(0), &[0x00]);
-    mem.put_bytes(deck_byte(1), &[0x00]);
-    sig.master_chains = Some(MasterChains {
-        // An unresolvable route first: the next one is used.
-        chains: vec![chain(0x300, &[0x8, 0x1b8]), chain(0x200, &[0x1450, 0x1b8])],
-        stride: 0x370,
-        decks: 4,
-        mask: 1,
-    });
-    let offsets = Offsets {
-        rekordbox_version: "7.2.19".into(),
-        platform: "windows".into(),
-        position_format: PositionFormat::I32,
-        position_rate_hz: 44_100.0,
-        master_deck: None,
-        decks: Vec::new(),
-        signature: Some(sig),
-        provenance: None,
-    };
-    assert_eq!(
-        Offsets::from_toml(&offsets.to_toml().unwrap()).unwrap(),
-        offsets
-    );
-    let mut reader = ChainReader::new(mem.clone(), offsets.clone());
-    reader.adopt_hits(&[0x9000 - 0x20, 0x7000 - 0x20]);
-    // The deck flag names deck 2, but the array says nobody: the array wins.
-    assert_eq!(reader.master_deck(), None);
-
-    mem.put_bytes(deck_byte(0), &[0x01]);
-    let mut reader = ChainReader::new(mem.clone(), offsets.clone());
-    reader.adopt_hits(&[0x9000 - 0x20, 0x7000 - 0x20]);
-    assert_eq!(reader.master_deck(), Some(0));
-
-    mem.put_bytes(deck_byte(0), &[0x00]);
-    mem.put_bytes(deck_byte(1), &[0x01]);
-    let mut reader = ChainReader::new(mem, offsets);
-    reader.adopt_hits(&[0x9000 - 0x20, 0x7000 - 0x20]);
-    assert_eq!(reader.master_deck(), Some(1));
 }
 
 fn p(s: &str) -> PathBuf {
