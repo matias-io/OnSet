@@ -54,6 +54,9 @@ pub struct MusicState {
     pub analysis: crate::bands::BandsAt,
     /// Whose structure the phrases and drop countdown follow; `None` without a beat grid.
     pub structure_source: Option<crate::structure::StructureSource>,
+    /// The kick and snare the visuals react to: locked to the beat grid while a track with
+    /// one plays, the audio's own otherwise.
+    pub hits: crate::hits::BeatHits,
 }
 
 impl Default for MusicState {
@@ -80,6 +83,7 @@ impl Default for MusicState {
             theme: DEFAULT_THEME,
             analysis: crate::bands::BandsAt::default(),
             structure_source: None,
+            hits: crate::hits::BeatHits::default(),
         }
     }
 }
@@ -136,6 +140,14 @@ impl MusicState {
             theme: DEFAULT_THEME,
             analysis: crate::bands::BandsAt::default(),
             structure_source: None,
+            // The audio's own hits until a `HitLock` replaces them.
+            hits: crate::hits::BeatHits {
+                kick: audio.kick,
+                snare: audio.snare,
+                audio_kick: audio.kick,
+                audio_snare: audio.snare,
+                ..crate::hits::BeatHits::default()
+            },
         }
     }
 }

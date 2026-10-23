@@ -439,6 +439,7 @@ impl Engine {
                     capture,
                     clock: Clock::new(),
                     director: Director::new(),
+                    hit_lock: onset_core::hits::HitLock::new(),
                     started,
                     last_tick: Instant::now(),
                     last_status: None,
@@ -564,6 +565,8 @@ struct Running {
     capture: Option<Capture>,
     clock: Clock,
     director: Director,
+    /// Locks the kick and snare to the beat grid, confirmed by the audio.
+    hit_lock: onset_core::hits::HitLock,
     started: Instant,
     last_tick: Instant,
     last_status: Option<EngineStatus>,
@@ -897,16 +900,20 @@ impl Running {
             let st = onset_core::structure::StructureState::default();
             let intensity = self.director.update(&st, dt);
             let audio = self.audio(now);
-            return MusicState::assemble(
+            let playing = self.clock.is_playing();
+            let mut ms = MusicState::assemble(
                 time_s,
                 self.clock.playhead_at(now).unwrap_or(0.0),
-                self.clock.is_playing(),
+                playing,
                 self.clock.rate(),
                 &st,
                 audio,
                 intensity,
                 None,
             );
+            // No grid: the lock passes the audio through and keeps its lag estimate.
+            ms.hits = self.hit_lock.update(&st, playing, 0.0, None, &audio, dt);
+            return ms;
         };
         let playhead = self.clock.playhead_at(now).unwrap_or(0.0);
         let meta = current.meta.clone();
@@ -927,10 +934,11 @@ impl Running {
         let structure_source = current.analysis.as_ref().map(|_| current.structure_source);
         let intensity = self.director.update(&st, dt);
         let audio = self.audio(now);
+        let playing = self.clock.is_playing();
         let mut ms = MusicState::assemble(
             time_s,
             playhead,
-            self.clock.is_playing(),
+            playing,
             self.clock.rate(),
             &st,
             audio,
@@ -941,6 +949,9 @@ impl Running {
             ms.analysis = at;
         }
         ms.structure_source = structure_source;
+        ms.hits = self
+            .hit_lock
+            .update(&st, playing, ms.bpm, analysis_now, &audio, dt);
         ms
     }
 

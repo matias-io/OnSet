@@ -83,7 +83,7 @@ export function ScenesCard({s,change,catalogue}:{s:Settings;change:Change;catalo
 
 const CORNERS=[{id:'top_left',label:'Top left'},{id:'top_right',label:'Top right'},{id:'bottom_left',label:'Bottom left'},{id:'bottom_right',label:'Bottom right'}];
 const CARD_FIELDS:[string,string][]=[['artwork','Cover'],['album','Album'],['year','Year'],['key','Key'],['bpm','BPM'],['genre','Genre'],['label','Label'],['rating','Rating'],['tags','My tags'],['comment','Comment'],['play_count','Play count']];
-const HUD_FIELDS:[string,string][]=[['scene','Scene'],['performance','Frame time and graphics card'],['transport','rekordbox link'],['tempo','Tempo'],['key','Key'],['phrase','Phrase'],['drop','Drop countdown'],['next_cue','Next cue'],['analysis','Analysis source']];
+const HUD_FIELDS:[string,string][]=[['scene','Scene'],['performance','Frame time and graphics card'],['transport','rekordbox link'],['tempo','Tempo'],['key','Key'],['phrase','Phrase'],['drop','Drop countdown'],['next_cue','Next cue'],['analysis','Analysis source'],['scope','Signal scope']];
 
 export function OnScreenCard({s,change,setLogo}:{s:Settings;change:Change;setLogo:(clear:boolean)=>void}){
   const card=s.card||{},hud=s.hud||{};

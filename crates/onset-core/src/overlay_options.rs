@@ -26,6 +26,9 @@ pub struct HudOptions {
     pub next_cue: bool,
     /// rekordbox's bands and vocal level at the playhead, and the live drums.
     pub analysis: bool,
+    /// The signal scope: the beat, the kick and snare shown against what the audio hears,
+    /// and the audio path's measured lag behind the beat grid.
+    pub scope: bool,
 }
 
 impl Default for HudOptions {
@@ -42,6 +45,7 @@ impl Default for HudOptions {
             drop: true,
             next_cue: false,
             analysis: false,
+            scope: false,
         }
     }
 }

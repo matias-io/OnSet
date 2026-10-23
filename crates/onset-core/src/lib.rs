@@ -7,6 +7,7 @@ pub mod bands;
 pub mod clock;
 pub mod director;
 pub mod grid;
+pub mod hits;
 pub mod lyrics;
 pub mod music_state;
 pub mod overlay_options;

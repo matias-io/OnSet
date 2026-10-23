@@ -52,6 +52,43 @@ pub fn phrase_name(kind: Option<PhraseKind>) -> &'static str {
     }
 }
 
+/// A text meter of `v` (0..1), `width` cells: `|||||.....`.
+fn meter(v: f32, width: usize) -> String {
+    let lit = ((v.clamp(0.0, 1.0) * width as f32).round() as usize).min(width);
+    format!("{}{}", "|".repeat(lit), ".".repeat(width - lit))
+}
+
+/// The signal scope's two lines: the hits shown against the hits heard, and the lag.
+fn scope_lines(ms: &MusicState) -> [String; 2] {
+    let h = &ms.hits;
+    let beat = (ms.bar_phase * 4.0).floor() as u32 % 4 + 1;
+    let first = format!(
+        "scope  beat {beat}/4  ·  kick [{}]  snare [{}]  ·  heard kick [{}]  snare [{}]",
+        meter(h.kick, 12),
+        meter(h.snare, 12),
+        meter(h.audio_kick, 12),
+        meter(h.audio_snare, 12),
+    );
+    let lag = if h.lag_samples == 0 {
+        "audio lag -".to_string()
+    } else {
+        format!(
+            "audio lag {:+.0} ms over {} kicks",
+            h.lag_s * 1000.0,
+            h.lag_samples
+        )
+    };
+    let lock = if h.locked {
+        format!(
+            "locked to the grid  ·  confidence kick {:.2}  snare {:.2}",
+            h.kick_confidence, h.snare_confidence
+        )
+    } else {
+        "hits as heard (no grid, paused or silent)".to_string()
+    };
+    [first, format!("{lag}  ·  {lock}")]
+}
+
 fn mmss(seconds: f64) -> String {
     let s = seconds.max(0.0);
     let m = (s / 60.0).floor();
@@ -150,6 +187,7 @@ impl Hud {
             },
         );
         let a = &ms.analysis;
+        let [scope1, scope2] = scope_lines(ms);
         let mut lines = vec![
             on(
                 o.scene,
@@ -201,9 +239,11 @@ impl Hud {
                 o.analysis,
                 format!(
                     "low {:.2}  ·  mid {:.2}  ·  high {:.2}  ·  vocal {:.2}  ·  kick {:.2}  ·  hats {:.2}",
-                    a.low, a.mid, a.high, a.vocal, ms.audio.kick, ms.audio.hat
+                    a.low, a.mid, a.high, a.vocal, ms.hits.kick, ms.audio.hat
                 ),
             ),
+            on(o.scope, scope1),
+            on(o.scope, scope2),
         ];
         lines.retain(|l| !l.is_empty());
         if let Some(err) = &info.last_error {
@@ -302,6 +342,33 @@ mod tests {
         assert_eq!(with.len(), plain.len() + 2);
         assert!(with.last().unwrap().text.starts_with("shader `ring`"));
         assert!(!with.last().unwrap().text.contains("more"));
+    }
+
+    #[test]
+    fn scope_shows_the_hits_and_the_lag() {
+        let hud = Hud::new();
+        let mut ms = MusicState::default();
+        ms.hits.kick = 0.5;
+        ms.hits.audio_kick = 1.0;
+        ms.hits.lag_s = 0.062;
+        ms.hits.lag_samples = 40;
+        ms.hits.locked = true;
+        ms.bar_phase = 0.3;
+        let o = HudOptions {
+            scope: true,
+            ..HudOptions::default()
+        };
+        let items = hud.items(&ms, &HudInfo::default(), 1.0, &o);
+        let text: Vec<&str> = items.iter().map(|i| i.text.as_str()).collect();
+        let line = text.iter().find(|t| t.starts_with("scope")).unwrap();
+        assert!(line.contains("beat 2/4"), "{line}");
+        assert!(line.contains("kick [||||||......]"), "{line}");
+        assert!(line.contains("heard kick [||||||||||||]"), "{line}");
+        let lag = text.iter().find(|t| t.starts_with("audio lag")).unwrap();
+        assert!(lag.contains("+62 ms over 40 kicks"), "{lag}");
+        assert!(lag.contains("locked to the grid"), "{lag}");
+        let off = hud.items(&ms, &HudInfo::default(), 1.0, &HudOptions::default());
+        assert_eq!(off.len() + 4, items.len());
     }
 
     #[test]
