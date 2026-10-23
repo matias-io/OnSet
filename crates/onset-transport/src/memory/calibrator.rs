@@ -15,6 +15,12 @@
 //! by hand so far), else from the files rekordbox keeps open, matched by length and BPM.
 //! Several runs can be merged into the anchors they all found (`merge_offsets`).
 //!
+//! rekordbox is raised to the front before each step in which its deck has to play: behind
+//! another window its clock stalled and the playing deck's own position never showed up as a
+//! candidate. Without that position the best layout found had no tempo beside it (the player
+//! object's copy), and the run failed only at its last check; it now stops at the layout
+//! choice and says how to retry.
+//!
 //! The CLI and the launcher both drive this; only the reporter differs.
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -31,6 +37,7 @@ use super::reader::{Mem, track_bpm_from};
 use super::scan::{
     Counter, CounterFormat, confirm_counters, find_bytes, find_sample_counters, find_u64_values,
 };
+use super::window::bring_to_front;
 
 /// Counters that must stop for the pause to count (the position has a few copies).
 const MIN_STOPPED: usize = 3;
@@ -51,7 +58,7 @@ const SETTLE: Duration = Duration::from_millis(800);
 /// The steps the operator performs, in order, as the launcher lists them up front.
 pub const STEPS: &[&str] = &[
     "Load a track on any deck and leave it paused, at least a minute before any loop or the end",
-    "Press play on that deck when asked",
+    "Press play on that deck when asked, and leave rekordbox in front while it plays",
     "Pause that deck",
     "Press play on it again",
 ];
@@ -261,6 +268,14 @@ fn scan_counters(s: &mut Session<'_>, p: &Process) -> Vec<Counter> {
 /// took a second scan, which kept the deck playing long enough to reach a short track's loops.
 const PLAY_COUNTDOWN_S: u64 = 5;
 
+/// Raises rekordbox before a step its deck has to play through; when Windows refuses (the
+/// caller is not in the foreground), asks the operator to do it.
+fn front(s: &mut Session<'_>, p: &Process) {
+    if !bring_to_front(p.pid) {
+        s.say("  bring rekordbox to the front and leave it there until calibration finishes");
+    }
+}
+
 /// Playback counters that started with play, best first (see `rank`). The scan waits for a
 /// countdown after asking for play, and scans again if the press still came late.
 fn ranked_counters(
@@ -268,8 +283,10 @@ fn ranked_counters(
     p: &Process,
     baseline: &BTreeSet<u64>,
 ) -> anyhow::Result<Vec<Counter>> {
+    front(s, p);
     s.say(format!(
-        "Step 2: press play on that deck now (scanning in {PLAY_COUNTDOWN_S} s)."
+        "Step 2: press play on that deck now (scanning in {PLAY_COUNTDOWN_S} s). \
+         Leave rekordbox in front while it plays."
     ));
     s.sleep(Duration::from_secs(PLAY_COUNTDOWN_S))?;
     let deadline = Instant::now() + s.step_limit;
@@ -307,6 +324,7 @@ fn ranked_counters(
 fn absolute_position_counters(s: &mut Session<'_>, p: &Process) -> anyhow::Result<Vec<Counter>> {
     let baseline = paused_baseline(s, p)?;
     let counters = ranked_counters(s, p, &baseline)?;
+    front(s, p);
     wait_for(
         s,
         "Step 3: pause that deck (press play/pause once).",
@@ -332,6 +350,7 @@ fn absolute_position_counters(s: &mut Session<'_>, p: &Process) -> anyhow::Resul
         keep.len()
     ));
     let held_counters: Vec<Counter> = keep.iter().map(|(c, _)| *c).collect();
+    front(s, p);
     wait_for(s, "Step 4: press play on that deck again.", || {
         any_counter_moving(p, &held_counters, Duration::from_millis(300))
     })?;
@@ -420,8 +439,7 @@ fn best_signature(
             .collect();
         by_set.entry(key).or_default().push(*c);
     }
-    let (key, members) = pick_layout(s, p, by_set)
-        .context("no position candidate sits in an object with module pointers")?;
+    let (key, members) = pick_layout(s, p, by_set)?;
     let mut anchors: Vec<Anchor> = key
         .iter()
         .map(|(offset, module_offset)| Anchor {
@@ -514,9 +532,15 @@ fn pick_layout(
     s: &mut Session<'_>,
     p: &Process,
     by_set: BTreeMap<LayoutKey, Vec<Counter>>,
-) -> Option<(LayoutKey, Vec<Counter>)> {
-    if by_set.len() < 2 {
-        return by_set.into_iter().next();
+) -> anyhow::Result<(LayoutKey, Vec<Counter>)> {
+    if by_set.is_empty() {
+        bail!("no position candidate sits in an object with module pointers");
+    }
+    if by_set.len() == 1 {
+        let (k, v) = by_set.into_iter().next().expect("one layout");
+        let tempo = tempo_fields(p, v[0].addr).is_some();
+        let rank = layout_rank(!holds_twice(&v), 0, k.len(), tempo, v.len());
+        return choose_layout(vec![(rank, (k, v))]);
     }
     let values: Vec<u64> = by_set
         .keys()
@@ -551,7 +575,7 @@ fn pick_layout(
             (shared.decks.len(), shared.anchors.len())
         }
     };
-    let scored: Vec<(LayoutRank, LayoutKey, Vec<Counter>)> = by_set
+    let scored: Vec<(LayoutRank, (LayoutKey, Vec<Counter>))> = by_set
         .into_iter()
         .map(|(k, v)| {
             let (found, shared) = objects(&k, v[0].addr);
@@ -562,10 +586,10 @@ fn pick_layout(
                 tempo_fields(p, v[0].addr).is_some(),
                 v.len(),
             );
-            (rank, k, v)
+            (rank, (k, v))
         })
         .collect();
-    for (rank, k, v) in &scored {
+    for (rank, (k, v)) in &scored {
         s.say(format!(
             "  layout with {} anchor(s) around {} candidate(s){}: finds {} object(s) sharing {}, tempo beside the position: {}",
             k.len(),
@@ -576,10 +600,26 @@ fn pick_layout(
             if rank.tempo { "yes" } else { "no" }
         ));
     }
-    scored
+    choose_layout(scored)
+}
+
+/// The best-ranked layout, provided it has the deck's tempo beside its position. Without it
+/// the run found only the player object's copy of the playhead (2026-10-22: every layout read
+/// "tempo beside the position: no" and the signature then failed its runtime check), so it
+/// stops here with what to do instead.
+fn choose_layout<T>(scored: Vec<(LayoutRank, T)>) -> anyhow::Result<T> {
+    let (rank, layout) = scored
         .into_iter()
-        .max_by_key(|(rank, _, _)| rank.key())
-        .map(|(_, k, v)| (k, v))
+        .max_by_key(|(rank, _)| rank.key())
+        .context("no position candidate sits in an object with module pointers")?;
+    if !rank.tempo {
+        bail!(
+            "the deck's own position was not found: no candidate has the deck's tempo beside it. \
+             Keep rekordbox in front for the whole run (its clock can stall behind other \
+             windows), load tracks on two decks, then start again with one of them paused"
+        );
+    }
+    Ok(layout)
 }
 
 /// Deck objects a layout can plausibly be found as: rekordbox keeps one object per deck and a
@@ -780,7 +820,8 @@ pub fn calibrate(out_dir: &Path, s: &mut Session<'_>) -> anyhow::Result<PathBuf>
         p.pid, p.module_base
     ));
     s.say(
-        "This takes about three minutes: with a track paused, play it, pause it, play it again.          The deck plays for under a minute of that.",
+        "This takes about three minutes: with a track paused, play it, pause it, play it again. \
+         The deck plays for under a minute of that.",
     );
     s.say(
         "Step 1: load a track on any deck and leave it paused, at least a minute before any \
@@ -998,6 +1039,32 @@ mod tests {
             vec![3, 4, 5],
             "the 117.8 s group comes before the smaller 30 s group"
         );
+    }
+
+    #[test]
+    fn a_layout_without_tempo_beside_the_position_stops_the_run() {
+        let player = layout_rank(true, 2, 7, false, 1);
+        let other = layout_rank(true, 3, 4, false, 1);
+        let err = choose_layout(vec![(player, "player"), (other, "other")]).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("tempo"), "{message}");
+        assert!(message.contains("in front"), "{message}");
+        assert!(choose_layout::<&str>(Vec::new()).is_err());
+    }
+
+    #[test]
+    fn the_deck_layout_with_tempo_is_chosen_over_one_with_more_pointers() {
+        let deck = layout_rank(true, 5, 8, true, 1);
+        let generic = layout_rank(true, 6, 9, false, 1);
+        assert_eq!(
+            choose_layout(vec![(generic, "generic"), (deck, "deck")]).unwrap(),
+            "deck"
+        );
+    }
+
+    #[test]
+    fn the_play_step_asks_to_keep_rekordbox_in_front() {
+        assert!(STEPS[1].contains("in front"));
     }
 
     #[test]
