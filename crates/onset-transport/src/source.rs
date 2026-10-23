@@ -14,6 +14,15 @@ pub enum SourceStatus {
     Error(String),
 }
 
+/// Every deck a source can read at its last poll, beside the one `poll` chose.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LiveDecks {
+    /// One snapshot per readable deck, in deck order.
+    pub decks: Vec<TransportSnapshot>,
+    /// The MASTER deck, when the source reads it.
+    pub master: Option<u8>,
+}
+
 pub trait TransportSource: Send {
     fn name(&self) -> &'static str;
     fn status(&self) -> SourceStatus;
@@ -32,4 +41,10 @@ pub trait TransportSource: Send {
 
     /// The library's BPM for each file, for the same purpose. Default: ignored.
     fn set_file_bpms(&mut self, _table: Vec<(std::path::PathBuf, f32)>) {}
+
+    /// Every deck read at the last poll, for listeners that weigh them all (the engine's
+    /// deck-by-ear). Default: none, for sources that know one deck.
+    fn live_decks(&self) -> LiveDecks {
+        LiveDecks::default()
+    }
 }

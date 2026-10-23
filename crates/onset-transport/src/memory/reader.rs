@@ -1079,7 +1079,7 @@ mod live {
         Some(reader.deck_count())
     }
     use crate::memory::offsets::Offsets;
-    use crate::source::{SourceStatus, TransportSource};
+    use crate::source::{LiveDecks, SourceStatus, TransportSource};
 
     impl Mem for Process {
         fn module_base(&self) -> u64 {
@@ -1286,6 +1286,37 @@ mod live {
             && playing_without_id(reader, trackers, now)
     }
 
+    /// A snapshot of every readable deck, as the chosen one is built, and the MASTER deck.
+    fn live_decks(
+        reader: &ChainReader<Process>,
+        states: &[Option<DeckState>],
+        playing: &[Option<bool>],
+        trackers: &[PlayTracker],
+        deck_files: &DeckFiles,
+        master: Option<usize>,
+        now: Instant,
+    ) -> LiveDecks {
+        LiveDecks {
+            decks: states
+                .iter()
+                .enumerate()
+                .filter_map(|(i, state)| {
+                    let mut snapshot = snapshot_from_deck(
+                        u8::try_from(i).ok()?,
+                        state.as_ref()?,
+                        playing.get(i).copied().flatten().unwrap_or(false),
+                        now,
+                        reader.track_bpm(i),
+                        trackers.get(i).and_then(PlayTracker::rate),
+                    );
+                    identify(&mut snapshot.track, reader, deck_files, i);
+                    Some(snapshot)
+                })
+                .collect(),
+            master: master.and_then(|m| u8::try_from(m).ok()),
+        }
+    }
+
     /// Hands each readable deck's state, play state and paired file to the reader, which
     /// keeps what it knows of the deck's track (id, rate) from it.
     fn observe_decks(
@@ -1350,6 +1381,8 @@ mod live {
         last_master: Option<usize>,
         /// The decks as last logged, to log changes.
         last_decks: DecksView,
+        /// Every readable deck at the last poll.
+        live: LiveDecks,
     }
 
     const RETRY: Duration = Duration::from_secs(2);
@@ -1367,6 +1400,7 @@ mod live {
                 bpms: HashMap::new(),
                 last_master: None,
                 last_decks: DecksView::default(),
+                live: LiveDecks::default(),
             }
         }
 
@@ -1434,6 +1468,10 @@ mod live {
             }
         }
 
+        fn live_decks(&self) -> LiveDecks {
+            self.live.clone()
+        }
+
         fn set_file_bpms(&mut self, table: Vec<(PathBuf, f32)>) {
             self.bpms = table.into_iter().map(|(p, b)| (norm_path(&p), b)).collect();
         }
@@ -1450,6 +1488,7 @@ mod live {
             let now = Instant::now();
             match &mut self.state {
                 State::Searching { next_try } | State::Unsupported { next_try, .. } => {
+                    self.live = LiveDecks::default();
                     if now >= *next_try {
                         self.try_connect();
                     }
@@ -1519,6 +1558,8 @@ mod live {
                     note_master(&mut self.last_master, master);
                     let followed = chooser.choose(now, master, &playing);
                     note_decks(&mut self.last_decks, reader, &playing, followed);
+                    self.live =
+                        live_decks(reader, &states, &playing, trackers, deck_files, master, now);
                     if let Some(i) = followed
                         && let Some(state) = &states[i]
                     {
