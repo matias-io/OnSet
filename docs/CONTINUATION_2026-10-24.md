@@ -61,3 +61,9 @@ Private evidence remains excluded from Git: `service/.artifacts/four-track-basel
 La Danza's current D proposal is still 3.946 s, marked **proposed/unverified**, with stale review/write state. It needs listening and explicit cue approval; the completed model run does not approve that interpretation or write it to rekordbox. The other tracks also need human review of their new revisions.
 
 The full project plan remains open as described in [PLAN_PROGRESS.md](PLAN_PROGRESS.md).
+
+## Listening-review interruption: cue audition offset
+
+The DJ reported that clicking a coloured cue-list button jumped earlier than the displayed cue. Source inspection confirmed that every button sought to `max(0, cue.time - 4)`: an implicit four-second lead-in, not a change to the saved cue. The source fix makes the coloured button seek exactly to the cue and provides a separate labelled **−4s** lead-in button. Waveform interaction is unchanged; a separate observed risk is that clicking a waveform marker is treated as a move even without a deliberate drag and deserves follow-up.
+
+Engineering verification: 39 UI tests across nine files pass, including exact cue seeking at 3.946/49.562/224.1 seconds, separate clamped lead-in playback, action ordering and accessible labels. TypeScript and the production UI build pass. This source fix still needs packaging, installation and visible acceptance. No listening labels, cue approvals or rekordbox writes were made during this review; La Danza's interpretation remains open.

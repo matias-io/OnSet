@@ -2,6 +2,7 @@ import React,{useCallback,useEffect,useState} from 'react';
 import type {Track} from './types';
 import {snapGrid,plainKey,roleColor} from './library';
 import {Button,Card,Pill} from './ui';
+import {CueAudition} from './CueAudition';
 
 function CueRow({cue,track,selected,toggle,run,seek,play,onDirty}:any){
   const [time,setTime]=useState(String(cue.time)),[end,setEnd]=useState(cue.end===null?'':String(cue.end));
@@ -19,7 +20,7 @@ function CueRow({cue,track,selected,toggle,run,seek,play,onDirty}:any){
   }
   return <div className="cue-row" tabIndex={0} role="group" aria-label={`Cue ${cue.role}: ${cue.name}`} onKeyDown={key}>
     <input type="checkbox" aria-label={`Select cue ${cue.role}`} checked={selected} onChange={toggle}/>
-    <button className="cue-letter" style={{background:roleColor[cue.role]||'#cccccc'}} title="Play from just before this cue" onClick={()=>{seek(Math.max(0,cue.time-4));play();}}>{cue.role}</button>
+    <CueAudition role={cue.role} time={cue.time} color={roleColor[cue.role]||'#cccccc'} seek={seek} play={play}/>
     <div className="cue-name"><strong>{cue.name}</strong><small>{cue.source} · {cue.confidence}</small></div>
     <div className="cue-times">
       <input aria-label={`Cue ${cue.role} position seconds`} type="number" min="0" max={track.duration} step=".01" value={time} onChange={e=>setTime(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&dirty)save();}}/>
