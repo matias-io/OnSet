@@ -2,7 +2,7 @@
 
 2026-10-24 release follow-up: [continuation evidence](CONTINUATION_2026-10-24.md) records installed abec26f, exact workspace preservation, current UI/worker checks and all six models completing on four real tracks. Listening, cue approval and broader acceptance remain open; no product milestone is closed by model execution alone.
 
-P5.2 listening-review follow-up: coloured cue buttons now seek to the exact cue in source; a separate **−4s** control preserves lead-in audition. UI tests (39) and production build pass. Packaging/installed acceptance remain pending; see the continuation record.
+P5.2 listening-review follow-up: coloured cue buttons now seek to the exact cue in source; a separate **−4s** control preserves lead-in audition. UI tests (39), production build and candidate 3630ea4 installer packaging pass. Installation/visible acceptance remain pending; see the continuation record.
 
 Reviewed 2026-10-20. Specification: [PROJECT_PLAN.md](PROJECT_PLAN.md). Start here with the [agent handoff](HANDOFF.md). This is an evidence index at phase level, not certification that every subrequirement is complete. Read the numbered requirements before changing or closing a phase. Historical imported analysis and generated fixtures do not establish musical accuracy.
 
