@@ -84,6 +84,19 @@ def discogs_styles(audio_path, cache, output, top=10):
             "taxonomy": "Discogs styles", "license": "CC BY-NC-SA 4.0"}
 
 
+def edmformer_chunks(duration, limit=225):
+    """Chunk length (s) and join times for EDMFormer. edm98 runs up to TIME_DUR = 420 s through
+    MuQ and MusicFM in one pass, and their memory grows with the square of the length: 240 s
+    peaked at 7.1 GB and was killed in WSL's default 7.8 GB (La Danza, Ray Of Solar, Joya,
+    2026-10-23). A track up to `limit` runs whole, as the model expects; a longer one is split
+    into equal chunks no longer than `limit`. Boundaries survive a join, but the model labels a
+    chunk's start as a track's start, so labels just after a join are less reliable."""
+    import math
+    count = max(1, math.ceil(duration / limit))
+    length = math.ceil(duration / count)
+    return length, [float(length * k) for k in range(1, count)]
+
+
 def stereo_input(audio, workdir):
     """Demucs 4.0.1 widens mono input to stereo as a view of one channel and then subtracts
     in place (separate.py:171, `wav -= ref.mean()`), which torch refuses: La Danza, Lock In
@@ -181,20 +194,24 @@ def main():
                     data = discogs_styles(request["audio"], cache, output)
                 elif name == "edmformer":
                     import warnings,math,soundfile as sf
+                    import edm98.inference.pipeline as edm_pipeline
                     from edm98.inference import create_pipeline
                     assets=Path.home()/".local/share/onset/experimental/edmformer-assets"
                     os.environ["MUSICFMPATH"]=str(assets/"musicfm")
+                    duration=sf.info(request['audio']).duration
+                    edm_pipeline.TIME_DUR,joins=edmformer_chunks(duration)
                     with warnings.catch_warnings(record=True) as observed:
                         prediction = create_pipeline(device=device, persistent_models=False,low_memory=True,hf_cache_dir=cache/"huggingface",checkpoint_path=assets/"data/checkpoints/model.pt",
                              config_path=assets/"configs/edmformer.yaml",musicfm_stat_path=assets/"data/checkpoints/msd_stats.json",
                              musicfm_model_path=assets/"data/checkpoints/pretrained_msd.pt").predict_file(request["audio"])
                     data = {"segments":prediction} if isinstance(prediction,list) else prediction if isinstance(prediction,dict) else vars(prediction)
-                    duration=sf.info(request['audio']).duration
                     if not data.get('segments'):raise ValueError('EDMFormer returned no structure segments')
                     for segment in data['segments']:
                         if not all(math.isfinite(segment[k]) for k in ('start','end')) or not 0<=segment['start']<segment['end']<=duration+.1:
                             raise ValueError('EDMFormer returned invalid segment timing')
                     data['warnings']=list(dict.fromkeys(str(w.message) for w in observed if issubclass(w.category,RuntimeWarning)))
+                    data['chunk_joins']=joins
+                    if joins:data['warnings'].append(f"Analysed in {len(joins)+1} chunks to fit in memory; labels just after {', '.join(f'{j:.0f}s' for j in joins)} are less reliable")
                 elif name == "allin1":
                     import logging
                     logging.getLogger('natten.functional').setLevel(logging.ERROR)
