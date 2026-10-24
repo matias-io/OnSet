@@ -2,13 +2,13 @@
 
 OnSet's desktop app (`crates/onset-desktop`, Tauri) holds the preparation screens and the live view in one window. It starts the Python service in `service/` as a child process and serves the React screens built from `ui/`. Automated engineering checks pass; musical accuracy and real rekordbox acceptance are separate release gates. See [implementation status](IMPLEMENTATION_STATUS.md).
 
-Last reviewed 2026-10-19. The dated installer checks in [desktop verification](history/DESKTOP_VERIFICATION.md) were made on the former Electron build of the preparation screens, before they moved into OnSet. They do not carry over to the Tauri app, which has no installer yet and needs its own installed acceptance.
+Installed startup/build instructions reviewed 2026-10-24. The older checks in [desktop verification](history/DESKTOP_VERIFICATION.md) belong to their dated builds. Current Tauri candidate `abec26f` has its own [installed-payload and workspace-preservation evidence](CONTINUATION_2026-10-24.md); this does not imply broader production acceptance.
 
 Development continuation: [agent handoff](HANDOFF.md), [complete plan](PROJECT_PLAN.md), [progress map](PLAN_PROGRESS.md).
 
 ## Start
 
-On this computer, the **OnSet** Start menu and desktop shortcuts run `bin\OnSet.exe` in the OnSet folder: a release build of `onset-desktop` copied there. It uses the folder's `service\` source and `service\.venv` Python, so keep the checkout in place. FFmpeg must be available on PATH; this computer already has it installed.
+On this computer, the **OnSet** Start menu and desktop shortcuts run `%LOCALAPPDATA%\OnSet\onset-desktop.exe`. The NSIS installer includes `runtime\python.exe`, the service and worker source, the model manifest and rekordbox offsets beside the executable. It uses that installed runtime rather than the development checkout. FFmpeg must be available on PATH; this computer already has it installed. The older `bin\OnSet.exe` is a development build, not the installed shortcut target.
 
 Workspace data defaults to `%LOCALAPPDATA%\Onset\Onset\data\workspace` (database `workspace.db`). On first start the app moves a workspace left in `%LOCALAPPDATA%\Autocue` by the earlier preparation app into that folder and renames `autocue.db` to `workspace.db`. If those files are in use, it leaves them and tries again next start. `ONSET_WORKSPACE` selects an isolated workspace for testing. Audio remains in its existing locations. Historical JSON inputs are preserved.
 
@@ -66,7 +66,7 @@ npm run build
 cargo build --locked --release -p onset-desktop
 ```
 
-`onset-desktop` finds the service through `ONSET_SERVICE_ROOT` (default: this checkout's `service/`) and its interpreter through `ONSET_PYTHON` (default: `service/.venv`, then `service/.runtime`). There is no installer for the desktop app yet; `service/scripts/package-runtime.ps1` prepares a self-contained Python runtime for that work.
+`ONSET_SERVICE_ROOT` and `ONSET_PYTHON` override service/runtime discovery. Otherwise an installed app uses the sibling `service/` and `runtime/python.exe`; a development build falls back to this checkout's `service/` and its `.venv` or `.runtime` interpreter. `scripts/package-desktop.ps1` builds the UI, prepares the self-contained runtime through `service/scripts/package-runtime.ps1`, and produces the per-user NSIS installer. Build from a clean, short-path checkout; see the current handoff for machine-specific packaging precautions.
 
 **Interface preview without the desktop app.** Run `npm run dev` in `ui/` (or the `ui-preview` entry in `.claude/launch.json`) and open `http://127.0.0.1:5173`. Without the desktop bridge, `ui/src/devMock.ts` supplies a sample library so you can review layout and styling. It never touches real data, and Vite removes it from production builds. The dev server strips the page Content-Security-Policy only while serving, because React refresh needs an inline script. `ui/dist/index.html` keeps the strict policy.
 

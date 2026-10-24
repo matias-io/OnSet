@@ -1,10 +1,12 @@
 # Windows runbook
 
-Reviewed 2026-10-19 for OnSet's preparation screens in the desktop app. See [desktop operation](DESKTOP.md) for source setup and [implementation status](IMPLEMENTATION_STATUS.md) for incomplete production gates. The September runbook is [archived separately](history/LEGACY_WINDOWS_RUNBOOK.md).
+Installed launch/update instructions reviewed 2026-10-24. See [desktop operation](DESKTOP.md) for source setup, [current installed evidence](CONTINUATION_2026-10-24.md) for build identity and preservation checks, and [implementation status](IMPLEMENTATION_STATUS.md) for incomplete production gates. The September runbook is [archived separately](history/LEGACY_WINDOWS_RUNBOOK.md).
 
 ## Start or update
 
-There is no installer for OnSet's desktop app yet. On this computer, the **OnSet** Start menu and desktop shortcuts run `bin\OnSet.exe`, a release build in the OnSet folder that uses the folder's `service\.venv` Python; build and replace it as described in [desktop operation](DESKTOP.md). Launch from the shortcut or Explorer.
+On this computer, the **OnSet** Start menu and desktop shortcuts run `%LOCALAPPDATA%\OnSet\onset-desktop.exe`. The per-user installer bundles its own `runtime\python.exe`, `service\` and `offsets\`; the installed app does not need the development checkout. The installed candidate is `abec26f`, packaged as `OnSet_0.0.1_x64-setup.exe`. Launch from the shortcut or Explorer so Windows AppData virtualization does not select a different workspace. `bin\OnSet.exe` is an older development build and is not the installed shortcut target.
+
+For a source update, use `scripts/package-desktop.ps1` from a clean, short-path checkout with the service runtime prepared. Quit the running app through **Settings → Jobs → Checkpoint jobs and quit** before replacing it. Keep a full-history export and compare it after the upgrade; the 2026-10-24 native before/after exports matched all seven tables exactly.
 
 FFmpeg must be on PATH. Deep models use the local WSL2 worker configured in Jobs & settings; the Check environment result reports missing components. CPU execution passed on generated audio; CUDA and clean-machine installation remain unverified. Keep a verified workspace backup before an update.
 

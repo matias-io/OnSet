@@ -1,8 +1,8 @@
 # OnSet preparation: implementation status
 
-The preparation side of OnSet (version 0.2.0 of the former standalone app) is an engineering candidate. Its screens now run in OnSet's Tauri desktop app; the installer results below were recorded on the former Electron build and need repeating on the Tauri app. The full requested plan is not yet fully verified for personal production. Generated fixtures establish software behavior; they do not establish musical accuracy or mixer equivalence.
+The preparation side of OnSet (version 0.2.0 of the former standalone app) is an engineering candidate. Its screens run in OnSet's Tauri desktop app. The [2026-10-24 continuation](CONTINUATION_2026-10-24.md) records installed Tauri candidate `abec26f`, its payload checks and exact workspace-preservation comparison. The older installer results below remain scoped to their dated builds. The full requested plan is not yet fully verified for personal production. Generated fixtures establish software behavior; they do not establish musical accuracy or mixer equivalence.
 
-Last reviewed 2026-10-19 against the local quality report, package manifest, post-upgrade workspace comparison and current source. Evidence is scoped to the measured machine and fixtures.
+The aggregate results below were reviewed 2026-10-19 against the then-current quality report, package manifest, workspace comparison and source. The separately scoped 2026-10-24 installed/model checks are linked above. Evidence is specific to the measured source, machine and inputs.
 
 The complete specification is [PROJECT_PLAN.md](PROJECT_PLAN.md); [PLAN_PROGRESS.md](PLAN_PROGRESS.md) maps its requirement IDs to current baselines and open work. For continuation commands, source pointers and machine-specific preservation notes, start with [the current handoff](HANDOFF.md).
 
