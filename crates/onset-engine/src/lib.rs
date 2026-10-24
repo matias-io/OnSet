@@ -49,8 +49,9 @@ const BLEND_BARS: u32 = 16;
 /// fraction; further apart, both play at their own tempo.
 const BLEND_MAX_NUDGE: f64 = 0.08;
 
-/// The ear listening to every deck with a known track (see [`deck_ear`]).
-struct Ear {
+/// The ear listening to every deck with a known track (see [`deck_ear`]), and what it was
+/// built for.
+struct Listening {
     ear: deck_ear::DeckEar,
     /// The decks and tracks it was built for, in deck order; a change rebuilds it.
     tracks: Vec<(u8, TrackRef)>,
@@ -724,7 +725,7 @@ struct Running {
     /// Writes each tick's state to a file while a recording runs.
     recorder: Option<recorder::Recorder>,
     /// Weighs every playing deck against what the room hears (live only).
-    ear: Option<Ear>,
+    ear: Option<Listening>,
     /// Waveforms loaded for the ear, by track, newest last.
     ear_bands: Vec<(TrackRef, Option<Arc<onset_core::bands::TrackBands>>)>,
     /// Seconds the captured audio trails the playhead, from the hit lock once measured.
@@ -951,7 +952,7 @@ impl Running {
         let following = self.ear.as_ref().and_then(|e| e.ear.current());
         let mut ear = deck_ear::DeckEar::new(ear_decks, self.ear_lag_s);
         ear.set_current(following.or(self.deck));
-        self.ear = Some(Ear {
+        self.ear = Some(Listening {
             ear,
             tracks,
             heads: Vec::new(),
