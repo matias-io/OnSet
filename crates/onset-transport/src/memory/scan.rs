@@ -536,7 +536,7 @@ mod tests {
         // A rate that a single timestamp got wrong now matches the audio rate exactly.
         let advance = 44_100.0 * 0.7;
         let (nominal, ratio) = matching_rate(advance, elapsed_at(0.0, first, second), 0.2).unwrap();
-        assert_eq!(nominal, 44_100.0);
+        assert!((nominal - 44_100.0).abs() < 1e-9);
         assert!((ratio - 1.0).abs() < 1e-9);
         assert!(matching_rate(advance, 0.7 - 0.3, 0.2).is_none());
     }
