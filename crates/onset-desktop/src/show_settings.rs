@@ -13,8 +13,8 @@ fn describe(config: &Config, path: &Path) -> Result<Value, String> {
         map.remove("read_only");
     }
     // What the effect sliders show: a named style's values, else the DJ's own.
-    let effective_fx = serde_json::to_value(config.preset.fx().unwrap_or(config.fx))
-        .map_err(|e| e.to_string())?;
+    let effective_fx =
+        serde_json::to_value(config.preset.fx().unwrap_or(config.fx)).map_err(|e| e.to_string())?;
     Ok(json!({
         "settings": settings,
         "effective_fx": effective_fx,
