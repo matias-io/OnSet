@@ -14,21 +14,37 @@ pub enum SourceStatus {
     Error(String),
 }
 
+/// Every deck a source can read at its last poll, beside the one `poll` chose.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LiveDecks {
+    /// One snapshot per readable deck, in deck order.
+    pub decks: Vec<TransportSnapshot>,
+    /// The MASTER deck, when the source reads it.
+    pub master: Option<u8>,
+}
+
 pub trait TransportSource: Send {
     fn name(&self) -> &'static str;
     fn status(&self) -> SourceStatus;
     /// Called at up to 120 Hz. `None` when nothing new can be reported.
     fn poll(&mut self) -> Option<TransportSnapshot>;
 
-    /// The sample rate of the track the engine believes is loaded, for sources whose
-    /// position counts in samples of the file (rekordbox). Default: ignored.
-    fn set_track_sample_rate(&mut self, _hz: Option<u32>) {}
-
-    /// The analysed tempo of the track the engine believes is loaded, for sources without
-    /// a readable tempo field. Default: ignored.
-    fn set_track_bpm(&mut self, _bpm: Option<f32>) {}
+    /// What the library knows about the track the engine believes deck `deck` holds: its
+    /// sample rate, for sources whose position counts in samples of the file (rekordbox),
+    /// and its analysed tempo, for sources without a readable tempo field. Kept per deck
+    /// until that deck takes another track. Default: ignored.
+    fn set_deck_track(&mut self, _deck: u8, _sample_rate: Option<u32>, _bpm: Option<f32>) {}
 
     /// Lengths of the library's files in seconds, for sources that learn which files are
     /// loaded but have to work out which deck holds which. Default: ignored.
     fn set_file_durations(&mut self, _table: Vec<(std::path::PathBuf, f64)>) {}
+
+    /// The library's BPM for each file, for the same purpose. Default: ignored.
+    fn set_file_bpms(&mut self, _table: Vec<(std::path::PathBuf, f32)>) {}
+
+    /// Every deck read at the last poll, for listeners that weigh them all (the engine's
+    /// deck-by-ear). Default: none, for sources that know one deck.
+    fn live_decks(&self) -> LiveDecks {
+        LiveDecks::default()
+    }
 }

@@ -1,0 +1,9 @@
+numpy==1.26.4
+scipy==1.15.3
+soundfile==0.13.1
+torch==2.6.0+cpu
+torchaudio==2.6.0+cpu
+imageio-ffmpeg==0.6.0
+edm98[inference]==0.1.0
+transformers==4.45.2
+muq @ git+https://github.com/tencent-ailab/MuQ.git@28847ea50cd31ac4b8b6a7dacc051ad7d1c7606a

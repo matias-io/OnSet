@@ -5,6 +5,32 @@ use crate::grid::BeatGrid;
 use crate::phrase::{PhraseKind, PhraseMap};
 use crate::track::HotCue;
 
+/// Whose analysis a track's phrases come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructureSource {
+    /// rekordbox's phrase analysis.
+    Rekordbox,
+    /// The structure the DJ prepared and corrected in OnSet, on rekordbox's beat grid.
+    Prepared,
+}
+
+impl StructureSource {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Rekordbox => "rekordbox",
+            Self::Prepared => "Prepared",
+        }
+    }
+
+    /// What the DJ sees: OnSet calls its preparation area Prep.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Rekordbox => "rekordbox",
+            Self::Prepared => "Prep",
+        }
+    }
+}
+
 /// Everything derivable from the playhead alone, sampled at one instant.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct StructureState {

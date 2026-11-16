@@ -23,3 +23,10 @@ fn rekordbox_7_2_19_knows_the_master_deck() {
         .expect("master flag");
     assert_eq!((flag.offset, flag.mask), (-396, 1));
 }
+
+#[test]
+fn rekordbox_7_2_19_knows_its_deck_list() {
+    let o = Offsets::for_version(&shipped(), "7.2.19").expect("7.2.19");
+    let list = o.signature.and_then(|s| s.deck_list).expect("deck list");
+    assert_eq!(list.start_offset, -420);
+}

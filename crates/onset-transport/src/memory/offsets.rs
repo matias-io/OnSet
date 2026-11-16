@@ -50,6 +50,38 @@ pub struct FlagField {
     pub mask: u8,
 }
 
+/// rekordbox's list of its decks: consecutive pointers to each deck object, in deck order.
+/// The signature finds the deck objects in address order, which after a restart need not
+/// be deck order; the list says which object is deck 1, deck 2 and so on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeckList {
+    /// Where the list's pointers point, relative to each deck's position field.
+    pub start_offset: i64,
+}
+
+/// Tempo fields inside the deck object, relative to the position field: the deck's current
+/// BPM and its pitch as a fraction (-0.0083 is -0.83 %), both f32. Together they give the
+/// loaded track's own BPM, which tells loaded files apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TempoFields {
+    pub bpm_offset: i64,
+    pub pitch_offset: i64,
+}
+
+/// rekordbox's player objects, one family apart from the decks: each holds the playhead of
+/// the deck it plays (the same value) and leads to the loaded track's content id. Found by
+/// scanning for a module pointer at a fixed distance from their position field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrackIdFields {
+    /// Module-relative value of the pointer that marks a player object.
+    pub anchor_module_offset: u64,
+    /// Where that pointer sits, relative to the player's position field.
+    pub anchor_offset: i64,
+    /// From the position field: add each hop but the last and read a pointer there, then add
+    /// the last and read the content id (u32).
+    pub chain: Vec<i64>,
+}
+
 /// Finds the deck objects by scanning memory for their anchors instead of following static
 /// chains, which change with every allocation order. Decks are numbered by address.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,6 +93,15 @@ pub struct DeckSignature {
     /// Set on the deck that is MASTER, when known.
     #[serde(default)]
     pub master_flag: Option<FlagField>,
+    /// The deck's tempo, when known.
+    #[serde(default)]
+    pub tempo: Option<TempoFields>,
+    /// Where rekordbox lists its decks in order, when known.
+    #[serde(default)]
+    pub deck_list: Option<DeckList>,
+    /// Where the loaded track's content id is found, when known.
+    #[serde(default)]
+    pub track_id: Option<TrackIdFields>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -7,11 +7,12 @@ use onset_transport::memory::chain::Chain;
 use std::path::{Path, PathBuf};
 
 use onset_transport::memory::offsets::{
-    Anchor, DeckChains, DeckSignature, FlagField, Offsets, PositionFormat,
+    Anchor, DeckChains, DeckSignature, FlagField, Offsets, PositionFormat, TempoFields,
+    TrackIdFields,
 };
 use onset_transport::memory::reader::{
-    ChainReader, DeckChooser, DeckFiles, FakeMem, PlayTracker, decks_from_hits, parse_track_info,
-    signature_matches,
+    ChainReader, DeckChooser, DeckFiles, FakeMem, PlayTracker, deck_order_from_hits,
+    decks_from_hits, order_decks, parse_track_info, signature_matches, track_bpm_from,
 };
 
 const BASE: u64 = 0x1000_0000;
@@ -181,6 +182,14 @@ fn play_tracker_needs_movement_to_call_it_playing() {
         "a single equal read within the grace period is still playing"
     );
     assert!(
+        tracker.is_playing(t0 + Duration::from_millis(100)),
+        "is_playing agrees with the last update"
+    );
+    assert!(
+        !tracker.is_playing(t0 + Duration::from_millis(600)),
+        "is_playing needs no new read to see the deck stop"
+    );
+    assert!(
         !tracker.update(10.05, t0 + Duration::from_millis(600)),
         "no movement for half a second: paused"
     );
@@ -224,39 +233,109 @@ fn offsets_work_without_a_master_chain() {
 
 #[test]
 fn deck_chooser_follows_the_master_while_it_plays() {
+    let t0 = Instant::now();
+    let at = |s: f64| t0 + Duration::from_secs_f64(s);
     let mut chooser = DeckChooser::default();
-    assert_eq!(chooser.choose(Some(1), &[Some(true), Some(true)]), Some(1));
-    // The master sits idle while the other deck plays: the playing deck is the show.
-    assert_eq!(chooser.choose(Some(1), &[Some(true), Some(false)]), Some(0));
+    assert_eq!(
+        chooser.choose(at(0.0), Some(1), &[Some(true), Some(true)]),
+        Some(1)
+    );
+    // The master stops while the other deck plays: the playing deck is the show, once
+    // the master has stood still for longer than a stall.
+    assert_eq!(
+        chooser.choose(at(1.0), Some(1), &[Some(true), Some(false)]),
+        Some(1)
+    );
+    assert_eq!(
+        chooser.choose(at(2.0), Some(1), &[Some(true), Some(false)]),
+        Some(0)
+    );
     // Nothing plays: back to the master.
     assert_eq!(
-        chooser.choose(Some(1), &[Some(false), Some(false)]),
+        chooser.choose(at(3.0), Some(1), &[Some(false), Some(false)]),
         Some(1)
     );
 }
 
 #[test]
 fn deck_chooser_sticks_to_the_playing_deck_through_a_transition() {
+    let t0 = Instant::now();
+    let at = |s: f64| t0 + Duration::from_secs_f64(s);
     let mut chooser = DeckChooser::default();
-    assert_eq!(chooser.choose(None, &[Some(true), Some(false)]), Some(0));
     assert_eq!(
-        chooser.choose(None, &[Some(true), Some(true)]),
+        chooser.choose(at(0.0), None, &[Some(true), Some(false)]),
+        Some(0)
+    );
+    assert_eq!(
+        chooser.choose(at(1.0), None, &[Some(true), Some(true)]),
         Some(0),
         "both play: no switch until the first deck stops"
     );
-    assert_eq!(chooser.choose(None, &[Some(false), Some(true)]), Some(1));
     assert_eq!(
-        chooser.choose(None, &[Some(false), Some(false)]),
+        chooser.choose(at(2.0), None, &[Some(false), Some(true)]),
+        Some(0),
+        "a stop shorter than the hold may be a stall"
+    );
+    assert_eq!(
+        chooser.choose(at(2.6), None, &[Some(false), Some(true)]),
+        Some(1)
+    );
+    assert_eq!(
+        chooser.choose(at(3.0), None, &[Some(false), Some(false)]),
         Some(1),
         "nothing plays: keep showing the last deck"
     );
 }
 
+/// On 2026-10-22 Abyss, playing as MASTER, read as stopped for 0.37 s while Adagio For
+/// Strings played on the other deck; the show moved to Adagio and never came back.
+#[test]
+fn deck_chooser_rides_out_a_short_stall() {
+    let t0 = Instant::now();
+    let at = |s: f64| t0 + Duration::from_secs_f64(s);
+    let mut chooser = DeckChooser::default();
+    assert_eq!(
+        chooser.choose(at(0.0), None, &[Some(true), Some(true)]),
+        Some(0)
+    );
+    assert_eq!(
+        chooser.choose(at(10.0), None, &[Some(true), Some(true)]),
+        Some(0)
+    );
+    assert_eq!(
+        chooser.choose(at(10.1), None, &[Some(false), Some(true)]),
+        Some(0)
+    );
+    assert_eq!(
+        chooser.choose(at(10.4), None, &[Some(false), Some(true)]),
+        Some(0)
+    );
+    assert_eq!(
+        chooser.choose(at(10.5), None, &[Some(true), Some(true)]),
+        Some(0)
+    );
+    // The same with MASTER on the stalling deck.
+    let mut chooser = DeckChooser::default();
+    assert_eq!(
+        chooser.choose(at(0.0), Some(1), &[Some(true), Some(true)]),
+        Some(1)
+    );
+    assert_eq!(
+        chooser.choose(at(0.3), Some(1), &[Some(true), Some(false)]),
+        Some(1)
+    );
+    assert_eq!(
+        chooser.choose(at(0.6), Some(1), &[Some(true), Some(true)]),
+        Some(1)
+    );
+}
+
 #[test]
 fn deck_chooser_falls_back_to_a_loaded_deck() {
+    let now = Instant::now();
     let mut chooser = DeckChooser::default();
-    assert_eq!(chooser.choose(None, &[None, Some(false)]), Some(1));
-    assert_eq!(chooser.choose(None, &[None, None]), None);
+    assert_eq!(chooser.choose(now, None, &[None, Some(false)]), Some(1));
+    assert_eq!(chooser.choose(now, None, &[None, None]), None);
 }
 
 /// Two deck objects laid out the way rekordbox 7.2 does: module pointers at fixed
@@ -279,6 +358,9 @@ fn signature_rekordbox() -> (FakeMem, DeckSignature) {
             offset: -0x328,
             mask: 0x80,
         }),
+        tempo: None,
+        deck_list: None,
+        track_id: None,
     };
     for (pos, samples) in [(0x9000u64, 44_100i32), (0x7000, 88_200)] {
         mem.put_u64(pos - 0x20, BASE + 0x1046);
@@ -344,6 +426,33 @@ fn reader_reads_signature_decks_without_chains() {
     );
 }
 
+/// On 2026-10-23, after rekordbox restarted, its decks 1 to 4 sat at deck objects 4, 1, 3
+/// and 2 by address, and a list of pointers to the objects' starts held them in that order.
+#[test]
+fn rekordbox_lists_its_decks_in_order() {
+    // Pointers to objects 4, 1, 3, 2 in consecutive slots; stray single pointers elsewhere.
+    let list = 0x8000u64;
+    let mut hits: Vec<Vec<u64>> = vec![vec![0x100], vec![], vec![], vec![], vec![]];
+    for (slot, obj) in [4usize, 1, 3, 2].iter().enumerate() {
+        hits[*obj].push(list + 8 * slot as u64);
+    }
+    hits[1].push(0x200);
+    assert_eq!(deck_order_from_hits(&hits), Some(vec![4, 1, 3, 2]));
+    let found = [0x10, 0x20, 0x30, 0x40, 0x50];
+    assert_eq!(
+        order_decks(&found, &[4, 1, 3, 2]),
+        vec![0x50, 0x20, 0x40, 0x30, 0x10],
+        "the unlisted object (a player) comes last"
+    );
+    // No run of two different decks: no order.
+    assert_eq!(deck_order_from_hits(&[vec![0x100], vec![0x200]]), None);
+    // Two different lists of the same length: ambiguous.
+    assert_eq!(
+        deck_order_from_hits(&[vec![0x100, 0x308], vec![0x108, 0x300]]),
+        None
+    );
+}
+
 fn p(s: &str) -> PathBuf {
     PathBuf::from(s)
 }
@@ -385,6 +494,165 @@ fn deck_files_uses_lengths_when_both_decks_are_free() {
         )
         .to_vec();
     assert_eq!(got, vec![Some(p("long.flac")), Some(p("short.flac"))]);
+}
+
+#[test]
+fn deck_files_skips_open_files_whose_bpm_no_deck_plays() {
+    // rekordbox 7.2.19 kept two tracks from an earlier session open with no deck holding
+    // them; both decks are long into tracks every file is long enough for.
+    let mut files = DeckFiles::default();
+    let open = [
+        p("push it.mp3"),
+        p("diamonds.mp3"),
+        p("miami.mp3"),
+        p("lady.mp3"),
+    ];
+    let duration = |_: &Path| Some(400.0);
+    let bpm = |path: &Path| match path.to_str() {
+        Some("push it.mp3") => Some(129.0),
+        Some("diamonds.mp3") => Some(150.0),
+        Some("miami.mp3") => Some(125.0),
+        Some("lady.mp3") => Some(126.02),
+        _ => None,
+    };
+    // Deck 1 plays Miami at 0 %; deck 2 holds Lady synced down to 125.00 (-0.83 %); decks 3
+    // and 4 are empty and read no tempo.
+    let bpms = [
+        track_bpm_from(125.0, 0.0),
+        track_bpm_from(125.0, -0.008_33),
+        track_bpm_from(0.0, 0.0),
+        None,
+    ];
+    let got = files
+        .update_with_tempo(
+            &open,
+            &[Some(242.0), Some(0.2), Some(0.0), Some(0.0)],
+            &duration,
+            &bpms,
+            &bpm,
+        )
+        .to_vec();
+    assert_eq!(
+        got,
+        vec![Some(p("miami.mp3")), Some(p("lady.mp3")), None, None],
+        "the stale files stay unassigned"
+    );
+    // Without tempo the first open file goes to the one deck that has moved: the wrong
+    // title OnSet Live showed before.
+    let mut blind = DeckFiles::default();
+    assert_eq!(
+        blind
+            .update(
+                &open,
+                &[Some(242.0), Some(0.2), Some(0.0), Some(0.0)],
+                &duration
+            )
+            .first()
+            .cloned()
+            .flatten(),
+        Some(p("push it.mp3"))
+    );
+}
+
+#[test]
+fn track_bpm_needs_a_plausible_tempo_and_pitch() {
+    let lady = track_bpm_from(125.0, -0.008_33).unwrap();
+    assert!((lady - 126.05).abs() < 0.01, "{lady}");
+    assert_eq!(track_bpm_from(0.0, 0.0), None, "an empty deck");
+    assert_eq!(track_bpm_from(125.0, f32::NAN), None);
+    assert_eq!(track_bpm_from(1.0e20, 0.0), None, "noise");
+}
+
+#[test]
+fn reader_reads_the_track_bpm_beside_the_position() {
+    let (mut mem, mut sig) = signature_rekordbox();
+    sig.tempo = Some(TempoFields {
+        bpm_offset: -4,
+        pitch_offset: 4,
+    });
+    mem.put_bytes(0x9000 - 4, &125.0f32.to_le_bytes());
+    mem.put_bytes(0x9000 + 4, &(-0.008f32).to_le_bytes());
+    let offsets = Offsets {
+        rekordbox_version: "7.2.19".into(),
+        platform: "windows".into(),
+        position_format: PositionFormat::I32,
+        position_rate_hz: 44_100.0,
+        master_deck: None,
+        decks: Vec::new(),
+        signature: Some(sig),
+        provenance: None,
+    };
+    assert_eq!(
+        Offsets::from_toml(&offsets.to_toml().unwrap()).unwrap(),
+        offsets
+    );
+    let mut reader = ChainReader::new(mem, offsets);
+    reader.adopt_hits(&[0x9000 - 0x20, 0x7000 - 0x20]);
+    let with_tempo = reader.deck(1).expect("deck at 0x9000");
+    let bpm = with_tempo.track_bpm.expect("tempo read");
+    assert!((bpm - 126.0).abs() < 0.01, "{bpm}");
+    assert_eq!(reader.deck(0).expect("deck at 0x7000").track_bpm, None);
+}
+
+/// The two-deck fake with player objects as rekordbox 7.2.19 lays them out: a marker
+/// pointer 200 bytes below the position, and the content id at `[[pos - 0x78] + 0x38] + 0x110`.
+fn with_players(players: &[(u64, i32, u32)]) -> ChainReader<FakeMem> {
+    let (mut mem, mut sig) = signature_rekordbox();
+    sig.track_id = Some(TrackIdFields {
+        anchor_module_offset: 0x5000,
+        anchor_offset: -200,
+        chain: vec![-0x78, 0x38, 0x110],
+    });
+    for (n, (pos, samples, id)) in players.iter().enumerate() {
+        let a = 0x20_0000 + n as u64 * 0x1000;
+        let b = a + 0x800;
+        mem.put_u64(pos - 200, BASE + 0x5000);
+        mem.put_bytes(*pos, &samples.to_le_bytes());
+        mem.put_u64(pos - 0x78, a);
+        mem.put_u64(a + 0x38, b);
+        mem.put_bytes(b + 0x110, &id.to_le_bytes());
+    }
+    let offsets = Offsets {
+        rekordbox_version: "7.2.19".into(),
+        platform: "windows".into(),
+        position_format: PositionFormat::I32,
+        position_rate_hz: 44_100.0,
+        master_deck: None,
+        decks: Vec::new(),
+        signature: Some(sig),
+        provenance: None,
+    };
+    assert_eq!(
+        Offsets::from_toml(&offsets.to_toml().unwrap()).unwrap(),
+        offsets
+    );
+    let mut reader = ChainReader::new(mem, offsets);
+    reader.adopt_hits(&[0x9000 - 0x20, 0x7000 - 0x20]);
+    let hits: Vec<u64> = players.iter().map(|(pos, _, _)| pos - 200).collect();
+    assert_eq!(reader.adopt_player_hits(&hits), players.len());
+    reader
+}
+
+#[test]
+fn the_player_at_a_decks_playhead_names_its_track() {
+    // Deck 0 (0x7000) is at 2 s, deck 1 (0x9000) at 1 s. One player per deck, plus a stale
+    // copy of deck 0's player and an unloaded one at zero.
+    let reader = with_players(&[
+        (0x30_0000, 88_200, 157_452_017),
+        (0x31_0000, 88_200, 157_452_017),
+        (0x32_0000, 44_100, 195_752_842),
+        (0x33_0000, 0, 68_956_487),
+    ]);
+    assert_eq!(reader.track_id(0), Some(157_452_017));
+    assert_eq!(reader.track_id(1), Some(195_752_842));
+}
+
+#[test]
+fn players_that_disagree_or_sit_elsewhere_name_nothing() {
+    let disagree = with_players(&[(0x30_0000, 88_200, 1), (0x31_0000, 88_200, 2)]);
+    assert_eq!(disagree.track_id(0), None, "two tracks at one playhead");
+    let elsewhere = with_players(&[(0x30_0000, 300_000, 1)]);
+    assert_eq!(elsewhere.track_id(0), None, "no player at the playhead");
 }
 
 #[test]

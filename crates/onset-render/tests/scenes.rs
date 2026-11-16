@@ -152,6 +152,36 @@ fn broken_builtin_shader_is_replaced_by_the_embedded_copy_and_reported() {
 }
 
 #[test]
+fn a_scene_on_disk_compiles_against_the_common_on_disk() {
+    // A helper that only the on-disk prelude defines: an older binary (whose embedded
+    // prelude lacks it) must still load the scene from disk, not fall back and report it.
+    let h = Headless::new(SIZE, true).expect("adapter");
+    let b = FrameBindings::new(&h.gpu);
+    let dir = tempfile::tempdir().unwrap();
+    copy_shaders_to(dir.path());
+    let common = std::fs::read_to_string(dir.path().join("common.wgsl")).unwrap();
+    std::fs::write(
+        dir.path().join("common.wgsl"),
+        format!(
+            "{common}\nfn only_on_disk() -> vec3<f32> {{ return vec3<f32>(1.0, 0.5, 0.0); }}\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("ring.wgsl"),
+        "@fragment\nfn fs_main(in: VsOut) -> @location(0) vec4<f32> { return vec4<f32>(only_on_disk(), 1.0); }\n",
+    )
+    .unwrap();
+    let loaded = builtin_scenes(&h.gpu, h.format, &b.layout, dir.path());
+    assert_eq!(loaded.scenes.len(), BUILTIN_SCENE_NAMES.len());
+    assert!(
+        loaded.errors.is_empty(),
+        "the disk prelude must be used for disk scenes: {:?}",
+        loaded.errors
+    );
+}
+
+#[test]
 fn missing_shader_files_fall_back_to_embedded_sources() {
     let h = Headless::new(SIZE, true).expect("adapter");
     let b = FrameBindings::new(&h.gpu);

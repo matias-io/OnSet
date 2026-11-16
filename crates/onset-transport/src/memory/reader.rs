@@ -9,6 +9,7 @@ use onset_core::transport::{TrackRef, TransportSnapshot};
 use std::path::{Path, PathBuf};
 
 use super::chain::Chain;
+use super::deck_track::DeckTrack;
 use super::offsets::{DeckSignature, Offsets, PositionFormat};
 
 /// Longest text block read for track info and paths.
@@ -129,17 +130,83 @@ pub struct DeckState {
     pub position_raw: f64,
     pub track_info: Option<String>,
     pub anlz_path: Option<String>,
+    /// The loaded track's own BPM (the deck's tempo without its pitch), when the offsets
+    /// know the tempo fields and they read as a plausible tempo.
+    pub track_bpm: Option<f32>,
+    /// The deck's pitch as a fraction, read with `track_bpm`.
+    pub pitch: Option<f32>,
+}
+
+/// A track's own BPM from a deck's tempo and pitch (a fraction), when both are plausible:
+/// unloaded decks read zero, and other layouts read noise.
+pub fn track_bpm_from(bpm: f32, pitch: f32) -> Option<f32> {
+    let plausible =
+        bpm.is_finite() && pitch.is_finite() && (40.0..=300.0).contains(&bpm) && pitch.abs() < 1.0;
+    plausible.then(|| bpm / (1.0 + pitch))
 }
 
 pub struct ChainReader<M: Mem> {
     mem: M,
     offsets: Offsets,
-    /// Sample rate of the loaded track, used when the offsets count file samples.
-    track_rate_hz: Option<f64>,
-    /// Analysed tempo of the loaded track, for decks without a readable tempo field.
-    track_bpm: Option<f32>,
+    /// What is known of each deck's track beyond its playhead, by deck index.
+    tracks: Vec<DeckTrack>,
     /// Position field addresses found through the signature, in deck order.
     found: Vec<u64>,
+    /// Position fields of the player objects (see `TrackIdFields`).
+    players: Vec<u64>,
+}
+
+/// The deck order from rekordbox's deck list. `hits[i]` holds the addresses where a
+/// pointer to deck object `i` was seen. The longest run of consecutive 8-byte slots that
+/// point at two or more different objects is the list; it gives the objects in deck order
+/// (first appearance). `None` when no run exists or two runs of the best length disagree.
+pub fn deck_order_from_hits(hits: &[Vec<u64>]) -> Option<Vec<usize>> {
+    let mut slots: Vec<(u64, usize)> = hits
+        .iter()
+        .enumerate()
+        .flat_map(|(i, addrs)| addrs.iter().map(move |a| (*a, i)))
+        .collect();
+    slots.sort_unstable();
+    slots.dedup();
+    let mut best: Vec<Vec<usize>> = Vec::new();
+    let mut i = 0;
+    while i < slots.len() {
+        let mut j = i;
+        while j + 1 < slots.len() && slots[j + 1].0 == slots[j].0 + 8 {
+            j += 1;
+        }
+        let mut order: Vec<usize> = Vec::new();
+        for (_, obj) in &slots[i..=j] {
+            if !order.contains(obj) {
+                order.push(*obj);
+            }
+        }
+        if order.len() >= 2 {
+            match best.first().map(Vec::len) {
+                Some(n) if order.len() < n => {}
+                Some(n) if order.len() == n => best.push(order),
+                _ => best = vec![order],
+            }
+        }
+        i = j + 1;
+    }
+    best.dedup();
+    (best.len() == 1).then(|| best.remove(0))
+}
+
+/// `found` reordered so the objects in `order` come first, in that order, then the rest
+/// in their original (address) order.
+pub fn order_decks(found: &[u64], order: &[usize]) -> Vec<u64> {
+    let mut out: Vec<u64> = order
+        .iter()
+        .filter_map(|i| found.get(*i).copied())
+        .collect();
+    for (i, pos) in found.iter().enumerate() {
+        if !order.contains(&i) {
+            out.push(*pos);
+        }
+    }
+    out
 }
 
 /// True when every anchor of `sig` reads as expected around a position field at `pos`.
@@ -174,9 +241,9 @@ impl<M: Mem> ChainReader<M> {
         Self {
             mem,
             offsets,
-            track_rate_hz: None,
-            track_bpm: None,
+            tracks: Vec::new(),
             found: Vec::new(),
+            players: Vec::new(),
         }
     }
 
@@ -185,9 +252,119 @@ impl<M: Mem> ChainReader<M> {
         &self.found
     }
 
-    /// Records the position fields a signature scan found, in deck order.
+    /// Records the position fields a signature scan found, in deck order. A different set
+    /// of decks (rekordbox rebuilt them) forgets what was known of their tracks: the
+    /// indices no longer mean the same decks.
     pub fn set_found_decks(&mut self, positions: Vec<u64>) {
+        if positions != self.found {
+            self.tracks.clear();
+        }
         self.found = positions;
+    }
+
+    /// The values rekordbox's deck list holds for the found decks (what each pointer in it
+    /// reads), when the offsets know the list: scan for these, then `adopt_deck_list`.
+    pub fn deck_list_values(&self) -> Option<Vec<u64>> {
+        let list = self.offsets.signature.as_ref()?.deck_list?;
+        self.found
+            .iter()
+            .map(|pos| pos.checked_add_signed(list.start_offset))
+            .collect()
+    }
+
+    /// Puts the found decks in rekordbox's deck order, from where pointers to each were
+    /// seen (`hits[i]` for found deck `i`). Returns the order applied, as indices into the
+    /// decks as found, or `None` when no deck list was recognised (the order stays).
+    pub fn adopt_deck_list(&mut self, hits: &[Vec<u64>]) -> Option<Vec<usize>> {
+        let order = deck_order_from_hits(hits)?;
+        let ordered = order_decks(&self.found, &order);
+        self.set_found_decks(ordered);
+        Some(order)
+    }
+
+    /// The bytes that mark a player object, when the offsets know them.
+    pub fn player_needle(&self) -> Option<[u8; 8]> {
+        let ids = self.offsets.signature.as_ref()?.track_id.as_ref()?;
+        Some(
+            self.mem
+                .module_base()
+                .wrapping_add(ids.anchor_module_offset)
+                .to_le_bytes(),
+        )
+    }
+
+    /// Records the player objects found from hits of `player_needle`.
+    pub fn adopt_player_hits(&mut self, hits: &[u64]) -> usize {
+        let Some(ids) = self
+            .offsets
+            .signature
+            .as_ref()
+            .and_then(|s| s.track_id.as_ref())
+        else {
+            return 0;
+        };
+        let mut players: Vec<u64> = hits
+            .iter()
+            .filter_map(|h| h.checked_add_signed(-ids.anchor_offset))
+            .collect();
+        players.sort_unstable();
+        players.dedup();
+        self.players = players;
+        self.players.len()
+    }
+
+    pub fn player_positions(&self) -> &[u64] {
+        &self.players
+    }
+
+    pub fn set_players(&mut self, players: Vec<u64>) {
+        self.players = players;
+    }
+
+    /// The content id of the track on deck `index`: the id every player object at the deck's
+    /// playhead leads to. `None` when no player is there, the deck sits at the start (where
+    /// unloaded players also read zero), or the players disagree.
+    pub fn track_id(&self, index: usize) -> Option<u32> {
+        let ids = self.offsets.signature.as_ref()?.track_id.as_ref()?;
+        let rate = self.position_rate(index);
+        let deck = self.read_position(*self.found.get(index)?)?;
+        if deck < PLAYER_MIN_S * rate {
+            return None;
+        }
+        let mut seen: Option<u32> = None;
+        for player in &self.players {
+            let Some(at) = self.read_position(*player) else {
+                continue;
+            };
+            if (at - deck).abs() > PLAYER_MATCH_S * rate {
+                continue;
+            }
+            let Some(id) = self.follow_id(*player, &ids.chain) else {
+                continue;
+            };
+            match seen {
+                Some(other) if other != id => return None,
+                _ => seen = Some(id),
+            }
+        }
+        seen
+    }
+
+    fn follow_id(&self, pos: u64, chain: &[i64]) -> Option<u32> {
+        let (last, hops) = chain.split_last()?;
+        let mut addr = pos;
+        for hop in hops {
+            addr = self.mem.read_u64(addr.checked_add_signed(*hop)?).ok()?;
+            if addr == 0 {
+                return None;
+            }
+        }
+        let mut b = [0u8; 4];
+        self.mem
+            .read_exact(addr.checked_add_signed(*last)?, &mut b)
+            .ok()?;
+        let id = u32::from_le_bytes(b);
+        (id != 0).then_some(id)
     }
 
     /// Decks readable right now: the found ones with a signature, else the chained ones.
@@ -241,25 +418,74 @@ impl<M: Mem> ChainReader<M> {
             .any(|pos| !signature_matches(&self.mem, sig, *pos))
     }
 
-    pub fn set_track_sample_rate(&mut self, hz: Option<u32>) {
-        self.track_rate_hz = hz.map(f64::from);
+    /// The library's sample rate and BPM for the track on deck `index`, as the engine
+    /// resolved it. They stay with the deck until it takes another track.
+    pub fn set_deck_track(&mut self, index: usize, sample_rate: Option<u32>, bpm: Option<f32>) {
+        let track = self.track_mut(index);
+        track.sample_rate = sample_rate.map(f64::from);
+        track.bpm = bpm;
     }
 
-    pub fn set_track_bpm(&mut self, bpm: Option<f32>) {
-        self.track_bpm = bpm;
+    /// The library's BPM for the track on deck `index`, when the engine sent it.
+    pub fn track_bpm(&self, index: usize) -> Option<f32> {
+        self.tracks.get(index).and_then(|t| t.bpm)
     }
 
-    pub fn track_bpm(&self) -> Option<f32> {
-        self.track_bpm
+    /// The content id the track on deck `index` is known by: the last one read for it, kept
+    /// while the deck plays on (rekordbox's players, where the id is read, exist only while
+    /// a deck plays).
+    pub fn known_track_id(&self, index: usize) -> Option<u32> {
+        self.tracks.get(index).and_then(|t| t.identity.id())
     }
 
-    /// Units per second for the position: the offsets' fixed rate, else the track's.
-    fn position_rate(&self) -> f64 {
-        if self.offsets.position_rate_hz > 0.0 {
-            self.offsets.position_rate_hz
-        } else {
-            self.track_rate_hz.unwrap_or(44_100.0)
+    /// Takes in this poll's evidence about deck `index`: its state as read, whether it is
+    /// playing and the open file paired with it. Reads the content id, notices a change of
+    /// track (which forgets the old track's rate and BPM) and measures the rate the position
+    /// counts at. Returns the content id the deck is known by.
+    pub fn observe_deck(
+        &mut self,
+        index: usize,
+        state: &DeckState,
+        playing: bool,
+        file: Option<&Path>,
+        now: Instant,
+    ) -> Option<u32> {
+        let read = self.track_id(index);
+        let track = self.track_mut(index);
+        let (id, change) = track.identity.update(read, state.track_bpm, file);
+        if let Some(change) = change {
+            tracing::info!(deck = index, ?id, ?change, "deck took another track");
+            track.new_track(change, state.track_bpm);
         }
+        track
+            .probe
+            .update(state.position_raw, state.pitch, playing, now);
+        id
+    }
+
+    /// The rate deck `index`'s position counts at, when known: the library's sample rate
+    /// for its track, else the measured one.
+    pub fn deck_rate_hz(&self, index: usize) -> Option<f64> {
+        self.tracks.get(index).and_then(DeckTrack::rate_hz)
+    }
+
+    fn track_mut(&mut self, index: usize) -> &mut DeckTrack {
+        if self.tracks.len() <= index {
+            self.tracks.resize_with(index + 1, DeckTrack::default);
+        }
+        &mut self.tracks[index]
+    }
+
+    /// Units per second for deck `index`'s position: the offsets' fixed rate, else what is
+    /// known of the deck's track (the library's rate, else the measured one), else CD rate.
+    fn position_rate(&self, index: usize) -> f64 {
+        if self.offsets.position_rate_hz > 0.0 {
+            return self.offsets.position_rate_hz;
+        }
+        self.tracks
+            .get(index)
+            .and_then(DeckTrack::rate_hz)
+            .unwrap_or(44_100.0)
     }
 
     pub fn offsets(&self) -> &Offsets {
@@ -313,12 +539,15 @@ impl<M: Mem> ChainReader<M> {
         if self.offsets.signature.is_some() {
             let pos_addr = *self.found.get(index)?;
             let raw = self.read_position(pos_addr)?;
+            let tempo = self.tempo_at(pos_addr);
             return Some(DeckState {
                 bpm: 0.0,
-                position_s: raw / self.position_rate(),
+                position_s: raw / self.position_rate(index),
                 position_raw: raw,
                 track_info: None,
                 anlz_path: None,
+                track_bpm: tempo.and_then(|(bpm, pitch)| track_bpm_from(bpm, pitch)),
+                pitch: tempo.map(|(_, pitch)| pitch),
             });
         }
         let d = self.offsets.decks.get(index)?;
@@ -337,10 +566,12 @@ impl<M: Mem> ChainReader<M> {
         }
         Some(DeckState {
             bpm,
-            position_s: raw / self.position_rate(),
+            position_s: raw / self.position_rate(index),
             position_raw: raw,
             track_info: d.track_info.as_ref().and_then(|c| self.read_text(c)),
             anlz_path: d.anlz_path.as_ref().and_then(|c| self.read_text(c)),
+            track_bpm: None,
+            pitch: None,
         })
     }
 }
@@ -354,6 +585,21 @@ impl<M: Mem> ChainReader<M> {
             PositionFormat::F64 => self.mem.read_f64(addr).ok()?,
         };
         raw.is_finite().then_some(raw)
+    }
+
+    /// The deck's tempo and pitch (a fraction) from the fields beside the position at
+    /// `pos`, as read: see `track_bpm_from` for whether they are plausible.
+    fn tempo_at(&self, pos: u64) -> Option<(f32, f32)> {
+        let tempo = self.offsets.signature.as_ref()?.tempo?;
+        let bpm = self
+            .mem
+            .read_f32(pos.checked_add_signed(tempo.bpm_offset)?)
+            .ok()?;
+        let pitch = self
+            .mem
+            .read_f32(pos.checked_add_signed(tempo.pitch_offset)?)
+            .ok()?;
+        Some((bpm, pitch))
     }
 }
 
@@ -381,6 +627,17 @@ pub fn parse_track_info(text: &str) -> TrackRef {
     }
 }
 
+/// A player object at a deck's playhead plays that deck: both hold the same position, read
+/// microseconds apart, so they agree to well within this many seconds.
+const PLAYER_MATCH_S: f64 = 0.25;
+/// Below this many seconds every unloaded player reads alike, so no match is trusted.
+const PLAYER_MIN_S: f64 = 0.5;
+
+/// How far a deck's track BPM may sit from the library's and still be the same track, as a
+/// fraction: rekordbox shows the tempo to two decimals and keeps the pitch apart (Lady Hear
+/// Me Tonight, 126.02 in the library, reads 125.00 at -0.83 %, which gives 126.05).
+const BPM_TOLERANCE: f32 = 0.005;
+
 /// Which deck holds which open audio file. rekordbox keeps a track's file open while it is
 /// loaded, so the open files name the loaded tracks; this pairs them with decks. A file
 /// that appears while one deck is free goes to that deck; with several free decks, a deck
@@ -401,6 +658,26 @@ impl DeckFiles {
         positions: &[Option<f64>],
         duration_of: &dyn Fn(&Path) -> Option<f64>,
     ) -> &[Option<PathBuf>] {
+        self.update_with_tempo(open, positions, duration_of, &[], &|_| None)
+    }
+
+    /// As `update`, also told each deck's track BPM (`bpms[i]`, see `DeckState::track_bpm`)
+    /// and each file's BPM from the library. A deck whose BPM is known holds only a file of
+    /// that BPM, so files rekordbox keeps open without a deck (it does, for tracks loaded in
+    /// an earlier session) stop competing for the decks.
+    pub fn update_with_tempo(
+        &mut self,
+        open: &[PathBuf],
+        positions: &[Option<f64>],
+        duration_of: &dyn Fn(&Path) -> Option<f64>,
+        bpms: &[Option<f32>],
+        bpm_of: &dyn Fn(&Path) -> Option<f32>,
+    ) -> &[Option<PathBuf>] {
+        let bpm_fits = |deck: usize, file: &Path| -> Option<bool> {
+            let deck_bpm = (*bpms.get(deck)?)?;
+            let file_bpm = bpm_of(file)?;
+            Some((deck_bpm - file_bpm).abs() <= file_bpm * BPM_TOLERANCE)
+        };
         self.assigned.resize(positions.len(), None);
         for slot in &mut self.assigned {
             if slot.as_ref().is_some_and(|f| !open.contains(f)) {
@@ -426,7 +703,10 @@ impl DeckFiles {
             if new_files.is_empty() || free.is_empty() {
                 break;
             }
-            if new_files.len() == 1 && free.len() == 1 {
+            if new_files.len() == 1
+                && free.len() == 1
+                && bpm_fits(free[0], new_files[0]) != Some(false)
+            {
                 self.assigned[free[0]] = Some(new_files[0].clone());
                 continue;
             }
@@ -440,6 +720,13 @@ impl DeckFiles {
                         (Some(p), Some(d)) => p <= d + 1.0,
                         _ => true,
                     })
+                    .filter(|i| bpm_fits(*i, file) != Some(false))
+                    .collect();
+                // A deck whose BPM matches the file's is the strongest evidence there is.
+                let matched: Vec<usize> = fits
+                    .iter()
+                    .copied()
+                    .filter(|i| bpm_fits(*i, file) == Some(true))
                     .collect();
                 // Several decks could hold it: an unloaded deck reads zero, so a lone deck
                 // that has moved off zero is the one with a track.
@@ -448,8 +735,8 @@ impl DeckFiles {
                     .copied()
                     .filter(|i| positions[*i].is_some_and(|p| p > 0.5))
                     .collect();
-                let pick = match (fits.as_slice(), moved.as_slice()) {
-                    ([one], _) | (_, [one]) => Some(*one),
+                let pick = match (fits.as_slice(), matched.as_slice(), moved.as_slice()) {
+                    ([one], _, _) | (_, [one], _) | (_, [], [one]) => Some(*one),
                     _ => None,
                 };
                 if let Some(i) = pick {
@@ -515,29 +802,55 @@ impl DeckFiles {
 /// Which deck the show follows when more than one is loaded. The master deck wins while it
 /// plays; otherwise the deck that is playing, and during a transition (both playing) the
 /// one already being followed, so the visuals switch when the outgoing deck stops rather
-/// than the moment the incoming one starts.
+/// than the moment the incoming one starts. A followed deck that stops for less than
+/// [`DeckChooser::HOLD`] keeps the show: rekordbox's position sometimes stands still for a
+/// few hundred milliseconds while a deck plays, and that read as a stop.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DeckChooser {
     current: Option<usize>,
+    /// When the followed deck was last seen playing.
+    current_played_at: Option<Instant>,
 }
 
 impl DeckChooser {
+    /// How long the followed deck may stand still before another playing deck takes the
+    /// show. On 2026-10-22 a playing deck read as stopped for 0.37 s, and the show moved to
+    /// the other deck and stayed there.
+    pub const HOLD: Duration = Duration::from_millis(1500);
+
     /// `decks[i]` is `None` for a deck without a readable track, else whether it plays.
-    pub fn choose(&mut self, master: Option<usize>, decks: &[Option<bool>]) -> Option<usize> {
+    pub fn choose(
+        &mut self,
+        now: Instant,
+        master: Option<usize>,
+        decks: &[Option<bool>],
+    ) -> Option<usize> {
         let loaded = |i: usize| decks.get(i).is_some_and(Option::is_some);
         let playing = |i: usize| decks.get(i).copied().flatten().unwrap_or(false);
         let any_playing = decks.contains(&Some(true));
         let master = master.filter(|m| loaded(*m));
+        let held = |c: usize| {
+            loaded(c)
+                && self
+                    .current_played_at
+                    .is_some_and(|t| now.duration_since(t) < Self::HOLD)
+        };
         let pick = match master {
             Some(m) if playing(m) || !any_playing => Some(m),
             _ => self
                 .current
-                .filter(|c| playing(*c))
+                .filter(|c| playing(*c) || held(*c))
                 .or_else(|| (0..decks.len()).find(|i| playing(*i)))
                 .or_else(|| self.current.filter(|c| loaded(*c)))
                 .or(master)
                 .or_else(|| (0..decks.len()).find(|i| loaded(*i))),
         };
+        if pick != self.current {
+            self.current_played_at = None;
+        }
+        if pick.is_some_and(playing) {
+            self.current_played_at = Some(now);
+        }
         self.current = pick;
         pick
     }
@@ -598,6 +911,12 @@ impl PlayTracker {
     pub fn rate(&self) -> Option<f64> {
         self.rate
     }
+
+    /// Whether the deck moved recently, as of `now`.
+    pub fn is_playing(&self, now: Instant) -> bool {
+        self.last_movement
+            .is_some_and(|t| now.duration_since(t) <= Self::GRACE)
+    }
 }
 
 /// Builds the snapshot the engine consumes from the master deck's state. With no tempo
@@ -644,8 +963,10 @@ mod live {
 
     use std::collections::HashMap;
     use std::path::Path;
-    use std::sync::mpsc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, mpsc};
 
+    use onset_core::track::TrackId;
     use onset_core::transport::TrackRef;
 
     use super::super::REKORDBOX_EXE;
@@ -657,18 +978,26 @@ mod live {
         ChainReader, DeckChooser, DeckFiles, DeckState, Mem, PlayTracker, snapshot_from_deck,
     };
 
-    /// How often the open-file list is refreshed.
+    /// How often the open-file list is refreshed while it is wanted.
     const FILES_EVERY: Duration = Duration::from_millis(1500);
+    /// How quickly the watcher notices it is wanted again.
+    const FILES_IDLE: Duration = Duration::from_millis(200);
 
     /// Starts the thread that lists rekordbox's open audio files; it stops when the
     /// receiver is dropped. Enumeration goes through every handle in the system and a few
-    /// can stall, so it never runs on the poll thread.
-    fn spawn_file_watcher(pid: u32) -> mpsc::Receiver<Vec<PathBuf>> {
+    /// can stall, so it never runs on the poll thread, and it runs only while `wanted`: some
+    /// deck plays a track that rekordbox's content id doesn't name.
+    fn spawn_file_watcher(pid: u32, wanted: Arc<AtomicBool>) -> mpsc::Receiver<Vec<PathBuf>> {
         let (tx, rx) = mpsc::channel();
         std::thread::Builder::new()
             .name("onset-open-files".into())
             .spawn(move || {
-                loop {
+                // The reader holds the other reference; once it is gone, so is this thread.
+                while Arc::strong_count(&wanted) > 1 {
+                    if !wanted.load(Ordering::Acquire) {
+                        std::thread::sleep(FILES_IDLE);
+                        continue;
+                    }
                     let files = open_audio_files(pid).unwrap_or_default();
                     if tx.send(files).is_err() {
                         break;
@@ -678,6 +1007,33 @@ mod live {
             })
             .ok();
         rx
+    }
+
+    /// Tells the watcher whether its list is wanted and takes in what it sent: deck
+    /// candidates only, logged when they change. While nothing needs it the last list is
+    /// kept: it only names paused decks, which haven't changed.
+    fn refresh_files(
+        reader: &ChainReader<Process>,
+        trackers: &[PlayTracker],
+        files_wanted: &AtomicBool,
+        files_rx: &mpsc::Receiver<Vec<PathBuf>>,
+        open_files: &mut Vec<PathBuf>,
+        durations: &HashMap<String, f64>,
+    ) {
+        files_wanted.store(
+            playing_without_id(reader, trackers, Instant::now()),
+            Ordering::Release,
+        );
+        while let Ok(files) = files_rx.try_recv() {
+            let files: Vec<PathBuf> = files
+                .into_iter()
+                .filter(|f| is_deck_candidate(f, durations))
+                .collect();
+            if files != *open_files {
+                tracing::info!(files = ?files, "loaded tracks changed");
+                *open_files = files;
+            }
+        }
     }
 
     fn norm_path(p: &Path) -> String {
@@ -705,6 +1061,14 @@ mod live {
             .get(&norm_path(path))
             .is_some_and(|d| *d >= MIN_TRACK_S)
     }
+
+    /// Most places a pointer to one deck is looked for when finding rekordbox's deck list.
+    const DECK_LIST_HITS: usize = 256;
+    /// Most hits considered when looking for player objects (7.2.19 has about a dozen).
+    const PLAYER_HITS: usize = 256;
+    /// Least time between scans made only because a playing deck has no track id: rekordbox
+    /// may build a player when a track loads, but a scan is a pass over the whole heap.
+    const ID_RESCAN: Duration = Duration::from_secs(30);
 
     /// Most needle hits considered per scan; the decks are the first few real ones.
     const SIGNATURE_HITS: usize = 64;
@@ -766,7 +1130,7 @@ mod live {
         Some(reader.deck_count())
     }
     use crate::memory::offsets::Offsets;
-    use crate::source::{SourceStatus, TransportSource};
+    use crate::source::{LiveDecks, SourceStatus, TransportSource};
 
     impl Mem for Process {
         fn module_base(&self) -> u64 {
@@ -796,6 +1160,7 @@ mod live {
             /// Consecutive polls in which a found deck lost its signature.
             stale_polls: u32,
             files_rx: mpsc::Receiver<Vec<PathBuf>>,
+            files_wanted: Arc<AtomicBool>,
             open_files: Vec<PathBuf>,
             deck_files: DeckFiles,
             /// A deck scan running on its own thread; a heap pass takes seconds.
@@ -807,6 +1172,7 @@ mod live {
     /// runtime repair replaced them.
     struct DeckScan {
         found: Vec<u64>,
+        players: Vec<u64>,
         anchors: Option<Vec<crate::memory::offsets::Anchor>>,
     }
 
@@ -814,6 +1180,45 @@ mod live {
         if master != *last {
             tracing::info!(?master, "MASTER deck changed");
             *last = master;
+        }
+    }
+
+    /// What the link makes of the decks at one poll: which play, the content id each is
+    /// known by and the rate its position counts at (Hz), and the deck the show follows.
+    #[derive(Debug, Clone, PartialEq, Default)]
+    struct DecksView {
+        playing: Vec<Option<bool>>,
+        ids: Vec<Option<u32>>,
+        rates: Vec<Option<u32>>,
+        followed: Option<usize>,
+    }
+
+    /// Logs the decks' view when it changes, so a session's play, pause and MASTER moves
+    /// can be read back from the log.
+    fn note_decks(
+        last: &mut DecksView,
+        reader: &ChainReader<Process>,
+        playing: &[Option<bool>],
+        followed: Option<usize>,
+    ) {
+        let n = playing.len();
+        let view = DecksView {
+            playing: playing.to_vec(),
+            ids: (0..n).map(|i| reader.known_track_id(i)).collect(),
+            rates: (0..n)
+                .map(|i| reader.deck_rate_hz(i).map(|hz| hz.round() as u32))
+                .collect(),
+            followed,
+        };
+        if view != *last {
+            tracing::info!(
+                playing = ?view.playing,
+                ids = ?view.ids,
+                rates_hz = ?view.rates,
+                followed = ?view.followed,
+                "decks"
+            );
+            *last = view;
         }
     }
 
@@ -833,6 +1238,7 @@ mod live {
                     reader.set_anchors(anchors);
                 }
                 reader.set_found_decks(found.found);
+                reader.set_players(found.players);
                 trackers.resize(reader.deck_count(), PlayTracker::default());
                 *last_scan = now;
                 *scan = None;
@@ -869,9 +1275,25 @@ mod live {
                 let before = offsets.signature.as_ref().map(|s| s.anchors.clone());
                 let mut reader = ChainReader::new(process, offsets);
                 discover_decks(&mut reader);
+                if let Some(values) = reader.deck_list_values() {
+                    let hits = find_u64_values(reader.mem(), &values, DECK_LIST_HITS);
+                    if let Some(order) = reader.adopt_deck_list(&hits) {
+                        tracing::info!(?order, "decks in rekordbox's order");
+                    } else {
+                        tracing::warn!(
+                            "rekordbox's deck list not found; decks stay in address order"
+                        );
+                    }
+                }
+                if let Some(needle) = reader.player_needle() {
+                    let hits = find_bytes(reader.mem(), &needle, PLAYER_HITS);
+                    let n = reader.adopt_player_hits(&hits);
+                    tracing::info!(players = n, "player scan");
+                }
                 let after = reader.signature().map(|s| s.anchors.clone());
                 let _ = tx.send(DeckScan {
                     found: reader.deck_positions().to_vec(),
+                    players: reader.player_positions().to_vec(),
                     anchors: if after == before { None } else { after },
                 });
             });
@@ -881,6 +1303,132 @@ mod live {
         rx
     }
 
+    /// Names an unknown track: by the content id the deck's track is known by (read from
+    /// the player at its playhead), else by the open file paired with the deck.
+    fn identify(
+        track: &mut TrackRef,
+        reader: &ChainReader<Process>,
+        deck_files: &DeckFiles,
+        deck: usize,
+    ) {
+        if *track != TrackRef::Unknown {
+            return;
+        }
+        if let Some(id) = reader.known_track_id(deck) {
+            *track = TrackRef::Id(TrackId(u64::from(id)));
+        } else if let Some(file) = deck_files.file_for(deck) {
+            *track = TrackRef::FilePath(file.clone());
+        }
+    }
+
+    /// Decks playing a track that rekordbox's content id doesn't name. rekordbox builds its
+    /// player objects only for playing decks, so a paused deck never has an id; counting
+    /// paused decks kept a full heap scan running every 30 s while nothing played.
+    fn playing_without_id(
+        reader: &ChainReader<Process>,
+        trackers: &[PlayTracker],
+        now: Instant,
+    ) -> bool {
+        (0..reader.deck_count()).any(|i| {
+            trackers.get(i).is_some_and(|t| t.is_playing(now)) && reader.known_track_id(i).is_none()
+        })
+    }
+
+    /// True when a deck plays without a track id and the last scan is old enough to repeat:
+    /// rekordbox may have built a player for a track loaded since.
+    fn wants_ids(
+        reader: &ChainReader<Process>,
+        trackers: &[PlayTracker],
+        last_scan: Instant,
+        now: Instant,
+    ) -> bool {
+        now.duration_since(last_scan) >= ID_RESCAN
+            && reader.player_needle().is_some()
+            && playing_without_id(reader, trackers, now)
+    }
+
+    /// A snapshot of every readable deck, as the chosen one is built, and the MASTER deck.
+    fn live_decks(
+        reader: &ChainReader<Process>,
+        states: &[Option<DeckState>],
+        playing: &[Option<bool>],
+        trackers: &[PlayTracker],
+        deck_files: &DeckFiles,
+        master: Option<usize>,
+        now: Instant,
+    ) -> LiveDecks {
+        LiveDecks {
+            decks: states
+                .iter()
+                .enumerate()
+                .filter_map(|(i, state)| {
+                    let mut snapshot = snapshot_from_deck(
+                        u8::try_from(i).ok()?,
+                        state.as_ref()?,
+                        playing.get(i).copied().flatten().unwrap_or(false),
+                        now,
+                        reader.track_bpm(i),
+                        trackers.get(i).and_then(PlayTracker::rate),
+                    );
+                    identify(&mut snapshot.track, reader, deck_files, i);
+                    Some(snapshot)
+                })
+                .collect(),
+            master: master.and_then(|m| u8::try_from(m).ok()),
+        }
+    }
+
+    /// Hands each readable deck's state, play state and paired file to the reader, which
+    /// keeps what it knows of the deck's track (id, rate) from it.
+    fn observe_decks(
+        reader: &mut ChainReader<Process>,
+        states: &[Option<DeckState>],
+        playing: &[Option<bool>],
+        deck_files: &DeckFiles,
+        now: Instant,
+    ) {
+        for (i, state) in states.iter().enumerate() {
+            if let Some(state) = state {
+                reader.observe_deck(
+                    i,
+                    state,
+                    playing[i].unwrap_or(false),
+                    deck_files.file_for(i).map(PathBuf::as_path),
+                    now,
+                );
+            }
+        }
+    }
+
+    /// Pairs the open files with the decks (by length and, where the deck's tempo reads, by
+    /// BPM) and logs a change.
+    fn attribute_files(
+        deck_files: &mut DeckFiles,
+        open: &[PathBuf],
+        states: &[Option<DeckState>],
+        positions: &[Option<f64>],
+        durations: &HashMap<String, f64>,
+        bpms: &HashMap<String, f32>,
+    ) {
+        let before: Vec<Option<PathBuf>> = (0..positions.len())
+            .map(|i| deck_files.file_for(i).cloned())
+            .collect();
+        let deck_bpms: Vec<Option<f32>> = states
+            .iter()
+            .map(|s| s.as_ref().and_then(|s| s.track_bpm))
+            .collect();
+        let after = deck_files.update_with_tempo(
+            open,
+            positions,
+            &|p| durations.get(&norm_path(p)).copied(),
+            &deck_bpms,
+            &|p| bpms.get(&norm_path(p)).copied(),
+        );
+        if after != before.as_slice() {
+            tracing::info!(decks = ?after, ?positions, "deck tracks");
+        }
+    }
+
     /// The rekordbox memory transport: finds the process, loads the offsets for its version,
     /// and reports the master deck at every poll.
     pub struct MemoryTransport {
@@ -888,8 +1436,14 @@ mod live {
         state: State,
         /// Library file lengths by normalised path, for deck attribution.
         durations: HashMap<String, f64>,
+        /// Library BPMs by normalised path, for deck attribution.
+        bpms: HashMap<String, f32>,
         /// The MASTER deck at the last poll, to log changes.
         last_master: Option<usize>,
+        /// The decks as last logged, to log changes.
+        last_decks: DecksView,
+        /// Every readable deck at the last poll.
+        live: LiveDecks,
     }
 
     const RETRY: Duration = Duration::from_secs(2);
@@ -904,7 +1458,10 @@ mod live {
                     next_try: Instant::now(),
                 },
                 durations: HashMap::new(),
+                bpms: HashMap::new(),
                 last_master: None,
+                last_decks: DecksView::default(),
+                live: LiveDecks::default(),
             }
         }
 
@@ -921,6 +1478,8 @@ mod live {
                 let pid = process.pid;
                 let scan = spawn_scan(pid, offsets.clone());
                 let reader = Box::new(ChainReader::new(process, offsets));
+                // Wanted until the first poll knows better.
+                let files_wanted = Arc::new(AtomicBool::new(true));
                 self.state = State::Connected {
                     reader,
                     trackers: Vec::new(),
@@ -928,7 +1487,8 @@ mod live {
                     failures: 0,
                     last_scan: Instant::now(),
                     stale_polls: 0,
-                    files_rx: spawn_file_watcher(pid),
+                    files_rx: spawn_file_watcher(pid, files_wanted.clone()),
+                    files_wanted,
                     open_files: Vec::new(),
                     deck_files: DeckFiles::default(),
                     scan: Some(scan),
@@ -963,16 +1523,18 @@ mod live {
             }
         }
 
-        fn set_track_sample_rate(&mut self, hz: Option<u32>) {
+        fn set_deck_track(&mut self, deck: u8, sample_rate: Option<u32>, bpm: Option<f32>) {
             if let State::Connected { reader, .. } = &mut self.state {
-                reader.set_track_sample_rate(hz);
+                reader.set_deck_track(usize::from(deck), sample_rate, bpm);
             }
         }
 
-        fn set_track_bpm(&mut self, bpm: Option<f32>) {
-            if let State::Connected { reader, .. } = &mut self.state {
-                reader.set_track_bpm(bpm);
-            }
+        fn live_decks(&self) -> LiveDecks {
+            self.live.clone()
+        }
+
+        fn set_file_bpms(&mut self, table: Vec<(PathBuf, f32)>) {
+            self.bpms = table.into_iter().map(|(p, b)| (norm_path(&p), b)).collect();
         }
 
         fn set_file_durations(&mut self, table: Vec<(PathBuf, f64)>) {
@@ -987,6 +1549,7 @@ mod live {
             let now = Instant::now();
             match &mut self.state {
                 State::Searching { next_try } | State::Unsupported { next_try, .. } => {
+                    self.live = LiveDecks::default();
                     if now >= *next_try {
                         self.try_connect();
                     }
@@ -1000,20 +1563,19 @@ mod live {
                     last_scan,
                     stale_polls,
                     files_rx,
+                    files_wanted,
                     open_files,
                     deck_files,
                     scan,
                 } => {
-                    while let Ok(files) = files_rx.try_recv() {
-                        let files: Vec<PathBuf> = files
-                            .into_iter()
-                            .filter(|f| is_deck_candidate(f, &self.durations))
-                            .collect();
-                        if files != *open_files {
-                            tracing::info!(files = ?files, "loaded tracks changed");
-                            *open_files = files;
-                        }
-                    }
+                    refresh_files(
+                        reader,
+                        trackers,
+                        files_wanted,
+                        files_rx,
+                        open_files,
+                        &self.durations,
+                    );
                     // Decks vanish when rekordbox rebuilds its players (a restart, a mode
                     // change); a fresh scan finds the new ones.
                     *stale_polls = if reader.found_decks_stale() {
@@ -1021,11 +1583,12 @@ mod live {
                     } else {
                         0
                     };
+                    let want_ids = wants_ids(reader, trackers, *last_scan, now);
                     tend_scan(
                         reader,
                         trackers,
                         last_scan,
-                        *stale_polls >= STALE_POLLS,
+                        *stale_polls >= STALE_POLLS || want_ids,
                         scan,
                         now,
                     );
@@ -1043,19 +1606,22 @@ mod live {
                         .iter()
                         .map(|s| s.as_ref().map(|s| s.position_s))
                         .collect();
-                    let durations = &self.durations;
-                    let before: Vec<Option<PathBuf>> = (0..positions.len())
-                        .map(|i| deck_files.file_for(i).cloned())
-                        .collect();
-                    let after = deck_files.update(open_files, &positions, &|p| {
-                        durations.get(&norm_path(p)).copied()
-                    });
-                    if after != before.as_slice() {
-                        tracing::info!(decks = ?after, ?positions, "deck tracks");
-                    }
+                    attribute_files(
+                        deck_files,
+                        open_files,
+                        &states,
+                        &positions,
+                        &self.durations,
+                        &self.bpms,
+                    );
+                    observe_decks(reader, &states, &playing, deck_files, now);
                     let master = reader.master_deck().map(usize::from);
                     note_master(&mut self.last_master, master);
-                    if let Some(i) = chooser.choose(master, &playing)
+                    let followed = chooser.choose(now, master, &playing);
+                    note_decks(&mut self.last_decks, reader, &playing, followed);
+                    self.live =
+                        live_decks(reader, &states, &playing, trackers, deck_files, master, now);
+                    if let Some(i) = followed
                         && let Some(state) = &states[i]
                     {
                         *failures = 0;
@@ -1064,14 +1630,10 @@ mod live {
                             state,
                             playing[i].unwrap_or(false),
                             now,
-                            reader.track_bpm(),
+                            reader.track_bpm(i),
                             trackers[i].rate(),
                         );
-                        if snapshot.track == TrackRef::Unknown
-                            && let Some(file) = deck_files.file_for(i)
-                        {
-                            snapshot.track = TrackRef::FilePath(file.clone());
-                        }
+                        identify(&mut snapshot.track, reader, deck_files, i);
                         return Some(snapshot);
                     }
                     *failures += 1;

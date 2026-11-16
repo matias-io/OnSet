@@ -44,6 +44,17 @@ enum Command {
         /// Track title (case-insensitive exact match)
         title: String,
     },
+    /// Show the prepared structure and approved cues the show takes for a track, beside
+    /// rekordbox's phrases
+    Prepared {
+        #[arg(long)]
+        app_dir: Option<PathBuf>,
+        /// Workspace database (defaults to %LOCALAPPDATA%\Onset\Onset\data\workspace\workspace.db)
+        #[arg(long)]
+        workspace: Option<PathBuf>,
+        /// Track title (case-insensitive exact match)
+        title: String,
+    },
     /// Play a track through the simulator and print live beat, phrase and drop state
     Sim {
         #[arg(long)]
@@ -201,6 +212,19 @@ enum Command {
         /// deck shares) instead of calibrating; needs no deck interaction
         #[arg(long)]
         refine: bool,
+        /// Combine these calibration files (several runs of one version) into the anchors
+        /// they all found, and write the result instead of calibrating
+        #[arg(long, num_args = 1..)]
+        merge: Vec<PathBuf>,
+    },
+    /// What the live link reads from rekordbox right now, deck by deck: position, the track's
+    /// BPM and content id, and the library track it names. Checks a calibration in seconds
+    Decks {
+        /// Offsets folder (default: `offsets/` or `ONSET_OFFSETS`)
+        #[arg(long)]
+        offsets_dir: Option<PathBuf>,
+        #[arg(long)]
+        app_dir: Option<PathBuf>,
     },
 }
 
@@ -218,6 +242,11 @@ fn main() -> anyhow::Result<()> {
         Command::Schema { app_dir } => library_cmds::schema(app_dir)?,
         Command::Library { app_dir, grep } => library_cmds::library(app_dir, grep)?,
         Command::Anlz { app_dir, title } => library_cmds::anlz(app_dir, &title)?,
+        Command::Prepared {
+            app_dir,
+            workspace,
+            title,
+        } => library_cmds::prepared(app_dir, workspace, &title)?,
         Command::Sim {
             app_dir,
             title,
@@ -332,14 +361,27 @@ fn main() -> anyhow::Result<()> {
             out_dir,
             step_seconds,
             refine,
+            merge,
         } => {
             let dir = out_dir.unwrap_or_else(calibrate::default_out_dir);
-            if refine {
+            if !merge.is_empty() {
+                calibrate::merge(&merge, &dir)?;
+            } else if refine {
                 calibrate::refine(&dir)?;
             } else {
                 calibrate::calibrate(&dir, step_seconds)?;
             }
         }
+        #[cfg(windows)]
+        Command::Decks {
+            offsets_dir,
+            app_dir,
+        } => calibrate::decks(
+            &offsets_dir.unwrap_or_else(calibrate::default_out_dir),
+            app_dir,
+        )?,
+        #[cfg(not(windows))]
+        Command::Decks { .. } => anyhow::bail!("decks needs Windows"),
         #[cfg(not(windows))]
         Command::Calibrate { .. } => anyhow::bail!("calibrate needs Windows"),
     }

@@ -11,7 +11,7 @@ $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
 try {
     if (-not $SkipBuild) {
-        cargo build --locked --release -p onset-app -p onset-cli --target-dir $BuildTargetDir
+        cargo build --locked --release -p onset-visuals -p onset-cli --target-dir $BuildTargetDir
         if ($LASTEXITCODE -ne 0) { throw 'Build failed. A running executable may prevent replacement.' }
     }
 

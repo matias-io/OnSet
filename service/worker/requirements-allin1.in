@@ -1,0 +1,15 @@
+numpy==1.23.5
+scipy==1.14.1
+librosa==0.10.2.post1
+soundfile==0.13.1
+imageio-ffmpeg==0.6.0
+torch==2.4.0+cpu
+torchaudio==2.4.0+cpu
+natten @ https://github.com/SHI-Labs/NATTEN/releases/download/v0.17.1/natten-0.17.1%2Btorch240cpu-cp311-cp311-linux_x86_64.whl
+allin1 @ git+https://github.com/mir-aidj/all-in-one.git@18e78903c0365147a2c5d4e5e57ebf88cb7d800e
+madmom @ git+https://github.com/CPJKU/madmom.git@27f032e8947204902c675e5e341a3faf5dc86dae
+cython==0.29.37
+setuptools==80.9.0
+wheel==0.45.1
+ziglang==0.13.0
+hatchling==1.27.0

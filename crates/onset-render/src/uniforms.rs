@@ -173,7 +173,13 @@ impl FrameUniforms {
             levels,
             groups: [a.groups[0], a.groups[1], a.groups[2], a.groups[3]],
             groups2: [a.groups[4], a.groups[5], a.loudness, a.brightness],
-            hits: [a.kick, a.snare, a.hat, if a.onset { 1.0 } else { 0.0 }],
+            // Kick and snare are beat-locked (`onset_core::hits`); hats come from the audio.
+            hits: [
+                ms.hits.kick,
+                ms.hits.snare,
+                a.hat,
+                if a.onset { 1.0 } else { 0.0 },
+            ],
             fx0: [fx.drop_hit, fx.phrase_hit, fx.cue_hit, fx.track_hit],
             fx1: [fx.tension, fx.beat_count, fx.bar_count, fx.seed],
             fx2: [fx.hue, x.reactivity, x.trails, x.quality],

@@ -1,0 +1,2 @@
+# Compatibility install. For reproducible development use scripts/bootstrap.ps1 and uv.lock.
+-e .[rekordbox]

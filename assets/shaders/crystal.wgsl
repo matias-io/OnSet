@@ -49,7 +49,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     for (var i = 0; i < steps; i = i + 1) {
         let p = ro + rd * dist;
         h = crystal_at(p, t);
-        let tint = palette(h.band + seed());
+        let tint = band_colour(h.band);
         glow = glow + tint * spectrum(h.band) * 0.006 / (0.02 + h.d * h.d * 30.0) * exp(-dist * 0.08);
         if (h.d < 0.001) {
             hit = true;
@@ -70,7 +70,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             crystal_at(p + e.yxy, t).d - crystal_at(p - e.yxy, t).d,
             crystal_at(p + e.yyx, t).d - crystal_at(p - e.yyx, t).d,
         ));
-        let tint = palette(h.band + seed());
+        let tint = band_colour(h.band);
         let level = spectrum(h.band);
         let light = normalize(vec3<f32>(0.4, 0.7, -0.6));
         let diff = max(dot(n, light), 0.0);

@@ -6,7 +6,9 @@ decks = []
 provenance = "onset calibrate at unix 1790311719"
 
 [signature]
-max_decks = 4
+# Five objects share this layout on 7.2.19 (four decks and a player); in address order
+# the playing deck can be the fifth.
+max_decks = 8
 
 [[signature.anchors]]
 offset = -420
@@ -44,3 +46,35 @@ module_offset = 92088496
 # Found with `onset-cli memflag`: 1 on the MASTER deck, 0 on the others.
 offset = -396
 mask = 1
+
+# Withdrawn: static routes to MASTER (59a860a; the reader for them was removed after). On
+# 2026-10-22 one rekordbox session kept a
+# per-deck MASTER byte at +0x1b8 in entries 0x370 apart, reached from static memory, and
+# it followed the button through restarts and loads of a deck. After rekordbox itself was
+# restarted on 2026-10-23 none of the 414 routes found to it reached a MASTER byte (the
+# first read deck 4 as MASTER with deck 1 lit) and no entries of that shape existed, so
+# MASTER falls back to `master_flag` above, which goes quiet for a deck after it restarts
+# or loads a track but does not name a wrong deck.
+
+[signature.deck_list]
+# rekordbox keeps its decks in a list of pointers to each deck object's start, 420 bytes
+# before the position field (where the first anchor sits). After rekordbox restarted on
+# 2026-10-23 decks 1 to 4 were objects 4, 1, 3 and 2 by address; the list was the only
+# run of pointers to the deck objects in the heap and held them in that order. The fifth
+# object (a player) is not in it.
+start_offset = -420
+
+[signature.tempo]
+# The deck's tempo (f32 BPM) and pitch (f32 fraction) beside the position: Lady Hear Me
+# Tonight (126.02) synced to 125.00 read 125.0 and -0.00833.
+bpm_offset = -4
+pitch_offset = 4
+
+[signature.track_id]
+# rekordbox's player objects: each holds the playhead of the deck it plays and leads to the
+# loaded track's content id (djmdContent.ID) at [[pos - 0x78] + 0x38] + 0x110. They carry
+# module+0x57fe968 at pos - 200. Seen with Miami 2 Ibiza (157452017) at 355.25 s on deck 1
+# and Lady Hear Me Tonight (195752842) on deck 2, and earlier with Stop It (126351799).
+anchor_module_offset = 92268904
+anchor_offset = -200
+chain = [-120, 56, 272]

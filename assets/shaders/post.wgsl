@@ -12,7 +12,7 @@ struct Post {
     tone: vec4<f32>,        // exposure, seed, bloom threshold, blackout
     trans: vec4<f32>,       // transition progress 0..1, kind, emphasis, tension
     build: vec4<f32>,       // build-up progress, beat count, phrase move (decaying), move direction (turns)
-    style: vec4<f32>,       // build-up strength, vocal level, -, -
+    style: vec4<f32>,       // build-up strength, vocal level, director intensity (0..1), -
     accent: vec4<f32>,      // palette colour for the sweeps (linear rgb)
     accent2: vec4<f32>,     // second palette colour
 };
@@ -217,6 +217,12 @@ fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
     col = col + sb(uv) * post.look.x * (1.0 + 0.35 * post.style.y);
     col = col * post.tone.x;
     col = aces(col);
+
+    // The director's intensity sets the colour's weight in every scene: a breakdown
+    // (intensity near 0.3) loses a little saturation, the drop gains a little.
+    let intensity = clamp(post.style.z, 0.0, 1.0);
+    let grey = vec3<f32>(dot(col, vec3<f32>(0.2126, 0.7152, 0.0722)));
+    col = clamp(mix(grey, col, 0.82 + 0.3 * intensity), vec3<f32>(0.0), vec3<f32>(1.0));
 
     col = clamp(hue_rotate(col, post.a.w), vec3<f32>(0.0), vec3<f32>(1.0));
     // Inversion: every colour swaps for its complement while each pixel keeps its

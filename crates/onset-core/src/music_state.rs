@@ -23,6 +23,14 @@ pub struct CueAhead {
     pub color: Option<[u8; 3]>,
 }
 
+/// What the deck ear heard: each playing deck's share of the room (summing to 1) and how
+/// well the mix explained the captured audio (r², 0..1).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DeckShares {
+    pub shares: Vec<(u8, f32)>,
+    pub fit: f32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MusicState {
     /// Wall-clock seconds since the app started.
@@ -52,6 +60,14 @@ pub struct MusicState {
     pub theme: [[f32; 3]; 5],
     /// rekordbox's own analysis at the playhead: 3-band waveform and vocal level.
     pub analysis: crate::bands::BandsAt,
+    /// Whose structure the phrases and drop countdown follow; `None` without a beat grid.
+    pub structure_source: Option<crate::structure::StructureSource>,
+    /// The kick and snare the visuals react to: locked to the beat grid while a track with
+    /// one plays, the audio's own otherwise.
+    pub hits: crate::hits::BeatHits,
+    /// The deck ear's reading of the room, when it has one (two or more decks heard for a
+    /// few seconds): for the HUD, so a wrong deck choice can be seen at once.
+    pub ear: Option<DeckShares>,
 }
 
 impl Default for MusicState {
@@ -77,6 +93,9 @@ impl Default for MusicState {
             next_cue: None,
             theme: DEFAULT_THEME,
             analysis: crate::bands::BandsAt::default(),
+            structure_source: None,
+            hits: crate::hits::BeatHits::default(),
+            ear: None,
         }
     }
 }
@@ -132,6 +151,16 @@ impl MusicState {
             }),
             theme: DEFAULT_THEME,
             analysis: crate::bands::BandsAt::default(),
+            structure_source: None,
+            // The audio's own hits until a `HitLock` replaces them.
+            hits: crate::hits::BeatHits {
+                kick: audio.kick,
+                snare: audio.snare,
+                audio_kick: audio.kick,
+                audio_snare: audio.snare,
+                ..crate::hits::BeatHits::default()
+            },
+            ear: None,
         }
     }
 }

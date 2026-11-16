@@ -53,7 +53,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let band_pos = abs(fi - 0.5) * 2.0;
         let level = spectrum(band_pos);
         let brightness = level * level * (1.0 + 1.5 * kick()) + 0.04;
-        let lamp_col = palette(fi * 0.5 + seed() + hue_shift() * 0.1);
+        // Each lamp wears the colour of the band it listens to.
+        let lamp_col = hue_rotate(band_colour(band_pos), hue_shift() * 0.1);
         let hot = mix(lamp_col, vec3<f32>(1.0), 0.5 * drop_hit());
         let centre = -PI * 0.5 + 0.55 * sin(t * 0.6 * sweep_dir + fi * 3.0);
         let spread = 0.18 * fan;

@@ -10,7 +10,6 @@ use onset_core::show::{
     AutoChange, AutoPilot, Fx, FxSettings, SceneProfile, ShowDirector, ShowEvent, Transition, Vibe,
     vibe,
 };
-use serde::{Deserialize, Serialize};
 
 use crate::artwork::{ArtworkLoader, palette};
 use crate::card::{Card, CardFrame};
@@ -32,65 +31,7 @@ pub struct FrameStats {
 /// Lowest internal scale offered; below this the upscale looks like a mistake.
 pub const MIN_INTERNAL_SCALE: f32 = 0.5;
 
-/// Rendering detail. Higher levels raise the internal resolution, the ray-march steps
-/// scenes take, the bloom depth, and allow the heaviest scenes into Auto mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Quality {
-    Low,
-    Medium,
-    #[default]
-    High,
-    Ultra,
-}
-
-impl Quality {
-    pub const ALL: [Self; 4] = [Self::Low, Self::Medium, Self::High, Self::Ultra];
-
-    /// The value scenes read as `quality()`.
-    pub fn code(self) -> f32 {
-        match self {
-            Self::Low => 0.0,
-            Self::Medium => 1.0,
-            Self::High => 2.0,
-            Self::Ultra => 3.0,
-        }
-    }
-
-    pub fn internal_scale(self) -> f32 {
-        match self {
-            Self::Low => 0.5,
-            Self::Medium => 0.75,
-            Self::High | Self::Ultra => 1.0,
-        }
-    }
-
-    pub fn bloom_levels(self) -> usize {
-        match self {
-            Self::Low => 3,
-            Self::Medium => 4,
-            Self::High | Self::Ultra => 5,
-        }
-    }
-
-    /// Most expensive scene (by `SceneInfo::cost`) Auto mode may pick.
-    pub fn max_cost(self) -> u8 {
-        match self {
-            Self::Low => 1,
-            Self::Medium => 2,
-            Self::High | Self::Ultra => 3,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Low => "Low",
-            Self::Medium => "Medium",
-            Self::High => "High",
-            Self::Ultra => "Ultra",
-        }
-    }
-}
+pub use onset_core::quality::Quality;
 
 /// Everything about the look the DJ controls.
 #[derive(Debug, Clone, PartialEq)]
@@ -248,7 +189,7 @@ impl Renderer {
             lyrics_status: String::new(),
             adapter: String::new(),
             hint_from: None,
-            lyrics: crate::lyrics::LyricsLayer::new(),
+            lyrics: crate::lyrics::LyricsLayer::new(gpu, format),
             lyrics_options: crate::overlay_options::LyricsOptions::default(),
             hud_options: crate::overlay_options::HudOptions::default(),
             card_options: crate::overlay_options::CardOptions::default(),
@@ -840,10 +781,17 @@ impl Renderer {
                 0.35,
                 0.0015 + 0.004 * fx.drop_hit,
             ],
-            tone: [1.0, fx.seed, 0.9, if self.blackout { 1.0 } else { 0.0 }],
+            // Exposure follows the director: a breakdown sits dimmer than a drop in every
+            // scene, whatever the scene itself does with `intensity`.
+            tone: [
+                0.82 + 0.3 * intensity,
+                fx.seed,
+                0.9,
+                if self.blackout { 1.0 } else { 0.0 },
+            ],
             trans: [progress, kind, 0.0, fx.tension],
             build: [fx.build, fx.beat_count, fx.phrase_move, fx.move_angle],
-            style: [s.buildup, fx.vocal, 0.0, 0.0],
+            style: [s.buildup, fx.vocal, intensity, 0.0],
             accent: [pal[2][0], pal[2][1], pal[2][2], 1.0],
             accent2: [pal[3][0], pal[3][1], pal[3][2], 1.0],
         }
@@ -986,6 +934,9 @@ impl Renderer {
         // Overlays grow a little on emphasis (track change, drop).
         let grow = 1.0 + 0.12 * fx.emphasis;
         let mut items: Vec<TextItem> = self.lyrics.items(
+            gpu,
+            encoder,
+            target,
             &mut self.text,
             &crate::lyrics::LyricsFrame {
                 size: self.size,
